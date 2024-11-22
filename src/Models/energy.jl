@@ -1,0 +1,40 @@
+@kwdef struct SolidEnergy{K, P, C} <: AbstractModel
+    k::K
+    ρ::P
+    cₚ::C
+end
+
+_num_vars(::SolidEnergy, _) = 1
+
+function make_f(model::SolidEnergy, domain; kwargs...)
+    (; k, ρ, cₚ) = model
+    vol = coordinates(domain.cloud.volume)
+    all_points = coordinates(domain.cloud)
+    ∇² = laplacian(all_points, vol; k = 40)
+    update_weights!(∇²)
+    α = k / (cₚ * ρ)
+    w = α * ∇².weights
+    vol_ids = only(domain.cloud.volume.points.indices)
+
+    function f(du, u, p, t)
+        mul!(view(du, vol_ids), w, u)
+        return nothing
+    end
+
+    return f
+end
+
+function make_system(model::SolidEnergy, domain; kwargs...)
+    (; k, ρ, cₚ) = model
+    coords = coordinates(domain.cloud)
+    ∇² = laplacian(coords; kwargs...)
+    update_weights!(∇²)
+    α = k / (cₚ * ρ)
+    A = α * ∇².weights
+    b = zeros(eltype(A), length(coords))
+    return A, b
+end
+
+function Base.show(io::IO, e::SolidEnergy)
+    print(io, "Energy: (k = $(e.k), ρ = $(e.ρ), cₚ = $(e.cₚ))")
+end

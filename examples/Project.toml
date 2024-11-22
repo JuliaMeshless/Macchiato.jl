@@ -1,0 +1,23 @@
+[deps]
+CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+Delaunay = "07eb4e4e-0c6d-46ef-bc4e-83d5e5d860a9"
+DifferentialEquations = "0c46a032-eb83-5123-abaf-570d42b7fbaa"
+FileIO = "5789e2e9-d7fb-5bc7-8068-2c6fae9b9549"
+GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+GeoIO = "f5a160d5-e41d-4189-8b61-d57781c419e3"
+IncompleteLU = "40713840-3770-5561-ab4c-a76e7d0d7895"
+LinearSolve = "7ed4a6bd-45f5-4d41-b270-4a48e9bafcae"
+LoopVectorization = "bdcacae8-1622-11e9-2a5c-532679323890"
+Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
+Meshes = "eacbb407-ea5a-433e-ab97-5258b1ca43fa"
+MeshlessMultiphysics = "cd40ceae-7681-4e2e-9056-ba6e356aca3e"
+PointClouds = "5faae8f1-f507-432f-bd56-cf2f1161ab6f"
+ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
+RadialBasisFunctions = "79ee0514-adf7-4479-8807-6f72ea8967e8"
+ReadVTK = "dc215faf-f008-4882-a9f7-a79a826fadc3"
+StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+UnicodePlots = "b8865327-cd53-5732-bb35-84acbb429228"
+WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
+
+[compat]
+Meshes = "<0.43.0"
