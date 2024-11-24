@@ -84,8 +84,8 @@ struct Adiabatic{T} <: EnergyBoundary
     op::T
 end
 Adiabatic() = Adiabatic(nothing)
-Adiabatic(Δ::Number) = Adiabatic(Shadow(Δ, 1))
-Adiabatic(Δ::Number, order::T) where {T <: Int} = Adiabatic(Shadow(Δ, order))
+Adiabatic(Δ::Number) = Adiabatic(ShadowPoints(Δ, 1))
+Adiabatic(Δ::Number, order::T) where {T <: Int} = Adiabatic(ShadowPoints(Δ, order))
 
 struct AdiabaticOp{O}
     op::O
@@ -95,7 +95,7 @@ function AdiabaticOp(boundary, surf, domain; kwargs...)
 end
 (op::AdiabaticOp)(du, u, p, t) = nothing
 
-function make_bc(boundary::Adiabatic{<:Shadow}, surf, domain; kwargs...)
+function make_bc(boundary::Adiabatic{<:ShadowPoints}, surf, domain; kwargs...)
     s = domain.cloud[surf]
     surf_ids = only(s.points.indices)
     shadow_points = generate_shadows(s, boundary.op)
@@ -211,7 +211,7 @@ function replace_rows(A, weights, ids, offset)
 end
 
 function make_bc!(
-        A::AbstractMatrix{TA}, b::AbstractVector{TB}, boundary::Adiabatic{<:Shadow},
+        A::AbstractMatrix{TA}, b::AbstractVector{TB}, boundary::Adiabatic{<:ShadowPoints},
         surf, domain; kwargs...) where {TA, TB}
     s = domain.cloud[surf]
     coords = coordinates(domain.cloud)
@@ -237,12 +237,13 @@ function make_bc!(
 end
 
 function make_bc!(
-        A::AbstractMatrix{TA}, b::AbstractVector{TB}, boundary::Adiabatic{<:Shadow{2}},
+        A::AbstractMatrix{TA}, b::AbstractVector{TB}, boundary::Adiabatic{<:ShadowPoints{2}},
         surf, domain; kwargs...) where {TA, TB}
     s = domain.cloud[surf]
     coords = coordinates(domain.cloud)
     shadow_points1 = generate_shadows(s, boundary.op)
-    shadow_points2 = generate_shadows(s, Shadow(ConstantSpacing(boundary.op.Δ.Δx * 2)))
+    shadow_points2 = generate_shadows(
+        s, ShadowPoints(ConstantSpacing(boundary.op.Δ.Δx * 2)))
 
     println("building surf")
     surf = regrid(coords, coordinates(s); kwargs...)
