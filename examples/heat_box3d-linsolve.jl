@@ -5,22 +5,20 @@ using RadialBasisFunctions
 using PointClouds
 using StaticArrays
 using LinearAlgebra
-using FileIO
 using DifferentialEquations
 using LinearSolve
 using CUDA
 using CUDA.CUSPARSE
-using SparseArrays
 import GLMakie
 println("using $(BLAS.get_num_threads()) CPU threads")
 
 ##
 
-part = PointPart(joinpath(@__DIR__, "geometry/rectangle3d-04.stl")) # in mm
-split_surface!(part, 75; views = true)
+part = PointBoundary(joinpath(@__DIR__, "geometry/rectangle3d-04.stl")) # in mm
+split_surface!(part, 75)
 combine_surfaces!(part, :surface3, :surface4, :surface5, :surface6)
 
-figsize = (2000, 1500)
+figsize = (1000, 500)
 markersize = 0.015
 visualize(part; markersize = markersize, size = figsize)
 
@@ -41,8 +39,8 @@ cₚ = 0.465 * 1e3 # J / (kg K)
 α = k / (cₚ * ρ) # mm^2 / s
 
 #bcs = Dict(:surface1 => Adiabatic(Δ / 4), :surface2 => Temperature(50))
-bcs = Dict(:surface1 => Adiabatic(Shadow(ConstantSpacing(Δ / 5), 1)),
-    :surface2 => Adiabatic(Shadow(ConstantSpacing(Δ / 5), 1)),
+bcs = Dict(:surface1 => Adiabatic(ShadowPoints(ConstantSpacing(Δ / 5), 1)),
+    :surface2 => Adiabatic(ShadowPoints(ConstantSpacing(Δ / 5), 1)),
     :surface3 => Temperature(50))
 domain = Domain(cloud, bcs, SolidEnergy(k = k, ρ = ρ, cₚ = cₚ))
 
@@ -51,10 +49,10 @@ vol_ids = only(domain.cloud.volume.points.indices)
 u0[vol_ids] .= 0.0
 
 # iterative solve using DiffEquations.jl
-#prob = MM.Solvers.MultiphysicsProblem(domain, u0, (0.0, 1e-7))
-#dt = 0.001 * (Δ)^2 / α
-#@time sol = solve(prob, Euler(), dt = dt, save_everystep = false, save_end = true)
-#T = Vector(sol.u[end])
+prob = MM.Solvers.MultiphysicsProblem(domain, u0, (0.0, 1e-7))
+dt = 0.001 * (Δ)^2 / α
+@time sol = solve(prob, Euler(), dt = dt, save_everystep = false, save_end = true)
+T = Vector(sol.u[end])
 
 # direct solve using LinearSolve.jl
 prob = MM.Solvers.LinearProblem(domain)
