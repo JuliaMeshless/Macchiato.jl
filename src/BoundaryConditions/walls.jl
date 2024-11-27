@@ -1,9 +1,9 @@
 """
-    Wall <: AbstractBoundary
+    Wall <: AbstractBoundaryCondition
 
 Wall is a solid boundary which fluid does not penetrate and maintains a no-slip condition. The wall can be stationary or moving.
 """
-struct Wall{T} <: AbstractBoundary
+struct Wall{T} <: AbstractBoundaryCondition
     v::T
 end
 

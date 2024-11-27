@@ -7,10 +7,10 @@ using FileIO
 using PointClouds
 
 # define abstract types
-abstract type AbstractBoundary end
+abstract type AbstractBoundaryCondition end
 abstract type AbstractModel end
 
-export AbstractBoundary, AbstractModel
+export AbstractBoundaryCondition, AbstractModel
 
 # include submodules
 include("utils.jl")
@@ -33,7 +33,7 @@ export node_drop, findmin_turbo
 export cov, make_memory_contiguous, ranges_from_permutation, permute!
 
 # Boundary Conditions
-export FluidBoundary, EnergyBoundary
+export FluidBoundaryCondition, EnergyBoundaryCondition
 export Wall
 export Temperature, HeatFlux, Convection, Adiabatic
 export VelocityInlet, PressureOutlet

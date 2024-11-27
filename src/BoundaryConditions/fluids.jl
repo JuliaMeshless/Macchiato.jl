@@ -1,7 +1,7 @@
 
-abstract type FluidBoundary <: AbstractBoundary end
+abstract type FluidBoundaryCondition <: AbstractBoundaryCondition end
 
-struct VelocityInlet{T} <: FluidBoundary
+struct VelocityInlet{T} <: FluidBoundaryCondition
     v::T
 end
 (bc::VelocityInlet)() = bc.v
@@ -18,7 +18,7 @@ function make_bc(boundary::VelocityInlet, surf, domain::Domain{Dim}; kwargs...) 
     return bc
 end
 
-struct PressureOutlet{T} <: FluidBoundary
+struct PressureOutlet{T} <: FluidBoundaryCondition
     p::T
 end
 (bc::PressureOutlet)() = bc.p

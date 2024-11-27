@@ -17,7 +17,7 @@ include("fluids.jl")
 include("energy.jl")
 
 # abstract and supertypes
-export FluidBoundary, EnergyBoundary
+export FluidBoundaryCondition, EnergyBoundaryCondition
 
 # walls
 export Wall

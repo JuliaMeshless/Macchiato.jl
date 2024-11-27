@@ -1,13 +1,13 @@
 struct Domain{Dim, T}
     cloud::PointCloud{Dim, T}
-    boundaries::Dict{Symbol, <:AbstractBoundary}
+    boundaries::Dict{Symbol, <:AbstractBoundaryCondition}
     models::AbstractVector{<:AbstractModel}
     name::Symbol
 end
 
 function Domain(cloud::PointCloud, boundaries, models)
     for bc_name in keys(boundaries)
-        if !haskey(cloud.surfaces, bc_name)
+        if !haskey(boundary(cloud).surfaces, bc_name)
             throw(ArgumentError("The boundary condition $bc_name is not associated with a `PointCloud` surface."))
         end
     end
@@ -17,13 +17,14 @@ function Domain(cloud::PointCloud, boundaries, models)
 end
 
 function Domain(cloud::PointCloud{Dim, T}, models) where {Dim, T}
-    boundaries = Dict{Symbol, AbstractBoundary}()
+    boundaries = Dict{Symbol, AbstractBoundaryCondition}()
     models = models isa Vector ? models : [models]
     return Domain(cloud, boundaries, models, :domain1)
 end
 
 add_model!(domain::Domain, model::AbstractModel) = push!(domain.models, model)
-function add_boundary_condition!(domain::Domain, boundary::AbstractBoundary, name::Symbol)
+function add_boundary_condition!(
+        domain::Domain, boundary::AbstractBoundaryCondition, name::Symbol)
     domain.boundaries[name] = boundary
 end
 

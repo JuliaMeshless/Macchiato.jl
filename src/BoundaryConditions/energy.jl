@@ -1,16 +1,16 @@
 """
-    EnergyBoundary <: AbstractBoundary
+    EnergyBoundaryCondition <: AbstractBoundaryCondition
 
 Abstract type for energy boundary conditions.
 """
-abstract type EnergyBoundary <: AbstractBoundary end
+abstract type EnergyBoundaryCondition <: AbstractBoundaryCondition end
 
 """
-    Temperature{T} <: EnergyBoundary
+    Temperature{T} <: EnergyBoundaryCondition
 
 Temperature boundary condition.
 """
-struct Temperature{T} <: EnergyBoundary
+struct Temperature{T} <: EnergyBoundaryCondition
     temperature::T
 end
 (bc::Temperature)() = bc.temperature
@@ -44,11 +44,11 @@ function Base.show(io::IO, boundary::Temperature)
 end
 
 """
-    HeatFlux{T} <: EnergyBoundary
+    HeatFlux{T} <: EnergyBoundaryCondition
 
 Heat flux boundary condition.
 """
-struct HeatFlux{T} <: EnergyBoundary
+struct HeatFlux{T} <: EnergyBoundaryCondition
     heat_flux::T
 end
 
@@ -57,11 +57,11 @@ function Base.show(io::IO, boundary::HeatFlux)
 end
 
 """
-    Convection{C, T} <: EnergyBoundary
+    Convection{C, T} <: EnergyBoundaryCondition
 
 Convection boundary condition.
 """
-struct Convection{C, T} <: EnergyBoundary
+struct Convection{C, T} <: EnergyBoundaryCondition
     coefficient::T
     T∞::T
     function Convection(coefficient::C, T∞::T) where {C, T}
@@ -76,11 +76,11 @@ function Base.show(io::IO, boundary::Convection)
 end
 
 """
-    Adiabatic <: EnergyBoundary
+    Adiabatic <: EnergyBoundaryCondition
 
 Adiabatic boundary condition. `op` is the operator type to use when calculating the normal gradient
 """
-struct Adiabatic{T} <: EnergyBoundary
+struct Adiabatic{T} <: EnergyBoundaryCondition
     op::T
 end
 Adiabatic() = Adiabatic(nothing)
