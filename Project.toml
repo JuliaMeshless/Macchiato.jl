@@ -26,6 +26,7 @@ TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
 [compat]
 FileIO = "1.16.6"
 Meshes = ">= 0.50"
+StaticArrays = "1"
 julia = "1.9"
 
 [extras]
