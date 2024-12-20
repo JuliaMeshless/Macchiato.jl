@@ -3,6 +3,8 @@ module Domains
 using MeshlessMultiphysics
 
 using PointClouds
+using Meshes: Manifold
+using CoordRefSystems
 using Accessors
 using ProgressMeter
 

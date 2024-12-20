@@ -10,8 +10,9 @@ using LinearAlgebra
 using SparseArrays
 using OhMyThreads
 using LoopVectorization
-using Meshes: ∠
+using Meshes: ∠, 𝔼
 
+include("../utils.jl")
 include("walls.jl")
 include("fluids.jl")
 include("energy.jl")

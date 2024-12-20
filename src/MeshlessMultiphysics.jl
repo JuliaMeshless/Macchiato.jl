@@ -4,6 +4,7 @@ using CUDA
 using LinearAlgebra
 using LoopVectorization
 using FileIO
+using Meshes: 𝔼
 using PointClouds
 
 # define abstract types

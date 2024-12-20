@@ -20,3 +20,10 @@ function findmin_turbo(x, ids)
     end
     return minval, indmin
 end
+
+function _coords(cloud::PointCloud{𝔼{3}})
+    map(pointify(cloud)) do p
+        c = coords(p)
+        SVector(c.x, c.y, c.z)
+    end
+end

@@ -8,8 +8,8 @@ _num_vars(::SolidEnergy, _) = 1
 
 function make_f(model::SolidEnergy, domain; kwargs...)
     (; k, ρ, cₚ) = model
-    vol = coordinates(domain.cloud.volume)
-    all_points = coordinates(domain.cloud)
+    vol = _coords(domain.cloud.volume)
+    all_points = _coords(domain.cloud)
     ∇² = laplacian(all_points, vol; k = 40)
     update_weights!(∇²)
     α = k / (cₚ * ρ)
@@ -26,7 +26,7 @@ end
 
 function make_system(model::SolidEnergy, domain; kwargs...)
     (; k, ρ, cₚ) = model
-    coords = coordinates(domain.cloud)
+    coords = _coords(domain.cloud)
     ∇² = laplacian(coords; kwargs...)
     update_weights!(∇²)
     α = k / (cₚ * ρ)

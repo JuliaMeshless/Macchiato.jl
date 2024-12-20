@@ -16,9 +16,7 @@ end
 (bc::Temperature)() = bc.temperature
 (bc::Temperature{<:Function})(x, t) = bc.temperature(x, t)
 
-function make_bc(boundary::Temperature, surf, domain; kwargs...)
-    s = domain.cloud[surf]
-    ids = only(s.points.indices)
+function make_bc(boundary::Temperature, surf, domain, ids; kwargs...)
     function bc(du, u, p, t)
         u[ids] .= boundary.temperature
         return nothing
@@ -28,9 +26,7 @@ end
 
 function make_bc!(
         A::AbstractMatrix{TA}, b::AbstractVector{TB}, boundary::Temperature,
-        surf, domain; kwargs...) where {TA, TB}
-    s = domain.cloud[surf]
-    ids = only(s.points.indices)
+        surf, domain, ids; kwargs...) where {TA, TB}
     @tasks for i in ids
         A[i, :] .= zero(TA)
         A[i, i] = one(TA)
@@ -95,24 +91,20 @@ function AdiabaticOp(boundary, surf, domain; kwargs...)
 end
 (op::AdiabaticOp)(du, u, p, t) = nothing
 
-function make_bc(boundary::Adiabatic{<:ShadowPoints}, surf, domain; kwargs...)
-    s = domain.cloud[surf]
-    surf_ids = only(s.points.indices)
-    shadow_points = generate_shadows(s, boundary.op)
-    d = regrid(coordinates(domain.cloud), shadow_points)
+function make_bc(boundary::Adiabatic{<:ShadowPoints}, surf, domain, ids; kwargs...)
+    shadow_points = generate_shadows(surf, boundary.op)
+    d = regrid(_coords(domain.cloud), shadow_points)
     update_weights!(d)
 
     function bc(du, u, p, t)
-        u[surf_ids] .= d(u)
+        u[ids] .= d(u)
         return nothing
     end
     return bc
 end
-function make_bc(boundary::Adiabatic, surf, domain; kwargs...)
+function make_bc(boundary::Adiabatic, surf, domain, ids; kwargs...)
     println("creating Adiabatic BC")
-    s = domain.cloud[surf]
-    surf_ids = only(s.points.indices)
-    d = directional(coordinates(domain.cloud), coordinates(s), normals(s); kwargs...)
+    d = directional(_coords(domain.cloud), _coords(surf), normals(surf); kwargs...)
     update_weights!(d)
     w = d.weights
     wi = diag(w)
@@ -122,15 +114,15 @@ function make_bc(boundary::Adiabatic, surf, domain; kwargs...)
     function bc(du, u, p, t)
         # TODO is this correct?
         #du[surf_ids] .= d(u) .- u[surf_ids]
-        u[surf_ids] .= (w * u) ./ wi
+        u[ids] .= (w * u) ./ wi
         return nothing
     end
     return bc
 end
 
 function cone(cloud, surf, k)
-    all_points = coordinates(cloud)
-    surf_points = coordinates(surf)
+    all_points = _coords(cloud)
+    surf_points = _coords(surf)
     normal = normals(surf)
     offset = first(only(surf.points.indices))
 
@@ -159,13 +151,12 @@ end
 
 function make_bc!(
         A::AbstractMatrix{TA}, b::AbstractVector{TB}, boundary::Adiabatic,
-        surf, domain; kwargs...) where {TA, TB}
-    s = domain.cloud[surf]
+        surf, domain, ids; kwargs...) where {TA, TB}
     #adjl = cone(domain.cloud, s, 40)
     #d = directional(
-    #    coordinates(domain.cloud), coordinates(s), normals(s); adjl = adjl, kwargs...)
+    #    _coords(domain.cloud), _coords(s), normals(s); adjl = adjl, kwargs...)
     d = directional(
-        coordinates(domain.cloud), coordinates(s), normals(s); k = 40, kwargs...)
+        _coords(domain.cloud), _coords(surf), normals(surf); k = 40, kwargs...)
     update_weights!(d)
 
     w = d.weights
@@ -173,7 +164,6 @@ function make_bc!(
     w[diagind(w)] .= 0
     dropzeros!(w)
 
-    ids = only(s.points.indices)
     offset = first(ids) - 1
     Threads.@threads for i in ids
         A[i, :] .= zero(TA)
@@ -212,13 +202,12 @@ end
 
 function make_bc!(
         A::AbstractMatrix{TA}, b::AbstractVector{TB}, boundary::Adiabatic{<:ShadowPoints},
-        surf, domain; kwargs...) where {TA, TB}
-    s = domain.cloud[surf]
-    coords = coordinates(domain.cloud)
-    shadow_points = generate_shadows(s, boundary.op)
+        surf, domain, ids; kwargs...) where {TA, TB}
+    coords = _coords(domain.cloud)
+    shadow_points = generate_shadows(surf, boundary.op)
 
     println("building surf")
-    @time surf = regrid(coords, coordinates(s); kwargs...)
+    @time surf = regrid(coords, _coords(surf); kwargs...)
     @time update_weights!(surf)
 
     println("building shadow")
@@ -226,7 +215,6 @@ function make_bc!(
     @time update_weights!(shadow)
     weights = columnwise_div(surf.weights .- shadow.weights, boundary.op.Δ.Δx)
 
-    ids = only(s.points.indices)
     offset = first(ids) - 1
     println("zeroing")
     @time b[ids] .= zero(TB)
@@ -238,15 +226,14 @@ end
 
 function make_bc!(
         A::AbstractMatrix{TA}, b::AbstractVector{TB}, boundary::Adiabatic{<:ShadowPoints{2}},
-        surf, domain; kwargs...) where {TA, TB}
-    s = domain.cloud[surf]
-    coords = coordinates(domain.cloud)
-    shadow_points1 = generate_shadows(s, boundary.op)
+        surf, domain, ids; kwargs...) where {TA, TB}
+    coords = _coords(domain.cloud)
+    shadow_points1 = generate_shadows(surf, boundary.op)
     shadow_points2 = generate_shadows(
-        s, ShadowPoints(ConstantSpacing(boundary.op.Δ.Δx * 2)))
+        surf, ShadowPoints(ConstantSpacing(boundary.op.Δ.Δx * 2)))
 
     println("building surf")
-    surf = regrid(coords, coordinates(s); kwargs...)
+    surf = regrid(coords, _coords(surf); kwargs...)
     @time update_weights!(surf)
 
     println("building shadow 1")
@@ -260,7 +247,6 @@ function make_bc!(
     num = 3 * surf.weights .- 4 * shadow1.weights .+ shadow2.weights
     weights = columnwise_div(num, 2 * boundary.op.Δ.Δx)
 
-    ids = only(s.points.indices)
     offset = first(ids) - 1
     println("zeroing")
     @time b[ids] .= zero(TB)

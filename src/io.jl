@@ -73,7 +73,7 @@ end
 
 function exportvtk(filename::String, points::Vector, data::Vector, names::Vector;
         createcells = false)
-    p = reduce(hcat, Meshes.coordinates.(points))
+    p = reduce(hcat, Meshes._coords.(points))
     cells = createvtkcells(p, createcells)
     vtkfile = createvtkfile(filename, p, cells)
     for (name, field) in zip(names, data)

@@ -39,8 +39,8 @@ _num_vars(::IncompressibleNavierStokes, dim::Int) = dim + 1
 function make_f(
         model::IncompressibleNavierStokes, domain::Domain{Dim}; kwargs...) where {Dim}
     (; μ, ρ) = model
-    vol = coordinates(domain.cloud.volume)
-    all_points = coordinates(domain.cloud)
+    vol = _coords(domain.cloud.volume)
+    all_points = _coords(domain.cloud)
     ∇² = laplacian(all_points, vol; k = 40)
     update_weights!(∇²)
     α = k / (cₚ * ρ)

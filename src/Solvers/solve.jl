@@ -2,8 +2,11 @@ abstract type AbstractProblem end
 
 function MultiphysicsProblem(
         domain::Domain{Dim}, u0, tspan; kwargs...) where {Dim}
-    boundary_funcs = mapreduce(
-        b -> make_bc(b.second, b.first, domain; kwargs...), vcat, domain.boundaries)
+    boundary_funcs = mapreduce(vcat, domain.boundaries) do b
+        ids, bc = b.second
+        surf = domain.cloud[b.first]
+        make_bc(bc, surf, domain, ids; kwargs...)
+    end
     model_funcs = mapreduce(
         m -> make_f(m, domain; kwargs...), vcat, domain.models)
 
@@ -36,7 +39,6 @@ function LinearProblem(domain::Domain; kwargs...)
     end
 
     println("Done creating linear problem")
-    return dropzeros(A), b
     return LinearSolve.LinearProblem(dropzeros(A), b)
 end
 
