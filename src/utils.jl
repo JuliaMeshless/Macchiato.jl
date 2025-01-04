@@ -27,3 +27,14 @@ function _coords(cloud::PointCloud{𝔼{3}})
         SVector(c.x, c.y, c.z)
     end
 end
+
+function _coords(points::AbstractVector{<:Point{𝔼{3}}})
+    map(points) do p
+        c = coords(p)
+        SVector(c.x, c.y, c.z)
+    end
+end
+
+_coords(vol::PointVolume) = _coords(vol.points.geoms)
+
+_ustrip(x::AbstractVector{<:AbstractVector}) = map(x -> ustrip.(x), x)

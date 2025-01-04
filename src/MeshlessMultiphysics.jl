@@ -4,53 +4,82 @@ using CUDA
 using LinearAlgebra
 using LoopVectorization
 using FileIO
-using Meshes: 𝔼
+using Meshes: 𝔼, Manifold, ∠
 using PointClouds
+using CoordRefSystems
+using Accessors
+using ProgressMeter
+using Unitful
+using StaticArrays
+using LinearAlgebra
+using RadialBasisFunctions
+using SparseArrays
+using OrdinaryDiffEq
+using LinearSolve
+using OhMyThreads
 
-# define abstract types
+include("utils.jl")
+
+#################### Abstract Types ####################
 abstract type AbstractBoundaryCondition end
 abstract type AbstractModel end
 
-export AbstractBoundaryCondition, AbstractModel
+#################### Domains ####################
+include("domain.jl")
+export Domain
 
-# include submodules
-include("utils.jl")
-include("Domains/Domains.jl")
-include("BoundaryConditions/BoundaryConditions.jl")
-include("Models/Models.jl")
-include("Solvers/Solvers.jl")
-include("Operators/Operators.jl")
-#include("io.jl")
+#################### Boundary Conditions ####################
+export AbstractBoundaryCondition
 
-using .BoundaryConditions
-using .Models
-using .Domains
+include("boundary_conditions/walls.jl")
+export Wall
 
-# io
+include("boundary_conditions/fluids.jl")
+export FluidBoundaryCondition
+export VelocityInlet, PressureOutlet
+
+include("boundary_conditions/energy.jl")
+export EnergyBoundaryCondition
+export Adiabatic, Temperature, HeatFlux, Convection
+
+export make_bc, make_bc!
+
+#################### Models ####################
+abstract type Fluid <: AbstractModel end
+abstract type Solid <: AbstractModel end
+
+export AbstractModel
+export AbstractViscosity, NewtonianViscosity, CarreauYasudaViscosity
+
+include("models/time.jl")
+
+include("models/fluids.jl")
+export IncompressibleNavierStokes
+
+include("models/energy.jl")
+export SolidEnergy
+
+export make_f, make_system
+export _num_vars
+
+#################### Solvers ####################
+include("solve.jl")
+export MultiphysicsProblem
+
+#################### Operators ####################
+abstract type AbstractOperator end
+export AbstractOperator
+
+include("upwinding.jl")
+export upwind
+
+#################### IO ####################
+include("io.jl")
 export exportvtk, savevtk!, save
 
 # test funcs
 export node_drop, findmin_turbo
 export cov, make_memory_contiguous, ranges_from_permutation, permute!
-
-# Boundary Conditions
-export FluidBoundaryCondition, EnergyBoundaryCondition
-export Wall
-export Temperature, HeatFlux, Convection, Adiabatic
-export VelocityInlet, PressureOutlet
-
-# Models
-export AbstractViscosity, NewtonianViscosity, CarreauYasudaViscosity
-export IncompressibleNavierStokes, SolidEnergy
-
-# Domains
-export Domain
-
-# Operators
-export AbstractOperator, upwind
-
-# Solvers
-export MultiphysicsProblem
 
 # utils
 export findmin_turbo

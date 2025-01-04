@@ -1,6 +1,5 @@
 using MeshlessMultiphysics
 const MM = MeshlessMultiphysics
-const BC = MM.BoundaryConditions
 using RadialBasisFunctions
 using PointClouds
 using StaticArrays
@@ -48,7 +47,7 @@ domain = Domain(cloud, bcs, SolidEnergy(k = k, ρ = ρ, cₚ = cₚ))
 u0 = rand(length(domain.cloud))
 
 # iterative solve using DiffEquations.jl
-prob = MM.Solvers.MultiphysicsProblem(domain, u0, (0.0, 1e-7))
+prob = MM.MultiphysicsProblem(domain, u0, (0.0, 1e-7))
 dt = 0.001 * (Δ)^2 / α
 @time sol = solve(prob, Euler(), dt = dt, save_everystep = false, save_end = true)
 T = Vector(sol.u[end])

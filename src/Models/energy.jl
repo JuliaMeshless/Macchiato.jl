@@ -10,7 +10,11 @@ function make_f(model::SolidEnergy, domain; kwargs...)
     (; k, ρ, cₚ) = model
     vol = _coords(domain.cloud.volume)
     all_points = _coords(domain.cloud)
-    ∇² = laplacian(all_points, vol; k = 40)
+
+    method = KNearestSearch(domain.cloud, 40)
+    adjl = search.(domain.cloud.volume.points, Ref(method))
+
+    ∇² = laplacian(all_points, vol; k = 40, adjl = adjl)
     update_weights!(∇²)
     α = k / (cₚ * ρ)
     w = α * ∇².weights

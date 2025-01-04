@@ -6,10 +6,13 @@ using ..Domains
 using PointClouds
 using RadialBasisFunctions
 using LinearAlgebra
+using LoopVectorization
+using Meshes: ∠, 𝔼
 
 abstract type Fluid <: AbstractModel end
 abstract type Solid <: AbstractModel end
 
+include("../utils.jl")
 include("time.jl")
 include("fluids.jl")
 include("energy.jl")

@@ -93,7 +93,10 @@ end
 
 function make_bc(boundary::Adiabatic{<:ShadowPoints}, surf, domain, ids; kwargs...)
     shadow_points = generate_shadows(surf, boundary.op)
-    d = regrid(_coords(domain.cloud), shadow_points)
+    coords = _coords(domain.cloud)
+    method = KNearestSearch(domain.cloud, 40)
+    adjl = search.(shadow_points, Ref(method))
+    d = regrid(_ustrip(coords), _ustrip(_coords(shadow_points)); adjl = adjl)
     update_weights!(d)
 
     function bc(du, u, p, t)
