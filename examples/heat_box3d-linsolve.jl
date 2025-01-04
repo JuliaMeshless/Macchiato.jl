@@ -9,7 +9,7 @@ using LinearSolve
 using CUDA
 using CUDA.CUSPARSE
 import GLMakie
-using Unitful: m
+using Unitful: m, ustrip
 println("using $(BLAS.get_num_threads()) CPU threads")
 
 ##
@@ -23,11 +23,11 @@ markersize = 0.015
 #visualize(part; markersize = markersize, size = figsize)
 
 Δ = 0.04m
-Δ *= 3
+#Δ *= 3
 cloud = PointClouds.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
 #cloud = load(joinpath(@__DIR__, "rectangle-0.04.jld2"), "cloud")
-repel!(cloud, ConstantSpacing(Δ); α = Δ / 100, max_iters = 1e3)
-#visualize(cloud; markersize = markersize, size = figsize)
+repel!(cloud, ConstantSpacing(Δ); α = Δ / 100, max_iters = 1e2)
+visualize(cloud; markersize = 0.7markersize, size = figsize)
 
 ##
 
@@ -44,17 +44,25 @@ bcs = Dict(:surface1 => Adiabatic(ShadowPoints(ConstantSpacing(Δ / 5), 1)),
     :surface3 => Temperature(50))
 domain = Domain(cloud, bcs, SolidEnergy(k = k, ρ = ρ, cₚ = cₚ))
 
-u0 = rand(length(domain.cloud))
+start = maximum(domain.boundaries) do b
+    b[2][1][end]
+end + 1
+vol_ids = start:(start + length(domain.cloud.volume) - 1)
+
+u0 = zeros(length(domain.cloud))
+u0[vol_ids] .= 30
+visualize(cloud.volume.points.geoms, u0[vol_ids], markersize = markersize, size = figsize)
 
 # iterative solve using DiffEquations.jl
-prob = MM.MultiphysicsProblem(domain, u0, (0.0, 1e-7))
-dt = 0.001 * (Δ)^2 / α
+prob = MM.MultiphysicsProblem(domain, u0, (0.0, 2e-4))
+dt = 0.001 * (ustrip(Δ))^2 / α
 @time sol = solve(prob, Euler(), dt = dt, save_everystep = false, save_end = true)
 T = Vector(sol.u[end])
+u0 = copy(T)
 
-half = findall(x -> x[2] > 0, _coords(cloud))
+half = findall(x -> x[2] > 0m, MM._coords(cloud.volume.points.geoms))
 visualize(
-    _coords.(cloud.points[half]), T[half], markersize = markersize, size = figsize)
+    cloud.volume.points.geoms[half], T[Ref(start - 1) .+ half], markersize = markersize, size = figsize)
 
 ##
 

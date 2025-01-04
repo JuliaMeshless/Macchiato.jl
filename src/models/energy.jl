@@ -14,11 +14,15 @@ function make_f(model::SolidEnergy, domain; kwargs...)
     method = KNearestSearch(domain.cloud, 40)
     adjl = search.(domain.cloud.volume.points, Ref(method))
 
-    ∇² = laplacian(all_points, vol; k = 40, adjl = adjl)
+    ∇² = laplacian(_ustrip(all_points), _ustrip(vol); k = 40, adjl = adjl)
     update_weights!(∇²)
     α = k / (cₚ * ρ)
     w = α * ∇².weights
-    vol_ids = only(domain.cloud.volume.points.indices)
+    start = maximum(domain.boundaries) do b
+        b[2][1][end]
+    end
+    vol_ids = (start + 1):(start + length(vol))
+    @show vol_ids
 
     function f(du, u, p, t)
         mul!(view(du, vol_ids), w, u)

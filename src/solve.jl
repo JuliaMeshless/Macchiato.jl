@@ -43,5 +43,5 @@ function LinearProblem(domain::Domain; kwargs...)
 end
 
 function _num_vars(models::AbstractVector{<:AbstractModel}, Dim)
-    sum(m -> Models._num_vars(m, Dim), models)
+    sum(m -> _num_vars(m, Dim), models)
 end
