@@ -5,6 +5,7 @@ function MultiphysicsProblem(
     boundary_funcs = mapreduce(vcat, domain.boundaries) do b
         ids, bc = b.second
         surf = domain.cloud[b.first]
+        @show bc
         make_bc(bc, surf, domain, ids; kwargs...)
     end
     model_funcs = mapreduce(
@@ -32,10 +33,13 @@ function LinearProblem(domain::Domain; kwargs...)
     # current setup only works when you have one physics model
     println("Creating linear problem")
     @time A, b = make_system(only(domain.models), domain; kwargs...)
+    #return dropzeros(A), b
 
-    for (surface_name, boundary_condition) in domain.boundaries
-        println("Applying boundary condition: ", surface_name)
-        @time A = make_bc!(A, b, boundary_condition, surface_name, domain; kwargs...)
+    for boundary in domain.boundaries
+        ids, bc = boundary.second
+        println("Applying boundary condition: ", boundary.first)
+        surf = domain.cloud[boundary.first]
+        @time A = make_bc!(A, b, bc, surf, domain, ids; kwargs...)
     end
 
     println("Done creating linear problem")

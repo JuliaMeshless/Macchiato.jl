@@ -17,6 +17,8 @@ end
 (bc::Temperature{<:Function})(x, t) = bc.temperature(x, t)
 
 function make_bc(boundary::Temperature, surf, domain, ids; kwargs...)
+    display(ids)
+    display(surf)
     function bc(du, u, p, t)
         u[ids] .= boundary.temperature
         return nothing
@@ -206,17 +208,17 @@ end
 function make_bc!(
         A::AbstractMatrix{TA}, b::AbstractVector{TB}, boundary::Adiabatic{<:ShadowPoints},
         surf, domain, ids; kwargs...) where {TA, TB}
-    coords = _coords(domain.cloud)
+    coords = _ustrip(_coords(domain.cloud))
     shadow_points = generate_shadows(surf, boundary.op)
 
     println("building surf")
-    @time surf = regrid(coords, _coords(surf); kwargs...)
+    @time surf = regrid(coords, _ustrip(_coords(surf)); kwargs...)
     @time update_weights!(surf)
 
     println("building shadow")
-    @time shadow = regrid(coords, shadow_points; kwargs...)
+    @time shadow = regrid(coords, _ustrip(_coords(shadow_points)); kwargs...)
     @time update_weights!(shadow)
-    weights = columnwise_div(surf.weights .- shadow.weights, boundary.op.Δ.Δx)
+    weights = columnwise_div(surf.weights .- shadow.weights, ustrip(boundary.op.Δ.Δx))
 
     offset = first(ids) - 1
     println("zeroing")

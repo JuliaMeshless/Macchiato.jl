@@ -21,7 +21,21 @@ function findmin_turbo(x, ids)
     return minval, indmin
 end
 
-function _coords(cloud::PointCloud{𝔼{3}})
+function _coords(cloud::Union{PointCloud{𝔼{2}}, PointSurface{𝔼{2}}})
+    map(pointify(cloud)) do p
+        c = coords(p)
+        SVector(c.x, c.y)
+    end
+end
+
+function _coords(points::AbstractVector{<:Point{𝔼{2}}})
+    map(points) do p
+        c = coords(p)
+        SVector(c.x, c.y)
+    end
+end
+
+function _coords(cloud::Union{PointCloud{𝔼{3}}, PointSurface{𝔼{3}}})
     map(pointify(cloud)) do p
         c = coords(p)
         SVector(c.x, c.y, c.z)

@@ -5,7 +5,7 @@ using LinearAlgebra
 using LoopVectorization
 using FileIO
 using Meshes: 𝔼, Manifold, ∠
-using PointClouds
+using WhatsThePoint
 using CoordRefSystems
 using Accessors
 using ProgressMeter
