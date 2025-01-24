@@ -28,6 +28,7 @@ WhatsThePoint = "5faae8f1-f507-432f-bd56-cf2f1161ab6f"
 [compat]
 CoordRefSystems = "0.16.0"
 FileIO = "1.16.6"
+LinearSolve = "2"
 Meshes = ">= 0.50"
 OrdinaryDiffEq = "6.90.1"
 Unitful = "1.21.1"
