@@ -5,9 +5,6 @@ function MultiphysicsProblem(
     boundary_funcs = mapreduce(vcat, domain.boundaries) do b
         ids, bc = b.second
         surf = domain.cloud[b.first]
-        @show b.first
-        @show boundary
-        @show ids
         make_bc(bc, surf, domain, ids; kwargs...)
     end
     model_funcs = mapreduce(

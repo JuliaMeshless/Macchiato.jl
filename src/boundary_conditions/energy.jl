@@ -83,14 +83,6 @@ Adiabatic() = Adiabatic(nothing)
 Adiabatic(Δ::Number) = Adiabatic(ShadowPoints(Δ, 1))
 Adiabatic(Δ::Number, order::T) where {T <: Int} = Adiabatic(ShadowPoints(Δ, order))
 
-struct AdiabaticOp{O}
-    op::O
-end
-function AdiabaticOp(boundary, surf, domain; kwargs...)
-    return nothing
-end
-(op::AdiabaticOp)(du, u, p, t) = nothing
-
 function make_bc(boundary::Adiabatic{<:ShadowPoints}, surf, domain, ids; kwargs...)
     shadow_points = generate_shadows(surf, boundary.op)
     coords = _coords(domain.cloud)
@@ -206,17 +198,19 @@ end
 function make_bc!(
         A::AbstractMatrix{TA}, b::AbstractVector{TB}, boundary::Adiabatic{<:ShadowPoints},
         surf, domain, ids; kwargs...) where {TA, TB}
-    coords = _ustrip(_coords(domain.cloud))
     shadow_points = generate_shadows(surf, boundary.op)
+    coords = _ustrip(_coords(domain.cloud))
+    method = KNearestSearch(domain.cloud, 40)
+    adjl = search.(shadow_points, Ref(method))
 
     println("building surf")
-    @time surf = regrid(coords, _ustrip(_coords(surf)); kwargs...)
+    @time surf = regrid(coords, _ustrip(_coords(surf)); adjl = adjl, kwargs...)
     @time update_weights!(surf)
 
     println("building shadow")
     @time shadow = regrid(coords, _ustrip(_coords(shadow_points)); kwargs...)
     @time update_weights!(shadow)
-    weights = columnwise_div(surf.weights .- shadow.weights, ustrip(boundary.op.Δ.Δx))
+    weights = columnwise_div(surf.weights .- shadow.weights, ustrip(boundary.op.Δ(1)))
 
     offset = first(ids) - 1
     println("zeroing")
