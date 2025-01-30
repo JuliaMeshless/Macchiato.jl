@@ -6,22 +6,24 @@ struct Domain{M <: Manifold, C <: CRS}
 end
 
 function Domain(cloud::PointCloud, boundaries, models)
-    for bc_name in keys(boundaries)
-        if !haskey(boundary(cloud).surfaces, bc_name)
+    for bc_surf_name in keys(boundaries)
+        if !hassurface(cloud.boundary, bc_surf_name)
             throw(ArgumentError("The boundary condition $bc_name is not associated with a `PointCloud` boundary."))
         end
     end
     # make sure it is a vector so we can push! to it later
     models = models isa Vector ? models : [models]
 
-    # assign ids to each boundary condition
-    a, b = Iterators.peel(zip(keys(boundaries), values(boundaries)))
-    init = first(a) => (1:length(cloud[first(a)]), a[2])
-    rest = accumulate(b; init = init) do x, y
-        ids = x.second[1][end] .+ (1:length(cloud[y[1]]))
-        y[1] => (ids, y[2])
+    ids_bcs = Dict{Symbol, Tuple{UnitRange, AbstractBoundaryCondition}}()
+    offset = 0
+    for surf_name in names(cloud.boundary)
+        N = length(cloud[surf_name])
+        ids = offset .+ (1:N)
+        offset += N
+        ids_bcs[surf_name] = (ids, boundaries[surf_name])
     end
-    ids_bcs = vcat([init], rest)
+
+    display(ids_bcs)
 
     return Domain(cloud, Dict(ids_bcs), models, :domain1)
 end

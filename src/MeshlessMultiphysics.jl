@@ -17,6 +17,7 @@ using SparseArrays
 using OrdinaryDiffEq
 using LinearSolve
 using OhMyThreads
+using WriteVTK
 
 include("utils.jl")
 

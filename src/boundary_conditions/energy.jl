@@ -17,8 +17,6 @@ end
 (bc::Temperature{<:Function})(x, t) = bc.temperature(x, t)
 
 function make_bc(boundary::Temperature, surf, domain, ids; kwargs...)
-    display(ids)
-    display(surf)
     function bc(du, u, p, t)
         u[ids] .= boundary.temperature
         return nothing

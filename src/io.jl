@@ -37,8 +37,9 @@ function pvdappend!(pvd, time, vtkfile)
     return pvd[time] = vtkfile
 end
 
-function exportvtk(filename::String, points::Vector, data::Vector, names::Vector)
-    p = reduce(hcat, Meshes._coords.(points))
+function exportvtk(filename::String, points::AbstractVector,
+        data::AbstractVector{<:AbstractVector}, names::AbstractVector)
+    p = reduce(hcat, _ustrip(_coords(points)))
     cells = createvtkcells(p)
     vtkfile = createvtkfile(filename, p, cells)
     for (name, field) in zip(names, data)

@@ -36,7 +36,8 @@ function _coords(points::AbstractVector{<:Point{𝔼{2}}})
 end
 
 function _coords(cloud::Union{PointCloud{𝔼{3}}, PointSurface{𝔼{3}}})
-    map(pointify(cloud)) do p
+    points = pointify(cloud)
+    map(points) do p
         c = coords(p)
         SVector(c.x, c.y, c.z)
     end
