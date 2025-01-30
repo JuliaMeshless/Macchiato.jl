@@ -2,9 +2,9 @@
 CurrentModule = MeshlessMultiphysics
 ```
 
-# LocalMeshlessMultiphysics
+# MeshlessMultiphysics
 
-Documentation for [MeshlessMultiphysics](https://github.com/kylebeggs/MeshlessMultiphysics.jl).
+Documentation for [MeshlessMultiphysics](https://github.com/JuliaMeshless/MeshlessMultiphysics.jl).
 
 ```@index
 ```
