@@ -51,5 +51,6 @@ function _coords(points::AbstractVector{<:Point{𝔼{3}}})
 end
 
 _coords(vol::PointVolume) = _coords(vol.points.geoms)
+_coords(coords::AbstractVector{<:SVector}) = coords
 
 _ustrip(x::AbstractVector{<:AbstractVector}) = map(x -> ustrip.(x), x)
