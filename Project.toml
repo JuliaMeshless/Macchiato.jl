@@ -28,8 +28,8 @@ WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 
 [compat]
 CUDA = "5"
+CoordRefSystems = "0.16.0, 0.17"
 Accessors = "0.1"
-CoordRefSystems = "0.16.0"
 FileIO = "1.16.6"
 LinearSolve = "3"
 LoopVectorization = "0.12"
