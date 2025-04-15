@@ -44,14 +44,14 @@ combine_surfaces!(part, :surface3, :surface4)
 
 figsize = (1500, 1500)
 markersize = 0.0025
-visualize(part; markersize = markersize, size = figsize)
+visualize(part; markersize = 1.5markersize, size = figsize)
 
 ##
 
 Δ = dx
 cloud = WhatsThePoint.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
 
-conv = repel!(cloud, ConstantSpacing(Δ); α = Δ / 20, max_iters = 500)
+conv = repel!(cloud, ConstantSpacing(Δ); α = Δ / 20, max_iters = 1000)
 display(lineplot(conv))
 
 visualize(cloud; markersize = markersize, size = figsize)
@@ -72,14 +72,7 @@ bcs = Dict(
 
 domain = MM.Domain(cloud, bcs, SolidEnergy(k = k, ρ = ρ, cₚ = cₚ))
 
-start = maximum(domain.boundaries) do b
-    b[2][1][end]
-end + 1
-vol_ids = start:(start + length(domain.cloud.volume) - 1)
-
 u0 = zeros(length(domain.cloud))
-
-##
 
 # solve using LinearSolve.jl
 prob = MM.LinearProblem(domain)
@@ -144,5 +137,5 @@ function viz(
     return fig
 end
 
-exportvtk("heat-equation-2d", pointify(cloud), [T], ["T"])
+#exportvtk("heat-equation-2d", pointify(cloud), [T], ["T"])
 viz(domain, T; markersize = markersize, size = figsize, levels = 32)
