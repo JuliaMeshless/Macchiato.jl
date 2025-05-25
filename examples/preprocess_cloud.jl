@@ -11,7 +11,7 @@ using StaticArrays
 using LinearAlgebra
 using SparseArrays
 using LinearSolve
-using IterativeSolvers, IncompleteLU
+using IterativeSolvers
 using Unitful: m, °, ustrip
 
 function get_new_domain_info(cloud)
