@@ -2,19 +2,64 @@ using MeshlessMultiphysics
 import MeshlessMultiphysics as MM
 using RadialBasisFunctions
 import RadialBasisFunctions as RBF
+names(RBF, all = true)
 using WhatsThePoint
 import WhatsThePoint as WTP
+using Accessors
+using NearestNeighbors
 using StaticArrays
 using LinearAlgebra
-using ChunkSplitters
 using SparseArrays
 using LinearSolve
 using IterativeSolvers, IncompleteLU
 using Unitful: m, °, ustrip
 
-# Include our extension file to add support for Meshes.Vec in _angle
-include(joinpath(@__DIR__, "wtp_extensions.jl"))
-include(joinpath(@__DIR__, "RBF_extensions.jl"))
+function get_new_domain_info(cloud)
+    #this also introduces dependency from Accessors.jl
+    #TODO:consider using shorter vectors (with length of boundary points only)
+    surfaces = cloud.boundary.surfaces
+    all_coords = ustrip.(MM._coords(cloud))
+    all_normals = zeros(typeof(all_coords[1]), size(all_coords))
+    is_boundary = falses(length(all_coords))
+    is_Neumann = falses(length(all_coords))
+    surface_name = Vector{Symbol}(undef, length(all_coords))
+
+    all_coords_tree = KDTree(all_coords)
+    boundary_coordinates = zeros(typeof(all_coords[1]))
+    for key in keys(surfaces)
+        for bnd_geom in surfaces[key].geoms
+            #TODO: check if @reset reduces performance, think about alternatives
+            #TODO: extend to generic case not just for 2D
+            @reset boundary_coordinates[1] = ustrip(bnd_geom.point.coords.x)
+            @reset boundary_coordinates[2] = ustrip(bnd_geom.point.coords.y)
+            idx, dist = knn(all_coords_tree, boundary_coordinates, 1)
+            if dist[1] > 1e-5
+                @warn "Boundary point $(boundary_coordinates) is too far from the nearest point in the cloud"
+            else
+                global_index = idx[1] # get the index of the nearest point in the cloud
+                @reset all_normals[global_index] .= ustrip(bnd_geom.normal)
+
+                is_boundary[global_index] = true
+                is_Neumann[global_index] = false #TODO:remove hardcoding
+                push!(surface_name, key)
+            end
+        end
+    end
+
+    return all_coords, all_normals, is_boundary, is_Neumann, surface_name
+end
+
+function get_boundary_values(bcs, is_boundary, surface_name)
+    boundary_values = zeros(sum(is_boundary))
+    boundary2global = findall(is_boundary)
+    global2boundary = cumsum(is_boundary)
+    for i in eachindex(boundary_values)
+        global_index = boundary2global[i]
+        surface_sym = surface_name[global_index]
+        boundary_values[i] = bcs[surface_sym].temperature
+    end
+    return boundary_values, boundary2global, global2boundary
+end
 
 ##
 # create boundary points
@@ -31,10 +76,10 @@ p_right = map(i -> WTP.Point(L[1], i), ry)
 p_top = map(i -> WTP.Point(i, L[2]), reverse(rx))
 p_left = map(i -> WTP.Point(0m, i), reverse(ry))
 
-n_bot = map(i -> WTP.Vec(0.0, -1.0), rx)
-n_right = map(i -> WTP.Vec(1.0, 0.0), ry)
-n_top = map(i -> WTP.Vec(0.0, 1.0), rx)
-n_left = map(i -> WTP.Vec(-1.0, 0.0), ry)
+n_bot = map(i -> SVector(0.0, -1.0), rx)
+n_right = map(i -> SVector(1.0, 0.0), ry)
+n_top = map(i -> SVector(0.0, 1.0), rx)
+n_left = map(i -> SVector(-1.0, 0.0), ry)
 
 p = vcat(p_bot, p_right, p_top, p_left) # points
 n = vcat(n_bot, n_right, n_top, n_left) # normals
@@ -48,46 +93,21 @@ combine_surfaces!(part, :surface3, :surface4)
 
 Δ = dx
 cloud = WhatsThePoint.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
+conv = repel!(cloud, ConstantSpacing(Δ); α = Δ / 20, max_iters = 1000)
 
-conv = repel!(cloud, ConstantSpacing(Δ); α = Δ / 20, max_iters = 500)
+#=
+Here I am having trouble building the stencils with this cloud structure
+this is because in the cloud structure the separation beteween internal 
+and boundary points is too strict, it would be more efficient to have
+a single array of points and a boolean array indicating whether the point is a boundary point or not
+and having points ordered in such a way that closer points are next to each other
+the equivalent of MM._coords(cloud) for boundary points appears to be
+cloud.boundary.points.geoms 
+=#
+(all_coords, all_normals, is_boundary, is_Neumann, surface_name) = get_new_domain_info(cloud)
 
-# generate a new set of vectors from cloud
-#starting from cloud isolate cloud.volume
-internal_points = cloud.volume.points
-internal_coords = ustrip.(MM._coords(cloud.volume))
+print("sum of is_boundary: ", sum(is_boundary), " -should be 512- \n")
 
-is_boundary = zeros(Bool, length(internal_points) + length(cloud.boundary.points))
-surface_name = Symbol[]
-surface_index = zeros(Int, length(internal_points) + length(cloud.boundary.points))
-for i in 1:length(internal_points)
-    push!(surface_name, :volume)
-    surface_index[i] = i
-end
-boundary_coords = SVector{2, Float64}[]
-normals = SVector{2, Float64}[]
-
-surfaces = cloud.boundary.surfaces
-bd_point_counter = [0]
-for key in keys(surfaces)
-    for (bnd_index, point) in enumerate(surfaces[key].geoms)
-        bd_point_counter[1] += 1
-        # println(point)
-        push!(
-            boundary_coords, SVector{2}(
-                ustrip(point.point.coords.x), ustrip(point.point.coords.y)))
-        push!(normals,
-            SVector{2}(
-                ustrip(point.normal.coords[1]), ustrip(point.normal.coords[2])))
-        is_boundary[length(internal_points) + bd_point_counter[1]] = true
-        # is_Neumann[bd_point_counter[1]] = false #TODO:remove hardcoding
-        push!(surface_name, key)
-        surface_index[length(internal_points) + bd_point_counter[1]] = bnd_index
-    end
-end
-
-is_Neumann = zeros(Bool, length(internal_points) + length(cloud.boundary.points))
-all_normals = vcat(zeros(SVector{2}, length(internal_points)), normals)
-all_coords = vcat(internal_coords, boundary_coords)
 rbf_basis = RBF.PHS(3; poly_deg = 2)
 mon = RBF.MonomialBasis(2, rbf_basis.poly_deg)
 Lrbf = RBF.∇²(rbf_basis)
@@ -95,7 +115,7 @@ Lmon = RBF.∇²(mon)
 k = RBF.autoselect_k(all_coords, rbf_basis)
 adjl = RBF.find_neighbors(all_coords, k)
 
-lhs, rhs = _build_weights(
+lhs, rhs = RBF._build_weights(
     all_coords, all_normals, is_boundary, is_Neumann, adjl, rbf_basis, Lrbf, Lmon, mon)
 
 # physics models and boundary conditions
@@ -109,20 +129,8 @@ cₚ = 0.465 * 1e3 # J / (kg K)
 bcs = Dict(
     :surface1 => Temperature(10), :surface2 => Temperature(0), :surface3 => Temperature(5))
 
-boundary_values = zeros(sum(is_boundary))
-boundary2global = findall(is_boundary)
-global2boundary = cumsum(is_boundary)
-for i in eachindex(boundary_values)
-    global_index = boundary2global[i]
-    surface_sym = surface_name[global_index]
-    boundary_values[i] = bcs[surface_sym].temperature
-end
+boundary_values, _, _ = get_boundary_values(bcs, is_boundary, surface_name)
 
-# @printf("ILU left-hand-side ")
-#     t0_ILU  = time()
-#     ilu_LHS = ilu(lhs,τ=6)
-#     t1_ILU  = time()
-# @printf("done, elapsed time = %f s\n", t1_ILU-t0_ILU)
 solution, history = bicgstabl(lhs, rhs * boundary_values, 2; reltol = 1e-10, log = true)
 if history.isconverged
     println("Solver converged in $(history.iters) iterations")
