@@ -41,7 +41,7 @@ function get_new_domain_info(cloud)
 
                 is_boundary[global_index] = true
                 is_Neumann[global_index] = false #TODO:remove hardcoding
-                push!(surface_name, key)
+                surface_name[global_index] = key
             end
         end
     end
@@ -76,10 +76,10 @@ p_right = map(i -> WTP.Point(L[1], i), ry)
 p_top = map(i -> WTP.Point(i, L[2]), reverse(rx))
 p_left = map(i -> WTP.Point(0m, i), reverse(ry))
 
-n_bot = map(i -> SVector(0.0, -1.0), rx)
-n_right = map(i -> SVector(1.0, 0.0), ry)
-n_top = map(i -> SVector(0.0, 1.0), rx)
-n_left = map(i -> SVector(-1.0, 0.0), ry)
+n_bot = map(i -> WTP.Vec(0.0, -1.0), rx)
+n_right = map(i -> WTP.Vec(1.0, 0.0), ry)
+n_top = map(i -> WTP.Vec(0.0, 1.0), rx)
+n_left = map(i -> WTP.Vec(-1.0, 0.0), ry)
 
 p = vcat(p_bot, p_right, p_top, p_left) # points
 n = vcat(n_bot, n_right, n_top, n_left) # normals
@@ -88,7 +88,7 @@ a = fill(dx, length(p)) # areas
 part = PointBoundary(p, n, a)
 
 # Restore the original call
-split_surface!(part, ustrip(75°))
+split_surface!(part, 75°)
 combine_surfaces!(part, :surface3, :surface4)
 
 Δ = dx
@@ -98,7 +98,7 @@ conv = repel!(cloud, ConstantSpacing(Δ); α = Δ / 20, max_iters = 1000)
 #=
 Here I am having trouble building the stencils with this cloud structure
 this is because in the cloud structure the separation beteween internal 
-and boundary points is too strict, it would be more efficient to have
+and boundary points is too strict, probably it would be more efficient to have
 a single array of points and a boolean array indicating whether the point is a boundary point or not
 and having points ordered in such a way that closer points are next to each other
 the equivalent of MM._coords(cloud) for boundary points appears to be
@@ -129,21 +129,74 @@ cₚ = 0.465 * 1e3 # J / (kg K)
 bcs = Dict(
     :surface1 => Temperature(10), :surface2 => Temperature(0), :surface3 => Temperature(5))
 
-boundary_values, _, _ = get_boundary_values(bcs, is_boundary, surface_name)
+boundary_values, boundary2global, global2boundary = get_boundary_values(
+    bcs, is_boundary, surface_name)
 
-solution, history = bicgstabl(lhs, rhs * boundary_values, 2; reltol = 1e-10, log = true)
-if history.isconverged
-    println("Solver converged in $(history.iters) iterations")
-else
-    @warn "Solver did not converge after $(history.iters) iterations"
+T, history = bicgstabl(lhs, -rhs * boundary_values; reltol = 1e-10, log = true)
+
+T_full = zeros(length(all_coords))
+
+for i in eachindex(boundary_values)
+    global_index = boundary2global[i]
+    T_full[global_index] = boundary_values[i]
+end
+internal_indices = findall(.!is_boundary)
+T_full[internal_indices] = T
+
+domain = MM.Domain(cloud, bcs, SolidEnergy(k = k, ρ = ρ, cₚ = cₚ))
+function viz(
+        domain,
+        labels;
+        size = (1000, 1000),
+        colorrange = WhatsThePoint._get_colorrange(labels),
+        colormap = :Spectral,
+        levels = 32,
+        kwargs...
+)
+    fig = Figure(; size = size)
+    ax = Axis(fig[1, 1]; aspect = DataAspect())
+
+    cmap = Makie.cgrad(colormap, levels; categorical = true)
+
+    for b in domain.boundaries
+        ids = b.second[1]
+        points = pointify(domain.cloud[b.first])
+        c = coords.(points)
+        x = map(c -> ustrip(c.x), c)
+        y = map(c -> ustrip(c.y), c)
+        meshscatter!(
+            ax,
+            ustrip.(x),
+            ustrip.(y);
+            color = labels[ids],
+            shading = Makie.NoShading,
+            colorrange = colorrange,
+            colormap = cmap,
+            kwargs...
+        )
+    end
+
+    # volume
+    start = maximum(domain.boundaries) do b
+        b[2][1][end]
+    end + 1
+    ids = start:(start + length(domain.cloud.volume) - 1)
+    c = coords.(domain.cloud.volume.points)
+    x = map(c -> ustrip(c.x), c)
+    y = map(c -> ustrip(c.y), c)
+    meshscatter!(
+        ax,
+        ustrip.(x),
+        ustrip.(y);
+        color = labels[ids],
+        shading = Makie.NoShading,
+        colorrange = colorrange,
+        colormap = cmap,
+        kwargs...
+    )
+    Makie.Colorbar(fig[1, 2]; colorrange = colorrange, colormap = cmap)
+    return fig
 end
 
-#scatter sol on internal coords
-using Plots
-plotlyjs()
-p = scatter(
-    [coord[1] for coord in internal_coords], [coord[2] for coord in internal_coords],
-    zcolor = solution, color = :turbo, aspect_ratio = :equal,
-    title = "Temperature Distribution", colorbar = true, markersize = 1, markerstrokewidth = 0)
-plot!(p, layout = (1, 1), size = (800, 600), margin = 10Plots.mm)
-display(p)
+#exportvtk("heat-equation-2d", pointify(cloud), [T], ["T"])
+viz(domain, T_full; markersize = markersize, size = figsize, levels = 32)
