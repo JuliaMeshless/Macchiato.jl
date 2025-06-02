@@ -14,6 +14,8 @@ using UnicodePlots
 using Unitful: m, °, ustrip
 using JLD2
 
+include("visualize_results.jl")
+
 ##
 # create boundary points
 
@@ -79,63 +81,5 @@ prob = MM.LinearProblem(domain)
 @time sol = solve(prob)
 T = sol.u
 
-##
-# visualize the solution
-
-# this needs to go into the WhatsThePoint package probably...
-function viz(
-        domain,
-        labels;
-        size = (1000, 1000),
-        colorrange = WhatsThePoint._get_colorrange(labels),
-        colormap = :Spectral,
-        levels = 32,
-        kwargs...
-)
-    fig = Figure(; size = size)
-    ax = Axis(fig[1, 1]; aspect = DataAspect())
-
-    cmap = Makie.cgrad(colormap, levels; categorical = true)
-
-    for b in domain.boundaries
-        ids = b.second[1]
-        points = pointify(domain.cloud[b.first])
-        c = coords.(points)
-        x = map(c -> ustrip(c.x), c)
-        y = map(c -> ustrip(c.y), c)
-        meshscatter!(
-            ax,
-            ustrip.(x),
-            ustrip.(y);
-            color = labels[ids],
-            shading = Makie.NoShading,
-            colorrange = colorrange,
-            colormap = cmap,
-            kwargs...
-        )
-    end
-
-    # volume
-    start = maximum(domain.boundaries) do b
-        b[2][1][end]
-    end + 1
-    ids = start:(start + length(domain.cloud.volume) - 1)
-    c = coords.(domain.cloud.volume.points)
-    x = map(c -> ustrip(c.x), c)
-    y = map(c -> ustrip(c.y), c)
-    meshscatter!(
-        ax,
-        ustrip.(x),
-        ustrip.(y);
-        color = labels[ids],
-        shading = Makie.NoShading,
-        colorrange = colorrange,
-        colormap = cmap,
-        kwargs...
-    )
-    Makie.Colorbar(fig[1, 2]; colorrange = colorrange, colormap = cmap)
-    return fig
-end
-
 #exportvtk("heat-equation-2d", pointify(cloud), [T], ["T"])
-viz(domain, T; markersize = markersize, size = figsize, levels = 32)
+viz_2d(domain, T; markersize = markersize, size = figsize, levels = 32)

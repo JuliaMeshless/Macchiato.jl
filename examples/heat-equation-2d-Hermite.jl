@@ -13,6 +13,7 @@ using SparseArrays
 using LinearSolve
 using IterativeSolvers
 using Unitful: m, °, ustrip
+include("visualize_results.jl")
 
 function get_new_domain_info(cloud)
     #this also introduces dependency from Accessors.jl
@@ -118,14 +119,6 @@ adjl = RBF.find_neighbors(all_coords, k)
 lhs, rhs = RBF._build_weights(
     all_coords, all_normals, is_boundary, is_Neumann, adjl, rbf_basis, Lrbf, Lmon, mon)
 
-# physics models and boundary conditions
-h = 250 / 1e6 # W / (mm^2 K)
-T∞ = 25 + 273.15 # K
-k = 40 / 1e3 # W / (mm K)
-ρ = 7833 / 1e9  # kg/mm^3
-cₚ = 0.465 * 1e3 # J / (kg K)
-α = k / (cₚ * ρ) # mm^2 / s
-
 bcs = Dict(
     :surface1 => Temperature(10), :surface2 => Temperature(0), :surface3 => Temperature(5))
 
@@ -133,6 +126,14 @@ boundary_values, boundary2global, global2boundary = get_boundary_values(
     bcs, is_boundary, surface_name)
 
 T, history = bicgstabl(lhs, -rhs * boundary_values; reltol = 1e-10, log = true)
+
+# physics models and boundary conditions
+h = 250 / 1e6 # W / (mm^2 K)
+T∞ = 25 + 273.15 # K
+k = 40 / 1e3 # W / (mm K)
+ρ = 7833 / 1e9  # kg/mm^3
+cₚ = 0.465 * 1e3 # J / (kg K)
+α = k / (cₚ * ρ) # mm^2 / s
 
 T_full = zeros(length(all_coords))
 
@@ -144,59 +145,4 @@ internal_indices = findall(.!is_boundary)
 T_full[internal_indices] = T
 
 domain = MM.Domain(cloud, bcs, SolidEnergy(k = k, ρ = ρ, cₚ = cₚ))
-function viz(
-        domain,
-        labels;
-        size = (1000, 1000),
-        colorrange = WhatsThePoint._get_colorrange(labels),
-        colormap = :Spectral,
-        levels = 32,
-        kwargs...
-)
-    fig = Figure(; size = size)
-    ax = Axis(fig[1, 1]; aspect = DataAspect())
-
-    cmap = Makie.cgrad(colormap, levels; categorical = true)
-
-    for b in domain.boundaries
-        ids = b.second[1]
-        points = pointify(domain.cloud[b.first])
-        c = coords.(points)
-        x = map(c -> ustrip(c.x), c)
-        y = map(c -> ustrip(c.y), c)
-        meshscatter!(
-            ax,
-            ustrip.(x),
-            ustrip.(y);
-            color = labels[ids],
-            shading = Makie.NoShading,
-            colorrange = colorrange,
-            colormap = cmap,
-            kwargs...
-        )
-    end
-
-    # volume
-    start = maximum(domain.boundaries) do b
-        b[2][1][end]
-    end + 1
-    ids = start:(start + length(domain.cloud.volume) - 1)
-    c = coords.(domain.cloud.volume.points)
-    x = map(c -> ustrip(c.x), c)
-    y = map(c -> ustrip(c.y), c)
-    meshscatter!(
-        ax,
-        ustrip.(x),
-        ustrip.(y);
-        color = labels[ids],
-        shading = Makie.NoShading,
-        colorrange = colorrange,
-        colormap = cmap,
-        kwargs...
-    )
-    Makie.Colorbar(fig[1, 2]; colorrange = colorrange, colormap = cmap)
-    return fig
-end
-
-#exportvtk("heat-equation-2d", pointify(cloud), [T], ["T"])
-viz(domain, T_full; markersize = markersize, size = figsize, levels = 32)
+viz_2d(domain, T_full; markersize = markersize, size = figsize, levels = 32)
