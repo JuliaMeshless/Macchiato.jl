@@ -1,10 +1,9 @@
+using GLMakie
 using MeshlessMultiphysics
 import MeshlessMultiphysics as MM
 using RadialBasisFunctions
 import RadialBasisFunctions as RBF
 names(RBF, all = true)
-using WhatsThePoint
-import WhatsThePoint as WTP
 using Accessors
 using NearestNeighbors
 using StaticArrays
@@ -12,7 +11,8 @@ using LinearAlgebra
 using SparseArrays
 using LinearSolve
 using IterativeSolvers
-using Unitful: m, °, ustrip
+using Unitful: ustrip
+include("create_2d_geometry.jl")
 include("visualize_results.jl")
 
 function get_new_domain_info(cloud)
@@ -96,39 +96,7 @@ function LinearProblemHermite(domain)
     return LinearSolve.LinearProblem(dropzeros(A), b), boundary_values
 end
 
-##
-# create boundary points
-
-L = (1m, 1m)
-
-dx = 1 / 129 * m # boundary point spacing
-S = ConstantSpacing(dx)
-rx = dx:dx:(L[1] - dx)
-ry = dx:dx:(L[2] - dx)
-
-p_bot = map(i -> WTP.Point(i, 0m), rx)
-p_right = map(i -> WTP.Point(L[1], i), ry)
-p_top = map(i -> WTP.Point(i, L[2]), reverse(rx))
-p_left = map(i -> WTP.Point(0m, i), reverse(ry))
-
-n_bot = map(i -> WTP.Vec(0.0, -1.0), rx)
-n_right = map(i -> WTP.Vec(1.0, 0.0), ry)
-n_top = map(i -> WTP.Vec(0.0, 1.0), rx)
-n_left = map(i -> WTP.Vec(-1.0, 0.0), ry)
-
-p = vcat(p_bot, p_right, p_top, p_left) # points
-n = vcat(n_bot, n_right, n_top, n_left) # normals
-a = fill(dx, length(p)) # areas
-
-part = PointBoundary(p, n, a)
-
-# Restore the original call
-split_surface!(part, 75°)
-combine_surfaces!(part, :surface3, :surface4)
-
-Δ = dx
-cloud = WhatsThePoint.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
-conv = repel!(cloud, ConstantSpacing(Δ); α = Δ / 20, max_iters = 1000)
+part, cloud, Δ = create_2d_geometry()
 
 bcs = Dict(
     :surface1 => Temperature(10), :surface2 => Temperature(0), :surface3 => Temperature(5))
