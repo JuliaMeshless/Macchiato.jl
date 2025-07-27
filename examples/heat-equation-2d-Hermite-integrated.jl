@@ -147,4 +147,6 @@ prob, boundary_values = LinearProblemHermite(domain)
 @time sol = solve(prob)
 T = sol.u
 T_full = vcat(boundary_values, T)
+figsize = (1500, 1500)
+markersize = 0.0025
 viz_2d(domain, T_full; markersize = markersize, size = figsize, levels = 32)
