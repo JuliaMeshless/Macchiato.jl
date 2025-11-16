@@ -5,84 +5,127 @@ Abstract type for energy boundary conditions.
 """
 abstract type EnergyBoundaryCondition <: AbstractBoundaryCondition end
 
+# ============================================================================
+# Temperature (Dirichlet for energy equation)
+# ============================================================================
+
 """
     Temperature{T} <: EnergyBoundaryCondition
 
-Temperature boundary condition.
+Temperature boundary condition - Dirichlet type (α=1, β=0).
+Prescribes the temperature value at the boundary.
 """
 struct Temperature{T} <: EnergyBoundaryCondition
     temperature::T
 end
+
+# Accessor
 (bc::Temperature)() = bc.temperature
 (bc::Temperature{<:Function})(x, t) = bc.temperature(x, t)
 
+# Helpers
+bc_type(::Temperature) = Dirichlet()
+bc_value(bc::Temperature) = bc.temperature
+bc_value(bc::Temperature{<:Function}, x, t) = bc.temperature(x, t)
+
+# Time evolution
 function make_bc(boundary::Temperature, surf, domain, ids; kwargs...)
-    function bc(du, u, p, t)
-        u[ids] .= boundary.temperature
-        return nothing
-    end
-    return bc
+    bc(du, u, p, t) = (u[ids] .= bc_value(boundary, nothing, t); nothing)
 end
 
-function make_bc!(
-        A::AbstractMatrix{TA}, b::AbstractVector{TB}, boundary::Temperature,
-        surf, domain, ids; kwargs...) where {TA, TB}
-    @tasks for i in ids
-        A[i, :] .= zero(TA)
-        A[i, i] = one(TA)
-        b[i] = convert(TB, boundary.temperature)
-    end
-    return A
+# Linear system
+function make_bc!(A, b, boundary::Temperature, surf, domain, ids; kwargs...)
+    (apply_bc!(A, b, bc_type(boundary), surf, domain, ids, bc_value(boundary)); A)
 end
 
-function Base.show(io::IO, boundary::Temperature)
-    print(io, "Temperature: $(boundary.temperature)")
-end
+Base.show(io::IO, bc::Temperature) = print(io, "Temperature: $(bc.temperature)")
+
+# ============================================================================
+# HeatFlux (Neumann for energy equation)
+# ============================================================================
 
 """
     HeatFlux{T} <: EnergyBoundaryCondition
 
-Heat flux boundary condition.
+Heat flux boundary condition - Neumann type (α=0, β=1).
+Prescribes the heat flux (normal derivative of temperature) at the boundary.
 """
 struct HeatFlux{T} <: EnergyBoundaryCondition
     heat_flux::T
 end
 
-function Base.show(io::IO, boundary::HeatFlux)
-    print(io, "HeatFlux: $(boundary.heat_flux)")
+# Helpers
+bc_type(::HeatFlux) = Neumann()
+bc_value(bc::HeatFlux) = bc.heat_flux
+
+# Linear system
+function make_bc!(A, b, boundary::HeatFlux, surf, domain, ids; kwargs...)
+    (apply_bc!(A, b, bc_type(boundary), surf, domain, ids, bc_value(boundary); kwargs...); A)
 end
+
+Base.show(io::IO, bc::HeatFlux) = print(io, "HeatFlux: $(bc.heat_flux)")
+
+# ============================================================================
+# Convection (Robin for energy equation)
+# ============================================================================
 
 """
     Convection{C, T} <: EnergyBoundaryCondition
 
-Convection boundary condition.
+Convection boundary condition - Robin type.
+Represents heat transfer to surrounding fluid: q = h*(T - T∞)
+This is a Robin condition: h*T + k*∂ₙT = h*T∞
 """
 struct Convection{C, T} <: EnergyBoundaryCondition
-    coefficient::T
-    T∞::T
+    coefficient::T  # h (heat transfer coefficient)
+    T∞::T  # Ambient temperature
+
     function Convection(coefficient::C, T∞::T) where {C, T}
-        if coefficient < 0
-            throw(ArgumentError("The coefficient must be non-negative."))
-        end
-        new{C, T}(coefficient, T∞)
+        coefficient < 0 && throw(ArgumentError("The coefficient must be non-negative."))
+        return new{C, T}(coefficient, T∞)
     end
 end
-function Base.show(io::IO, boundary::Convection)
-    print(io, "Convection: coeff = $(boundary.coefficient), T∞ = $(boundary.T∞)")
+
+# Helpers
+bc_type(bc::Convection) = Robin(bc.coefficient, 1.0)
+bc_value(bc::Convection) = bc.coefficient * bc.T∞
+
+# Linear system
+function make_bc!(A, b, boundary::Convection, surf, domain, ids; kwargs...)
+    (apply_bc!(A, b, bc_type(boundary), surf, domain, ids, bc_value(boundary); kwargs...); A)
 end
+
+function Base.show(io::IO, bc::Convection)
+    print(io, "Convection: coeff=$(bc.coefficient), T∞=$(bc.T∞)")
+end
+
+# ============================================================================
+# Adiabatic (Neumann with zero flux)
+# ============================================================================
 
 """
     Adiabatic <: EnergyBoundaryCondition
 
-Adiabatic boundary condition. `op` is the operator type to use when calculating the normal gradient
+Adiabatic boundary condition - Neumann type with zero heat flux (α=0, β=1, g=0).
+Represents a thermally insulated boundary where ∂ₙT = 0.
+
+# Fields
+- `op::T`: Operator type to use when calculating the normal gradient (e.g., ShadowPoints)
 """
 struct Adiabatic{T} <: EnergyBoundaryCondition
     op::T
 end
+
+# Constructors
 Adiabatic() = Adiabatic(nothing)
 Adiabatic(Δ::Number) = Adiabatic(ShadowPoints(Δ, 1))
 Adiabatic(Δ::Number, order::T) where {T <: Int} = Adiabatic(ShadowPoints(Δ, order))
 
+# Helpers
+bc_type(::Adiabatic) = Neumann()
+bc_value(::Adiabatic) = 0.0  # Zero flux
+
+# Time evolution - specialized implementations
 function make_bc(boundary::Adiabatic{<:ShadowPoints}, surf, domain, ids; kwargs...)
     shadow_points = generate_shadows(surf, boundary.op)
     coords = _coords(domain.cloud)
@@ -147,28 +190,7 @@ end
 function make_bc!(
         A::AbstractMatrix{TA}, b::AbstractVector{TB}, boundary::Adiabatic,
         surf, domain, ids; kwargs...) where {TA, TB}
-    #adjl = cone(domain.cloud, s, 40)
-    #d = directional(
-    #    _coords(domain.cloud), _coords(s), normals(s); adjl = adjl, kwargs...)
-    d = directional(
-        _coords(domain.cloud), _coords(surf), normals(surf); k = 40, kwargs...)
-    update_weights!(d)
-
-    w = d.weights
-    wi = diag(w)
-    w[diagind(w)] .= 0
-    dropzeros!(w)
-
-    offset = first(ids) - 1
-    Threads.@threads for i in ids
-        A[i, :] .= zero(TA)
-        A[i, :] .= d.weights[i - offset, :]
-        #A[i, :] .= d.weights[i, :]
-        b[i] = zero(TB)
-    end
-    A[ids, :] .= d.weights
-    dropzeros!(A)
-    return A
+    apply_bc!(A, b, boundary, surf, domain, ids, bc_value(boundary))
 end
 
 function columnwise_div(A::SparseMatrixCSC, B::AbstractVector)
