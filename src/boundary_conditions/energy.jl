@@ -6,97 +6,81 @@ Abstract type for energy boundary conditions.
 abstract type EnergyBoundaryCondition <: AbstractBoundaryCondition end
 
 # ============================================================================
-# Temperature (Dirichlet for energy equation)
+# Temperature (Dirichlet)
 # ============================================================================
 
-"""
-    Temperature{T} <: EnergyBoundaryCondition
-
-Temperature boundary condition - Dirichlet type (α=1, β=0).
-Prescribes the temperature value at the boundary.
-"""
 struct Temperature{T} <: EnergyBoundaryCondition
     temperature::T
 end
 
-# Accessor
-(bc::Temperature)() = bc.temperature
-(bc::Temperature{<:Function})(x, t) = bc.temperature(x, t)
-
-# Helpers
 bc_type(::Temperature) = Dirichlet()
 bc_value(bc::Temperature) = bc.temperature
-bc_value(bc::Temperature{<:Function}, x, t) = bc.temperature(x, t)
 
-# Time evolution
+# Time evolution - return closure for ODE: (du, u, p, t) -> modify u
 function make_bc(boundary::Temperature, surf, domain, ids; kwargs...)
-    bc(du, u, p, t) = (u[ids] .= bc_value(boundary, nothing, t); nothing)
-end
-
-# Linear system
-function make_bc!(A, b, boundary::Temperature, surf, domain, ids; kwargs...)
-    (apply_bc!(A, b, bc_type(boundary), surf, domain, ids, bc_value(boundary)); A)
+    T = boundary.temperature
+    (du, u, p, t) -> (u[ids] .= T; nothing)
 end
 
 Base.show(io::IO, bc::Temperature) = print(io, "Temperature: $(bc.temperature)")
 
 # ============================================================================
-# HeatFlux (Neumann for energy equation)
+# HeatFlux (Neumann)
 # ============================================================================
 
-"""
-    HeatFlux{T} <: EnergyBoundaryCondition
-
-Heat flux boundary condition - Neumann type (α=0, β=1).
-Prescribes the heat flux (normal derivative of temperature) at the boundary.
-"""
 struct HeatFlux{T} <: EnergyBoundaryCondition
     heat_flux::T
 end
 
-# Helpers
 bc_type(::HeatFlux) = Neumann()
 bc_value(bc::HeatFlux) = bc.heat_flux
-
-# Linear system
-function make_bc!(A, b, boundary::HeatFlux, surf, domain, ids; kwargs...)
-    (apply_bc!(A, b, bc_type(boundary), surf, domain, ids, bc_value(boundary); kwargs...); A)
-end
 
 Base.show(io::IO, bc::HeatFlux) = print(io, "HeatFlux: $(bc.heat_flux)")
 
 # ============================================================================
-# Convection (Robin for energy equation)
+# Convection (Robin)
 # ============================================================================
 
 """
-    Convection{C, T} <: EnergyBoundaryCondition
-
 Convection boundary condition - Robin type.
-Represents heat transfer to surrounding fluid: q = h*(T - T∞)
-This is a Robin condition: h*T + k*∂ₙT = h*T∞
-"""
-struct Convection{C, T} <: EnergyBoundaryCondition
-    coefficient::T  # h (heat transfer coefficient)
-    T∞::T  # Ambient temperature
 
-    function Convection(coefficient::C, T∞::T) where {C, T}
-        coefficient < 0 && throw(ArgumentError("The coefficient must be non-negative."))
-        return new{C, T}(coefficient, T∞)
+Represents convective heat transfer to surrounding fluid at the boundary.
+The heat flux at the boundary is governed by Newton's law of cooling:
+    q = h(T - T∞)
+
+For the heat equation with thermal conductivity k:
+    -k ∂T/∂n = h(T - T∞)
+
+Rearranging to Robin form (α*T + β*∂T/∂n = g):
+    h*T + k*∂T/∂n = h*T∞
+
+where:
+- α = h (heat transfer coefficient)
+- β = k (thermal conductivity of the material)
+- g = h*T∞ (prescribed value)
+
+# Fields
+- `h`: Heat transfer coefficient [W/(m²·K)]
+- `k`: Thermal conductivity of the material [W/(m·K)]
+- `T∞`: Ambient/surrounding temperature [K]
+"""
+struct Convection{H, K, T} <: EnergyBoundaryCondition
+    h::H   # heat transfer coefficient
+    k::K   # thermal conductivity
+    T∞::T  # ambient temperature
+
+    function Convection(h::H, k::K, T∞::T) where {H, K, T}
+        h < 0 && throw(ArgumentError("Heat transfer coefficient must be non-negative"))
+        k <= 0 && throw(ArgumentError("Thermal conductivity must be positive"))
+        return new{H, K, T}(h, k, T∞)
     end
 end
 
-# Helpers
-bc_type(bc::Convection) = Robin(bc.coefficient, 1.0)
-bc_value(bc::Convection) = bc.coefficient * bc.T∞
-
-# Linear system
-function make_bc!(A, b, boundary::Convection, surf, domain, ids; kwargs...)
-    (apply_bc!(A, b, bc_type(boundary), surf, domain, ids, bc_value(boundary); kwargs...); A)
-end
+bc_type(bc::Convection) = Robin(bc.h, bc.k)
+bc_value(bc::Convection) = bc.h * bc.T∞
 
 function Base.show(io::IO, bc::Convection)
-    print(io, "Convection: coeff=$(bc.coefficient), T∞=$(bc.T∞)")
+    print(io, "Convection: h=$(bc.h), k=$(bc.k), T∞=$(bc.T∞)")
 end
 
 # ============================================================================
@@ -187,11 +171,7 @@ function cone(cloud, surf, k)
     return adjl
 end
 
-function make_bc!(
-        A::AbstractMatrix{TA}, b::AbstractVector{TB}, boundary::Adiabatic,
-        surf, domain, ids; kwargs...) where {TA, TB}
-    apply_bc!(A, b, boundary, surf, domain, ids, bc_value(boundary))
-end
+# Basic Adiabatic uses default make_bc! (Neumann with zero flux)
 
 function columnwise_div(A::SparseMatrixCSC, B::AbstractVector)
     I, J, V = findnz(A)

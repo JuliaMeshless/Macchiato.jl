@@ -36,8 +36,6 @@ include("boundary_conditions/boundary_conditions.jl")
 # Re-export from RadialBasisFunctions.jl
 export BoundaryCondition, Dirichlet, Neumann, Robin, Internal
 export α, β, is_dirichlet, is_neumann, is_robin, is_internal
-# MeshlessMultiphysics-specific helper functions
-export apply_bc!, apply_dirichlet!, apply_neumann!, apply_robin!
 
 include("boundary_conditions/walls.jl")
 export Wall
