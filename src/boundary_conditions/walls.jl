@@ -1,23 +1,21 @@
 """
-Wall boundary condition for fluid flows - Dirichlet type for velocity.
+    Wall{T} <: Dirichlet
 
-Represents a solid boundary where the no-slip condition is enforced.
-For incompressible Navier-Stokes equations, the velocity at the wall
-matches the wall velocity:
-    v = v_wall
+No-slip wall boundary condition for fluid flows.
 
-# Cases
-- Stationary wall (no-slip): `Wall()` or `Wall(0)` → v = 0
-- Moving wall: `Wall(v_wall)` → v = v_wall
-
-# Fields
-- `v`: Wall velocity (nothing or 0 for stationary, vector/scalar for moving wall)
+Enforces velocity = 0 at solid boundaries.
 """
-struct Wall{T} <: AbstractBoundaryCondition
+struct Wall{T} <: Dirichlet
     v::T
 end
 
+"""
+    Wall()
+
+Stationary wall (no-slip): velocity = 0
+"""
 Wall() = Wall(nothing)
 
-bc_type(::Wall) = Dirichlet()
-bc_value(bc::Wall) = bc.v === nothing ? 0 : bc.v
+(bc::Wall)() = bc.v === nothing ? 0 : bc.v
+
+Base.show(io::IO, ::Wall) = print(io, "Wall (no-slip)")

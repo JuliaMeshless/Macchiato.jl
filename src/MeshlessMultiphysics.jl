@@ -22,30 +22,24 @@ using WriteVTK
 include("utils.jl")
 
 #################### Abstract Types ####################
-abstract type AbstractBoundaryCondition end
 abstract type AbstractModel end
-
-#################### Domains ####################
-include("domain.jl")
-export Domain
 
 #################### Boundary Conditions ####################
 export AbstractBoundaryCondition
 
 include("boundary_conditions/boundary_conditions.jl")
-# Re-export from RadialBasisFunctions.jl
-export BoundaryCondition, Dirichlet, Neumann, Robin, Internal
-export α, β, is_dirichlet, is_neumann, is_robin, is_internal
+
+#################### Domains ####################
+include("domain.jl")
+export Domain
 
 include("boundary_conditions/walls.jl")
 export Wall
 
 include("boundary_conditions/fluids.jl")
-export FluidBoundaryCondition
 export VelocityInlet, PressureOutlet
 
 include("boundary_conditions/energy.jl")
-export EnergyBoundaryCondition
 export Adiabatic, Temperature, HeatFlux, Convection
 
 export make_bc, make_bc!
