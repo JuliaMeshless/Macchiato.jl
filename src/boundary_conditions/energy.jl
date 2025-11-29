@@ -31,18 +31,15 @@ Base.show(io::IO, bc::Temperature) = print(io, "Temperature: $(bc.temperature)")
 # ============================================================================
 
 """
-    HeatFlux{Q, T} <: Neumann
+    HeatFlux{Q} <: Neumann
 
 Prescribed heat flux boundary condition (∂T/∂n = q).
-
-Optional `shadow_op` for high-accuracy derivative approximation.
 """
-struct HeatFlux{Q, T} <: Neumann
+struct HeatFlux{Q} <: Neumann
     heat_flux::Q
-    shadow_op::T
 end
 
-HeatFlux(q) = HeatFlux(q, nothing)
+HeatFlux(q) = HeatFlux(q)
 
 (bc::HeatFlux)() = bc.heat_flux
 # (bc::HeatFlux{<:Function})(x, t) = bc.heat_flux(x, t)
@@ -64,22 +61,21 @@ Base.show(io::IO, bc::HeatFlux) = print(io, "HeatFlux: $(bc.heat_flux)")
 # ============================================================================
 
 """
-    Convection{H, K, T, S} <: Robin
+    Convection{H, K, T} <: Robin
 
 Convective heat transfer: h·T + k·∂T/∂n = h·T∞
 
-Newton's law of cooling at boundary. Optional `shadow_op` for derivatives.
+Newton's law of cooling at boundary.
 """
-struct Convection{H, K, T, S} <: Robin
+struct Convection{H, K, T} <: Robin
     h::H   # heat transfer coefficient
     k::K   # thermal conductivity
     T∞::T  # ambient temperature
-    shadow_op::S
 
-    function Convection(h::H, k::K, T∞::T, shadow_op::S = nothing) where {H, K, T, S}
+    function Convection(h::H, k::K, T∞::T) where {H, K, T}
         h < 0 && throw(ArgumentError("Heat transfer coefficient must be non-negative"))
         k <= 0 && throw(ArgumentError("Thermal conductivity must be positive"))
-        return new{H, K, T, S}(h, k, T∞, shadow_op)
+        return new{H, K, T}(h, k, T∞)
     end
 end
 
@@ -102,20 +98,14 @@ end
 # ============================================================================
 
 """
-    Adiabatic{T} <: Neumann
+    Adiabatic <: Neumann
 
 Thermally insulated boundary: ∂T/∂n = 0
-
-Optional shadow points for high-accuracy derivatives.
 """
-struct Adiabatic{T} <: Neumann
-    shadow_op::T
-end
+struct Adiabatic <: Neumann end
 
-# Constructors
-Adiabatic() = Adiabatic(nothing)
-Adiabatic(Δ::Number) = Adiabatic(ShadowPoints(Δ, 1))
-Adiabatic(Δ::Number, order::O) where {O <: Int} = Adiabatic(ShadowPoints(Δ, order))
+# Constructor
+Adiabatic() = Adiabatic()
 
 # bc_type(::Adiabatic) = Neumann()
 (bc::Adiabatic)() = 0.0  # Zero flux

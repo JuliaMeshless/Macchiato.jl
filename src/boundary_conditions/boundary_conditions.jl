@@ -1,46 +1,39 @@
 abstract type AbstractBoundaryCondition end
+abstract type DerivativeBoundaryCondition <: AbstractBoundaryCondition end
 
 abstract type Dirichlet <: AbstractBoundaryCondition end
-abstract type Neumann <: AbstractBoundaryCondition end
-abstract type Robin <: AbstractBoundaryCondition end
+abstract type Neumann <: DerivativeBoundaryCondition end
+abstract type Robin <: DerivativeBoundaryCondition end
+
+bc_family(::Type{<:Dirichlet}) = Dirichlet
+bc_family(::Type{<:DerivativeBoundaryCondition}) = DerivativeBoundaryCondition
 
 bc_type(::Type{<:Dirichlet}) = Dirichlet
 bc_type(::Type{<:Neumann}) = Neumann
 bc_type(::Type{<:Robin}) = Robin
 
 function make_bc!(A, b, boundary::T, surf, domain, ids; kwargs...) where {T}
-    return make_bc!(bc_type(T), A, b, boundary, surf, domain, ids; kwargs...)
+    return make_bc!(bc_family(T), A, b, boundary, surf, domain, ids; kwargs...)
 end
 
 function make_bc!(::Type{Dirichlet}, A, b, boundary, surf, domain, ids; kwargs...)
-    make_bc_dirichlet!(A, b, ids, boundary())
-    return A
+    return write_bc_dirichlet!(A, b, ids, boundary)
 end
 
-function make_bc!(::Type{Neumann}, A, b, boundary, surf, domain, ids; kwargs...)
-    shadow_op = hasproperty(boundary, :shadow_op) ? boundary.shadow_op : nothing
-    make_bc_neumann!(A, b, surf, domain, ids, boundary(); shadow_op=shadow_op, kwargs...)
-    return A
+function make_bc!(::Type{DerivativeBoundaryCondition}, A, b, boundary, surf, domain, ids;
+        scheme = nothing, kwargs...)
+    # scheme comes from kwargs, passed down from LinearProblem
+    weights = compute_derivative_weights(surf, domain, scheme; kwargs...)
+    return write_bc_derivative!(
+        bc_type(typeof(boundary)), A, b, ids, weights, boundary; kwargs...)
 end
 
-function make_bc!(::Type{Robin}, A, b, boundary, surf, domain, ids; kwargs...)
-    shadow_op = hasproperty(boundary, :shadow_op) ? boundary.shadow_op : nothing
-    make_bc_robin!(A, b, α(boundary), β(boundary), surf, domain, ids, boundary();
-                   shadow_op=shadow_op, kwargs...)
-    return A
+function write_bc_derivative!(::Type{Neumann}, A, b, ids, weights, boundary; kwargs...)
+    return write_bc_neumann!(A, b, ids, weights, boundary; kwargs...)
 end
 
-# ============================================================================
-# BC Type Implementations
-# ============================================================================
-
-function make_bc_dirichlet!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        ids, value) where {TA, TB}
-    for i in ids
-        A[i, :] .= zero(TA)
-        A[i, i] = one(TA)
-        b[i] = value isa AbstractVector ? value[i - first(ids) + 1] : convert(TB, value)
-    end
+function write_bc_derivative!(::Type{Robin}, A, b, ids, weights, boundary; kwargs...)
+    return write_bc_robin!(A, b, ids, weights, boundary; kwargs...)
 end
 
 # ============================================================================
@@ -64,19 +57,21 @@ derivative_method(::ShadowPoints{2}) = ShadowPointsSecondOrder
 
 function compute_derivative_weights(surf, domain, shadow_op; kwargs...)
     return compute_derivative_weights(derivative_method(shadow_op),
-                                     surf, domain, shadow_op; kwargs...)
+        surf, domain, shadow_op; kwargs...)
 end
 
 # Standard directional derivative
-function compute_derivative_weights(::Type{StandardDerivative}, surf, domain, ::Nothing; kwargs...)
+function compute_derivative_weights(
+        ::Type{StandardDerivative}, surf, domain, ::Nothing; kwargs...)
     d = directional(coordinates(domain.cloud), coordinates(surf), normals(surf);
-                   k = get(kwargs, :k, 40))
+        k = get(kwargs, :k, 40))
     update_weights!(d)
     return d.weights
 end
 
 # First order shadow points: (u_surf - u_shadow) / Δ = ∂u/∂n
-function compute_derivative_weights(::Type{ShadowPointsFirstOrder}, surf, domain, shadow_op; kwargs...)
+function compute_derivative_weights(
+        ::Type{ShadowPointsFirstOrder}, surf, domain, shadow_op; kwargs...)
     coords = _coords(domain.cloud)
 
     # Generate shadow points
@@ -97,14 +92,15 @@ function compute_derivative_weights(::Type{ShadowPointsFirstOrder}, surf, domain
 end
 
 # Second order shadow points: (3·u_surf - 4·u_shadow1 + u_shadow2) / (2·Δ) = ∂u/∂n
-function compute_derivative_weights(::Type{ShadowPointsSecondOrder}, surf, domain, shadow_op; kwargs...)
+function compute_derivative_weights(
+        ::Type{ShadowPointsSecondOrder}, surf, domain, shadow_op; kwargs...)
     coords = _coords(domain.cloud)
     Δx = get_spacing(shadow_op)
 
     # Generate both shadow layers
     shadow_points1 = generate_shadows(surf, shadow_op)
     shadow_points2 = generate_shadows(surf,
-                                     ShadowPoints(ConstantSpacing(2 * Δx), 2))
+        ShadowPoints(ConstantSpacing(2 * Δx), 2))
 
     # Build interpolation weights
     surf_weights = regrid(coords, _coords(surf); kwargs...)
@@ -130,25 +126,32 @@ get_spacing(shadow_op) = ustrip(shadow_op.Δ.Δx)
 # BC Implementations (Simplified with Holy Traits)
 # ============================================================================
 
-function make_bc_neumann!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        surf, domain, ids, flux_value; shadow_op = nothing, kwargs...) where {TA, TB}
-    weights = compute_derivative_weights(surf, domain, shadow_op; kwargs...)
-
+function write_bc_dirichlet!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
+        ids, boundary) where {TA, TB}
     for i in ids
-        A[i, :] .= weights[i, :]
-        b[i] = convert(TB, flux_value)
+        A[i, :] .= zero(TA)
+        A[i, i] = one(TA)
+        b[i] = boundary() isa AbstractVector ? boundary()[i - first(ids) + 1] :
+               convert(TB, boundary())
     end
 end
 
-function make_bc_robin!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        α_val, β_val, surf, domain, ids, value; shadow_op = nothing, kwargs...) where {
-        TA, TB}
-    weights = compute_derivative_weights(surf, domain, shadow_op; kwargs...)
+function write_bc_neumann!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
+        ids, weights, boundary; shadow_op = nothing, kwargs...) where {TA, TB}
+    for i in ids
+        A[i, :] .= weights[i, :]
+        b[i] = convert(TB, boundary())
+    end
+end
 
+function write_bc_robin!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
+        ids, weights, boundary; kwargs...) where {TA, TB}
+    α_val = convert(TA, α(boundary))
+    β_val = convert(TA, β(boundary))
     for i in ids
         A[i, :] .= convert(TA, β_val) .* weights[i, :]
         A[i, i] += convert(TA, α_val)
-        b[i] = convert(TB, value)
+        b[i] = convert(TB, boundary())
     end
 end
 
