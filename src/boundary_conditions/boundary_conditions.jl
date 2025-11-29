@@ -17,7 +17,7 @@ function make_bc!(A, b, boundary::T, surf, domain, ids; kwargs...) where {T}
 end
 
 function make_bc!(::Type{Dirichlet}, A, b, boundary, surf, domain, ids; kwargs...)
-    return write_bc_dirichlet!(A, b, ids, boundary)
+    return write_bc_dirichlet!(A, b, ids, boundary, surf)
 end
 
 function make_bc!(::Type{DerivativeBoundaryCondition}, A, b, boundary, surf, domain, ids;
@@ -25,15 +25,15 @@ function make_bc!(::Type{DerivativeBoundaryCondition}, A, b, boundary, surf, dom
     # scheme comes from kwargs, passed down from LinearProblem
     weights = compute_derivative_weights(surf, domain, scheme; kwargs...)
     return write_bc_derivative!(
-        bc_type(typeof(boundary)), A, b, ids, weights, boundary; kwargs...)
+        bc_type(typeof(boundary)), A, b, ids, weights, boundary, surf; kwargs...)
 end
 
-function write_bc_derivative!(::Type{Neumann}, A, b, ids, weights, boundary; kwargs...)
-    return write_bc_neumann!(A, b, ids, weights, boundary; kwargs...)
+function write_bc_derivative!(::Type{Neumann}, A, b, ids, weights, boundary, surf; kwargs...)
+    return write_bc_neumann!(A, b, ids, weights, boundary, surf; kwargs...)
 end
 
-function write_bc_derivative!(::Type{Robin}, A, b, ids, weights, boundary; kwargs...)
-    return write_bc_robin!(A, b, ids, weights, boundary; kwargs...)
+function write_bc_derivative!(::Type{Robin}, A, b, ids, weights, boundary, surf; kwargs...)
+    return write_bc_robin!(A, b, ids, weights, boundary, surf; kwargs...)
 end
 
 # ============================================================================
@@ -126,32 +126,56 @@ get_spacing(shadow_op) = ustrip(shadow_op.Δ.Δx)
 # BC Implementations (Simplified with Holy Traits)
 # ============================================================================
 
+# Helper function to extract BC value at a specific index
+function get_bc_value_at_index(value::Number, surf, ids, i)
+    # Scalar value - return as-is
+    return value
+end
+
+function get_bc_value_at_index(value::AbstractVector, surf, ids, i)
+    # Vector of values - index into it
+    local_idx = i - first(ids) + 1
+    return value[local_idx]
+end
+
+function get_bc_value_at_index(value::Function, surf, ids, i)
+    # Function - evaluate at surface point
+    local_idx = i - first(ids) + 1
+    point = coordinates(surf)[local_idx]
+    return value(point)
+end
+
 function write_bc_dirichlet!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        ids, boundary) where {TA, TB}
+        ids, boundary, surf) where {TA, TB}
+    bc_value = boundary()  # Can be scalar, vector, or function
+
     for i in ids
         A[i, :] .= zero(TA)
         A[i, i] = one(TA)
-        b[i] = boundary() isa AbstractVector ? boundary()[i - first(ids) + 1] :
-               convert(TB, boundary())
+        b[i] = convert(TB, get_bc_value_at_index(bc_value, surf, ids, i))
     end
 end
 
 function write_bc_neumann!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        ids, weights, boundary; shadow_op = nothing, kwargs...) where {TA, TB}
+        ids, weights, boundary, surf; kwargs...) where {TA, TB}
+    bc_value = boundary()  # Can be scalar, vector, or function
+
     for i in ids
         A[i, :] .= weights[i, :]
-        b[i] = convert(TB, boundary())
+        b[i] = convert(TB, get_bc_value_at_index(bc_value, surf, ids, i))
     end
 end
 
 function write_bc_robin!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        ids, weights, boundary; kwargs...) where {TA, TB}
+        ids, weights, boundary, surf; kwargs...) where {TA, TB}
     α_val = convert(TA, α(boundary))
     β_val = convert(TA, β(boundary))
+    bc_value = boundary()  # Can be scalar, vector, or function
+
     for i in ids
         A[i, :] .= convert(TA, β_val) .* weights[i, :]
         A[i, i] += convert(TA, α_val)
-        b[i] = convert(TB, boundary())
+        b[i] = convert(TB, get_bc_value_at_index(bc_value, surf, ids, i))
     end
 end
 
