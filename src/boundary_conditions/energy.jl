@@ -101,13 +101,13 @@ end
     Adiabatic <: Neumann
 
 Thermally insulated boundary: ∂T/∂n = 0
+
+The numerical method (standard derivative vs shadow points) is controlled
+by the `scheme` parameter passed to `LinearProblem`, not by the BC itself.
 """
 struct Adiabatic <: Neumann end
 
-# Constructor
-Adiabatic() = Adiabatic()
-
-# bc_type(::Adiabatic) = Neumann()
+# BC value accessor
 (bc::Adiabatic)() = 0.0  # Zero flux
 
 # LinearProblem: Pass shadow_op to make_bc_neumann!

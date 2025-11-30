@@ -25,9 +25,10 @@ include("utils.jl")
 abstract type AbstractModel end
 
 #################### Boundary Conditions ####################
-export AbstractBoundaryCondition
-
+include("boundary_conditions/boundary_derivatives.jl")
 include("boundary_conditions/boundary_conditions.jl")
+
+export AbstractBoundaryCondition
 
 #################### Domains ####################
 include("domain.jl")
