@@ -1,63 +1,81 @@
 # ============================================================================
-# Temperature (Dirichlet)
+# Energy Boundary Conditions
+# ============================================================================
+# User-friendly aliases for generic parametric BC types in energy problems.
+
+# ============================================================================
+# Temperature (Dirichlet) - alias for FixedValue{EnergyPhysics}
 # ============================================================================
 
 """
-    Temperature{T} <: Dirichlet
+    Temperature{T}
 
 Prescribed temperature boundary condition.
+
+This is an alias for `FixedValue{EnergyPhysics, T}`.
+
+# Examples
+```julia
+Temperature(100.0)           # Fixed temperature of 100
+Temperature(x -> sin(x[1]))  # Spatially varying temperature
+```
 """
-struct Temperature{T} <: Dirichlet
-    temperature::T
-end
+const Temperature{T} = FixedValue{EnergyPhysics, T}
 
-(bc::Temperature)() = bc.temperature
-# (bc::Temperature{<:Function})(x, t) = bc.temperature(x, t)
+# Note: Temperature(value) constructor works automatically via the FixedValue inner constructor
 
-# Time evolution - return closure for ODE: (du, u, p, t) -> modify u
-# function make_bc(boundary::Temperature, surf, domain, ids; kwargs...)
-#     T = boundary.temperature
-#     (du, u, p, t) -> (u[ids] .= T; nothing)
-# end
-# function make_bc(boundary::Temperature{<:Function}, surf, domain, ids; kwargs...)
-#     T_func = boundary.temperature
-#     (du, u, p, t) -> (u[ids] .= T_func(surf, t); nothing)
-# end
-
-Base.show(io::IO, bc::Temperature) = print(io, "Temperature: $(bc.temperature)")
+Base.show(io::IO, bc::Temperature) = print(io, "Temperature: $(bc.value)")
 
 # ============================================================================
-# HeatFlux (Neumann)
+# HeatFlux (Neumann) - alias for FixedGradient{EnergyPhysics}
 # ============================================================================
 
 """
-    HeatFlux{Q} <: Neumann
+    HeatFlux{Q}
 
 Prescribed heat flux boundary condition (∂T/∂n = q).
+
+This is an alias for `FixedGradient{EnergyPhysics, Q}`.
+
+# Examples
+```julia
+HeatFlux(500.0)              # Constant heat flux
+HeatFlux(x -> x[1] * 100.0)  # Spatially varying flux
+```
 """
-struct HeatFlux{Q} <: Neumann
-    heat_flux::Q
-end
+const HeatFlux{Q} = FixedGradient{EnergyPhysics, Q}
 
-HeatFlux(q) = HeatFlux(q)
+# Note: HeatFlux(q) constructor works automatically via the FixedGradient inner constructor
 
-(bc::HeatFlux)() = bc.heat_flux
-# (bc::HeatFlux{<:Function})(x, t) = bc.heat_flux(x, t)
-
-# function make_bc!(A, b, boundary::HeatFlux, surf, domain, ids; kwargs...)
-#     make_bc_neumann!(A, b, surf, domain, ids, boundary.heat_flux;
-#         shadow_op = boundary.shadow_op, kwargs...)
-# end
-# function make_bc!(A, b, boundary::HeatFlux{<:Function}, surf, domain, ids; kwargs...)
-#     q_func = boundary.heat_flux
-#     make_bc_neumann!(A, b, surf, domain, ids, q_func;
-#         shadow_op = boundary.shadow_op, kwargs...)
-# end
-
-Base.show(io::IO, bc::HeatFlux) = print(io, "HeatFlux: $(bc.heat_flux)")
+Base.show(io::IO, bc::HeatFlux) = print(io, "HeatFlux: $(bc.gradient)")
 
 # ============================================================================
-# Convection (Robin)
+# Adiabatic (Neumann) - alias for ZeroGradient{EnergyPhysics}
+# ============================================================================
+
+"""
+    Adiabatic
+
+Thermally insulated boundary: ∂T/∂n = 0
+
+This is an alias for `ZeroGradient{EnergyPhysics}`.
+
+The numerical method (standard derivative vs shadow points) is controlled
+by the `scheme` parameter passed to `LinearProblem`, not by the BC itself.
+
+# Examples
+```julia
+Adiabatic()  # Insulated boundary
+```
+"""
+const Adiabatic = ZeroGradient{EnergyPhysics}
+
+# Note: Adiabatic() constructor works automatically via the const alias
+
+Base.show(io::IO, ::Adiabatic) = print(io, "Adiabatic")
+
+# ============================================================================
+# Convection (Robin) - physics-specific type
 # ============================================================================
 
 """
@@ -65,7 +83,18 @@ Base.show(io::IO, bc::HeatFlux) = print(io, "HeatFlux: $(bc.heat_flux)")
 
 Convective heat transfer: h·T + k·∂T/∂n = h·T∞
 
-Newton's law of cooling at boundary.
+Newton's law of cooling at boundary. This is a physics-specific Robin BC
+with semantic field names, not a generic `MixedBC`.
+
+# Fields
+- `h`: Heat transfer coefficient [W/(m²·K)]
+- `k`: Thermal conductivity [W/(m·K)]
+- `T∞`: Ambient temperature [K or °C]
+
+# Examples
+```julia
+Convection(25.0, 0.6, 20.0)  # h=25, k=0.6, T∞=20
+```
 """
 struct Convection{H, K, T} <: Robin
     h::H   # heat transfer coefficient
@@ -79,75 +108,11 @@ struct Convection{H, K, T} <: Robin
     end
 end
 
-# bc_type(bc::Convection) = Robin(bc.h, bc.k)
+physics_domain(::Type{<:Convection}) = EnergyPhysics()
 α(bc::Convection) = bc.h
 β(bc::Convection) = bc.k
 (bc::Convection)() = bc.h * bc.T∞
 
-# function make_bc!(A, b, boundary::Convection, surf, domain, ids; kwargs...)
-#     make_bc_robin!(A, b, boundary.h, boundary.k, surf, domain, ids, bc_value(boundary);
-#         shadow_op = boundary.shadow_op, kwargs...)
-# end
-
 function Base.show(io::IO, bc::Convection)
-    print(io, "Convection: h=$(bc.h), k=$(bc.k), T∞=$(bc.T∞)")
+    return print(io, "Convection: h=$(bc.h), k=$(bc.k), T∞=$(bc.T∞)")
 end
-
-# ============================================================================
-# Adiabatic (Neumann with zero flux)
-# ============================================================================
-
-"""
-    Adiabatic <: Neumann
-
-Thermally insulated boundary: ∂T/∂n = 0
-
-The numerical method (standard derivative vs shadow points) is controlled
-by the `scheme` parameter passed to `LinearProblem`, not by the BC itself.
-"""
-struct Adiabatic <: Neumann end
-
-# BC value accessor
-(bc::Adiabatic)() = 0.0  # Zero flux
-
-# LinearProblem: Pass shadow_op to make_bc_neumann!
-# function make_bc!(A, b, boundary::Adiabatic, surf, domain, ids; kwargs...)
-#     make_bc_neumann!(
-#         A, b, surf, domain, ids, 0.0; shadow_op = boundary.shadow_op, kwargs...)
-# end
-
-# # Time evolution - specialized implementations
-# function make_bc(boundary::Adiabatic{<:ShadowPoints}, surf, domain, ids; kwargs...)
-#     shadow_points = generate_shadows(surf, boundary.shadow_op)
-#     coords = _coords(domain.cloud)
-#     method = KNearestSearch(domain.cloud, 40)
-#     adjl = search.(shadow_points, Ref(method))
-#     d = regrid(_ustrip(coords), _ustrip(_coords(shadow_points)); adjl = adjl)
-#     update_weights!(d)
-
-#     function bc(du, u, p, t)
-#         u[ids] .= d(u)
-#         return nothing
-#     end
-#     return bc
-# end
-
-# function make_bc(boundary::Adiabatic, surf, domain, ids; kwargs...)
-#     println("creating Adiabatic BC")
-#     d = directional(_coords(domain.cloud), _coords(surf), normals(surf); kwargs...)
-#     update_weights!(d)
-#     w = d.weights
-#     wi = diag(w)
-#     w[diagind(w)] .= 0
-#     dropzeros!(w)
-
-#     function bc(du, u, p, t)
-#         # TODO is this correct?
-#         #du[surf_ids] .= d(u) .- u[surf_ids]
-#         u[ids] .= (w * u) ./ wi
-#         return nothing
-#     end
-#     return bc
-# end
-
-Base.show(io::IO, ::Adiabatic) = print(io, "Adiabatic")

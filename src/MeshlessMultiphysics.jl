@@ -24,11 +24,20 @@ include("utils.jl")
 #################### Abstract Types ####################
 abstract type AbstractModel end
 
+#################### Physics Traits ####################
+include("boundary_conditions/physics_traits.jl")
+
+export PhysicsDomain, EnergyPhysics, FluidPhysics, WallPhysics, GenericPhysics
+export physics_domain, is_compatible
+
 #################### Boundary Conditions ####################
 include("boundary_conditions/boundary_derivatives.jl")
 include("boundary_conditions/boundary_conditions.jl")
+include("boundary_conditions/generic_bcs.jl")
 
-export AbstractBoundaryCondition
+export AbstractBoundaryCondition, Dirichlet, Neumann, Robin, DerivativeBoundaryCondition
+export FixedValue, ZeroGradient, FixedGradient, MixedBC
+export bc_type
 
 #################### Domains ####################
 include("domain.jl")
@@ -38,7 +47,7 @@ include("boundary_conditions/walls.jl")
 export Wall
 
 include("boundary_conditions/fluids.jl")
-export VelocityInlet, PressureOutlet
+export VelocityInlet, VelocityOutlet, PressureOutlet
 
 include("boundary_conditions/energy.jl")
 export Adiabatic, Temperature, HeatFlux, Convection

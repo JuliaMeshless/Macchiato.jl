@@ -4,6 +4,7 @@
     cₚ::C
 end
 
+physics_domain(::Type{<:SolidEnergy}) = EnergyPhysics()
 _num_vars(::SolidEnergy, _) = 1
 
 function make_f(model::SolidEnergy, domain; neighbors = 40, kwargs...)

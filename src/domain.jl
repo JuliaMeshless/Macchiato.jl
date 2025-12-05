@@ -6,13 +6,30 @@ struct Domain{M <: Manifold, C <: CRS}
 end
 
 function Domain(cloud::PointCloud, boundaries, models)
+    # Validate that all BC surfaces exist in the point cloud
     for bc_surf_name in keys(boundaries)
         if !hassurface(cloud.boundary, bc_surf_name)
-            throw(ArgumentError("The boundary condition $bc_name is not associated with a `PointCloud` boundary."))
+            throw(ArgumentError("The boundary condition $bc_surf_name is not associated with a `PointCloud` boundary."))
         end
     end
+
     # make sure it is a vector so we can push! to it later
     models = models isa Vector ? models : [models]
+
+    # Validate BC-model physics compatibility
+    for model in models
+        model_physics = physics_domain(typeof(model))
+        for (surf_name, bc) in boundaries
+            bc_physics = physics_domain(typeof(bc))
+            if !is_compatible(bc_physics, model_physics)
+                throw(ArgumentError(
+                    "Boundary condition $(typeof(bc)) on :$surf_name is incompatible " *
+                    "with model $(typeof(model)). " *
+                    "BC physics: $bc_physics, Model physics: $model_physics"
+                ))
+            end
+        end
+    end
 
     ids_bcs = Dict{Symbol, Tuple{UnitRange, AbstractBoundaryCondition}}()
     offset = 0

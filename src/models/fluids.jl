@@ -34,6 +34,7 @@ function IncompressibleNavierStokes(μ::M, ρ) where {M <: Real}
     IncompressibleNavierStokes(NewtonianViscosity(μ), ρ)
 end
 
+physics_domain(::Type{<:IncompressibleNavierStokes}) = FluidPhysics()
 _num_vars(::IncompressibleNavierStokes, dim::Int) = dim + 1
 
 function make_f(

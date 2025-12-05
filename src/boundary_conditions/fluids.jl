@@ -1,49 +1,79 @@
 # ============================================================================
-# VelocityInlet (Dirichlet)
+# Fluid Boundary Conditions
+# ============================================================================
+# User-friendly aliases for generic parametric BC types in fluid problems.
+
+# ============================================================================
+# VelocityInlet (Dirichlet) - alias for FixedValue{FluidPhysics}
 # ============================================================================
 
 """
-    VelocityInlet{T} <: Dirichlet
+    VelocityInlet{T}
 
 Prescribed velocity at inlet boundary.
+
+This is an alias for `FixedValue{FluidPhysics, T}`.
+
+# Examples
+```julia
+VelocityInlet(1.0)           # Fixed velocity of 1.0
+VelocityInlet(x -> x[2])     # Parabolic profile
+```
 """
-struct VelocityInlet{T} <: Dirichlet
-    v::T
-end
+const VelocityInlet{T} = FixedValue{FluidPhysics, T}
 
-(bc::VelocityInlet)() = bc.v
+# Note: VelocityInlet(v) constructor works automatically via the FixedValue inner constructor
 
-# Time evolution - return closure for ODE: (du, u, p, t) -> modify u
-# function make_bc(boundary::VelocityInlet, surf, domain::Domain{Dim}; kwargs...) where {Dim}
-#     s = domain.cloud[surf]
-#     surf_ids = only(s.points.indices)
-#     v = boundary.v
-#     (du, u, p, t) -> (u[surf_ids] .= v; nothing)
-# end
-
-Base.show(io::IO, bc::VelocityInlet) = print(io, "VelocityInlet: $(bc.v)")
+Base.show(io::IO, bc::VelocityInlet) = print(io, "VelocityInlet: $(bc.value)")
 
 # ============================================================================
-# PressureOutlet (Dirichlet)
+# VelocityOutlet (Neumann) - alias for ZeroGradient{FluidPhysics}
+# ============================================================================
+
+"""
+    VelocityOutlet
+
+Zero-gradient velocity outlet: ∂v/∂n = 0
+
+This is an alias for `ZeroGradient{FluidPhysics}`.
+
+Use this for outflow boundaries where velocity gradients should be zero.
+
+# Examples
+```julia
+VelocityOutlet()  # Zero-gradient outflow
+```
+"""
+const VelocityOutlet = ZeroGradient{FluidPhysics}
+
+# Note: VelocityOutlet() constructor works automatically via the const alias
+
+Base.show(io::IO, ::VelocityOutlet) = print(io, "VelocityOutlet")
+
+# ============================================================================
+# PressureOutlet (Dirichlet) - physics-specific type
 # ============================================================================
 
 """
     PressureOutlet{T} <: Dirichlet
 
 Prescribed pressure at outlet boundary.
+
+This is a distinct type (not an alias for `FixedValue{FluidPhysics}`) because
+in incompressible flow, pressure and velocity are separate fields. A
+`PressureOutlet` applies to the pressure DOF, while `VelocityInlet` applies
+to velocity DOFs.
+
+# Examples
+```julia
+PressureOutlet(0.0)  # Zero gauge pressure at outlet
+```
 """
 struct PressureOutlet{T} <: Dirichlet
     p::T
 end
 
+physics_domain(::Type{<:PressureOutlet}) = FluidPhysics()
 (bc::PressureOutlet)() = bc.p
-
-# Time evolution - return closure for ODE: (du, u, p, t) -> modify u
-# function make_bc(boundary::PressureOutlet, surf, domain::Domain{Dim}; kwargs...) where {Dim}
-#     s = domain.cloud[surf]
-#     ids = only(s.points.indices)
-#     p_val = boundary.p
-#     (du, u, p, t) -> (u[ids] .= p_val; nothing)
-# end
 
 Base.show(io::IO, bc::PressureOutlet) = print(io, "PressureOutlet: $(bc.p)")

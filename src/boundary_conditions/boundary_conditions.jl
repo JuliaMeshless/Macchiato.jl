@@ -5,31 +5,24 @@ abstract type Dirichlet <: AbstractBoundaryCondition end
 abstract type Neumann <: DerivativeBoundaryCondition end
 abstract type Robin <: DerivativeBoundaryCondition end
 
-bc_family(::Type{<:Dirichlet}) = Dirichlet
-bc_family(::Type{<:DerivativeBoundaryCondition}) = DerivativeBoundaryCondition
-
-bc_type(::Type{<:Dirichlet}) = Dirichlet
+# Trait for dispatching Neumann vs Robin after shared derivative weight computation
 bc_type(::Type{<:Neumann}) = Neumann
 bc_type(::Type{<:Robin}) = Robin
 
-function make_bc!(A, b, boundary::T, surf, domain, ids; kwargs...) where {T}
-    return make_bc!(bc_family(T), A, b, boundary, surf, domain, ids; kwargs...)
-end
-
-function make_bc!(::Type{Dirichlet}, A, b, boundary, surf, domain, ids; kwargs...)
+# Dirichlet: directly write the BC (no derivative weights needed)
+function make_bc!(A, b, boundary::Dirichlet, surf, domain, ids; kwargs...)
     return write_bc_dirichlet!(A, b, ids, boundary, surf)
 end
 
-function make_bc!(::Type{DerivativeBoundaryCondition}, A, b, boundary, surf, domain, ids;
+# DerivativeBoundaryCondition: compute weights first, then dispatch on Neumann vs Robin
+function make_bc!(A, b, boundary::DerivativeBoundaryCondition, surf, domain, ids;
         scheme = nothing, kwargs...)
-    # scheme comes from kwargs, passed down from LinearProblem
     weights = compute_derivative_weights(surf, domain, scheme; kwargs...)
     return write_bc_derivative!(
         bc_type(typeof(boundary)), A, b, ids, weights, boundary, surf; kwargs...)
 end
 
-function write_bc_derivative!(
-        ::Type{Neumann}, A, b, ids, weights, boundary, surf; kwargs...)
+function write_bc_derivative!(::Type{Neumann}, A, b, ids, weights, boundary, surf; kwargs...)
     return write_bc_neumann!(A, b, ids, weights, boundary, surf; kwargs...)
 end
 
