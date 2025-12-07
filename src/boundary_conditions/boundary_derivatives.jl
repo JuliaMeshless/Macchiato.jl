@@ -10,56 +10,27 @@ derivative_method(::Nothing) = StandardDerivative
 derivative_method(::WhatsThePoint.ShadowPoints{1}) = ShadowPointsFirstOrder
 derivative_method(::WhatsThePoint.ShadowPoints{2}) = ShadowPointsSecondOrder
 
-# Extract spacing value from shadow operator
-function get_spacing(shadow_op, surf)
-    return ustrip.(shadow_op.Δ.(_coords(surf)))
-end
-
-# Prepare context for derivative computation
-function prepare_derivative_context(surf, domain, shadow_op)
-    return prepare_derivative_context(derivative_method(shadow_op), surf, domain, shadow_op)
-end
-
-function prepare_derivative_context(::Type{StandardDerivative}, surf, domain, ::Nothing)
-    return (
-        normals = normal(surf),
-        domain = domain,
-        surf = surf
-    )
-end
-
-function prepare_derivative_context(
-        ::Type{<:ShadowPointsMethod},
-        surf, domain, shadow_op)
-    return (
-        normals = normal(surf),
-        spacing = get_spacing(shadow_op, surf),
-        domain = domain,
-        surf = surf
-    )
-end
-
 # Compute local weights for a single point
 function compute_local_derivative_weights(
-        surf, domain, shadow_op, A, global_i, local_i, ctx;
+        surf, domain, shadow_op, A, global_i, local_i, normals;
         kwargs...)::Tuple{Vector{Int}, Vector{Float64}}
     return compute_local_derivative_weights(derivative_method(shadow_op),
-        ctx, A, global_i, local_i; kwargs...)
+        surf, domain, shadow_op, A, global_i, local_i, normals; kwargs...)
 end
 
 # Standard directional derivative
 function compute_local_derivative_weights(
-        ::Type{StandardDerivative}, ctx, A, global_i, local_i; kwargs...)
+        ::Type{StandardDerivative}, surf, domain, shadow_op, A, global_i, local_i, normals; kwargs...)
 
     # Get neighbors from A (assuming structural symmetry)
     nbs = view(A.rowval, A.colptr[global_i]:(A.colptr[global_i + 1] - 1))
 
     # Get coords
-    surf_pt = get_node_coords(ctx.surf, local_i)
-    nbs_coords = [get_node_coords(ctx.domain.cloud, nb) for nb in nbs]
+    surf_pt = get_node_coords(surf, local_i)
+    nbs_coords = [get_node_coords(domain.cloud, nb) for nb in nbs]
 
     # Compute weights
-    n = ustrip(ctx.normals[local_i])
+    n = ustrip(normals[local_i])
     d = directional(nbs_coords, [surf_pt], n)
 
     # d.weights is (1, length(nbs))
@@ -68,14 +39,14 @@ end
 
 # First order shadow points
 function compute_local_derivative_weights(
-        ::Type{ShadowPointsFirstOrder}, ctx, A, global_i, local_i; kwargs...)
+        ::Type{ShadowPointsFirstOrder}, surf, domain, shadow_op, A, global_i, local_i, normals; kwargs...)
     nbs = view(A.rowval, A.colptr[global_i]:(A.colptr[global_i + 1] - 1))
 
-    surf_pt = get_node_coords(ctx.surf, local_i)
-    nbs_coords = [get_node_coords(ctx.domain.cloud, nb) for nb in nbs]
+    surf_pt = get_node_coords(surf, local_i)
+    nbs_coords = [get_node_coords(domain.cloud, nb) for nb in nbs]
 
-    n = ustrip(ctx.normals[local_i])
-    d = ctx.spacing[local_i]
+    n = ustrip(normals[local_i])
+    d = ustrip(shadow_op.Δ(surf_pt))
 
     # Shadow point
     shadow_pt = surf_pt .- n .* d
@@ -98,14 +69,14 @@ end
 
 # Second order shadow points
 function compute_local_derivative_weights(
-        ::Type{ShadowPointsSecondOrder}, ctx, A, global_i, local_i; kwargs...)
+        ::Type{ShadowPointsSecondOrder}, surf, domain, shadow_op, A, global_i, local_i, normals; kwargs...)
     nbs = view(A.rowval, A.colptr[global_i]:(A.colptr[global_i + 1] - 1))
 
-    surf_pt = get_node_coords(ctx.surf, local_i)
-    nbs_coords = [get_node_coords(ctx.domain.cloud, nb) for nb in nbs]
+    surf_pt = get_node_coords(surf, local_i)
+    nbs_coords = [get_node_coords(domain.cloud, nb) for nb in nbs]
 
-    n = ustrip(ctx.normals[local_i])
-    d = ctx.spacing[local_i]
+    n = ustrip(normals[local_i])
+    d = ustrip(shadow_op.Δ(surf_pt))
 
     shadow_pt1 = surf_pt .- n .* d
     shadow_pt2 = surf_pt .- n .* (2 * d)

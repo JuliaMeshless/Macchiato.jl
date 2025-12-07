@@ -69,11 +69,11 @@ end
 function write_bc_neumann!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
         ids, boundary, surf, domain, scheme; kwargs...) where {TA, TB}
     bc_value = boundary()  # Can be scalar, vector, or function
-    ctx = prepare_derivative_context(surf, domain, scheme)
+    normals = normal(surf)
 
     for (local_i, global_i) in enumerate(ids)
         nbs, weights = compute_local_derivative_weights(
-            surf, domain, scheme, A, global_i, local_i, ctx; kwargs...)
+            surf, domain, scheme, A, global_i, local_i, normals; kwargs...)
 
         sv = SparseVector(size(A, 2), nbs, weights)
         A[global_i, :] = sv
@@ -87,11 +87,11 @@ function write_bc_robin!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
     α_val = convert(TA, α(boundary))
     β_val = convert(TA, β(boundary))
     bc_value = boundary()  # Can be scalar, vector, or function
-    ctx = prepare_derivative_context(surf, domain, scheme)
+    normals = normal(surf)
 
     for (local_i, global_i) in enumerate(ids)
         nbs, weights = compute_local_derivative_weights(
-            surf, domain, scheme, A, global_i, local_i, ctx; kwargs...)
+            surf, domain, scheme, A, global_i, local_i, normals; kwargs...)
 
         # Robin BC: β * ∂u/∂n + α * u = g
         robin_weights = convert(TA, β_val) .* weights
