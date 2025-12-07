@@ -23,18 +23,18 @@ end
 function make_bc!(::Type{DerivativeBoundaryCondition}, A, b, boundary, surf, domain, ids;
         scheme = nothing, kwargs...)
     # scheme comes from kwargs, passed down from LinearProblem
-    weights = compute_derivative_weights(surf, domain, scheme; kwargs...)
     return write_bc_derivative!(
-        bc_type(typeof(boundary)), A, b, ids, weights, boundary, surf; kwargs...)
+        bc_type(typeof(boundary)), A, b, ids, boundary, surf, domain, scheme; kwargs...)
 end
 
 function write_bc_derivative!(
-        ::Type{Neumann}, A, b, ids, weights, boundary, surf; kwargs...)
-    return write_bc_neumann!(A, b, ids, weights, boundary, surf; kwargs...)
+        ::Type{Neumann}, A, b, ids, boundary, surf, domain, scheme; kwargs...)
+    return write_bc_neumann!(A, b, ids, boundary, surf, domain, scheme; kwargs...)
 end
 
-function write_bc_derivative!(::Type{Robin}, A, b, ids, weights, boundary, surf; kwargs...)
-    return write_bc_robin!(A, b, ids, weights, boundary, surf; kwargs...)
+function write_bc_derivative!(
+        ::Type{Robin}, A, b, ids, boundary, surf, domain, scheme; kwargs...)
+    return write_bc_robin!(A, b, ids, boundary, surf, domain, scheme; kwargs...)
 end
 
 function get_bc_value_at_index(value::Number, surf, ids, i)
@@ -67,26 +67,40 @@ function write_bc_dirichlet!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
 end
 
 function write_bc_neumann!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        ids, weights, boundary, surf; kwargs...) where {TA, TB}
+        ids, boundary, surf, domain, scheme; kwargs...) where {TA, TB}
     bc_value = boundary()  # Can be scalar, vector, or function
+    ctx = prepare_derivative_context(surf, domain, scheme)
 
-    for i in ids
-        local_idx = i - first(ids) + 1
-        A[i, :] .= weights[local_idx, :]
-        b[i] = convert(TB, get_bc_value_at_index(bc_value, surf, ids, i))
+    for (local_i, global_i) in enumerate(ids)
+        nbs, weights = compute_local_derivative_weights(
+            surf, domain, scheme, A, global_i, local_i, ctx; kwargs...)
+
+        sv = SparseVector(size(A, 2), nbs, weights)
+        A[global_i, :] = sv
+
+        b[global_i] = convert(TB, get_bc_value_at_index(bc_value, surf, ids, global_i))
     end
 end
 
 function write_bc_robin!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        ids, weights, boundary, surf; kwargs...) where {TA, TB}
+        ids, boundary, surf, domain, scheme; kwargs...) where {TA, TB}
     α_val = convert(TA, α(boundary))
     β_val = convert(TA, β(boundary))
     bc_value = boundary()  # Can be scalar, vector, or function
+    ctx = prepare_derivative_context(surf, domain, scheme)
 
-    for i in ids
-        local_idx = i - first(ids) + 1
-        A[i, :] .= convert(TA, β_val) .* weights[local_idx, :]
-        A[i, i] += convert(TA, α_val)
-        b[i] = convert(TB, get_bc_value_at_index(bc_value, surf, ids, i))
+    for (local_i, global_i) in enumerate(ids)
+        nbs, weights = compute_local_derivative_weights(
+            surf, domain, scheme, A, global_i, local_i, ctx; kwargs...)
+
+        # Robin BC: β * ∂u/∂n + α * u = g
+        robin_weights = convert(TA, β_val) .* weights
+        diag_idx = searchsortedfirst(nbs, global_i)
+        robin_weights[diag_idx] += convert(TA, α_val)
+
+        sv = SparseVector(size(A, 2), nbs, robin_weights)
+        A[global_i, :] = sv
+
+        b[global_i] = convert(TB, get_bc_value_at_index(bc_value, surf, ids, global_i))
     end
 end

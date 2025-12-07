@@ -53,3 +53,15 @@ end
 _coords(vol::PointVolume) = _coords(vol.points.geoms)
 
 _ustrip(x::AbstractVector{<:AbstractVector}) = map(x -> ustrip.(x), x)
+
+function get_node_coords(cloud::Union{PointCloud{𝔼{2}}, PointSurface{𝔼{2}}}, i)
+    p = pointify(cloud)[i]
+    c = coords(p)
+    return ustrip.(SVector(c.x, c.y))
+end
+
+function get_node_coords(cloud::Union{PointCloud{𝔼{3}}, PointSurface{𝔼{3}}}, i)
+    p = pointify(cloud)[i]
+    c = coords(p)
+    return ustrip.(SVector(c.x, c.y, c.z))
+end

@@ -1,181 +1,129 @@
 abstract type DerivativeMethod end
 
 abstract type StandardDerivative <: DerivativeMethod end
-abstract type ShadowPointsFirstOrder <: DerivativeMethod end
-abstract type ShadowPointsSecondOrder <: DerivativeMethod end
+abstract type ShadowPointsMethod <: DerivativeMethod end
+abstract type ShadowPointsFirstOrder <: ShadowPointsMethod end
+abstract type ShadowPointsSecondOrder <: ShadowPointsMethod end
 
 # Trait accessor
 derivative_method(::Nothing) = StandardDerivative
-derivative_method(::ShadowPoints{1}) = ShadowPointsFirstOrder
-derivative_method(::ShadowPoints{2}) = ShadowPointsSecondOrder
-
-#This is tremendously inefficient because we are allocating I think
-#Normals should come from WhatsThePoint directly
-function surface_normals(surf)
-    normals_vec = ustrip.(normal(surf))
-    @assert all_equals(normals_vec) "All normals must be equal for the same surface"
-    return first(normals_vec)
-end
-
-function all_equals(v::Vector{<:AbstractVector})
-    length(v) == 1 && return true
-    first_elem = v[1]
-    @inbounds for elem in view(v, 2:length(v))
-        if elem != first_elem
-            return false
-        end
-    end
-    return true
-end
+derivative_method(::WhatsThePoint.ShadowPoints{1}) = ShadowPointsFirstOrder
+derivative_method(::WhatsThePoint.ShadowPoints{2}) = ShadowPointsSecondOrder
 
 # Extract spacing value from shadow operator
-# Note: shadow_op.Δ is a function that takes a point and returns spacing
-# We evaluate it at a representative point (first coordinate of the surface)
 function get_spacing(shadow_op, surf)
-    # Get first surface point as representative location
-    first_point = first(_coords(surf))
-    return ustrip(shadow_op.Δ(first_point))
+    return ustrip.(shadow_op.Δ.(_coords(surf)))
 end
 
-function compute_derivative_weights(surf, domain, shadow_op; kwargs...)
-    return compute_derivative_weights(derivative_method(shadow_op),
-        surf, domain, shadow_op; kwargs...)
+# Prepare context for derivative computation
+function prepare_derivative_context(surf, domain, shadow_op)
+    return prepare_derivative_context(derivative_method(shadow_op), surf, domain, shadow_op)
+end
+
+function prepare_derivative_context(::Type{StandardDerivative}, surf, domain, ::Nothing)
+    return (
+        normals = normal(surf),
+        domain = domain,
+        surf = surf
+    )
+end
+
+function prepare_derivative_context(
+        ::Type{<:ShadowPointsMethod},
+        surf, domain, shadow_op)
+    return (
+        normals = normal(surf),
+        spacing = get_spacing(shadow_op, surf),
+        domain = domain,
+        surf = surf
+    )
+end
+
+# Compute local weights for a single point
+function compute_local_derivative_weights(
+        surf, domain, shadow_op, A, global_i, local_i, ctx;
+        kwargs...)::Tuple{Vector{Int}, Vector{Float64}}
+    return compute_local_derivative_weights(derivative_method(shadow_op),
+        ctx, A, global_i, local_i; kwargs...)
 end
 
 # Standard directional derivative
-function compute_derivative_weights(
-        ::Type{StandardDerivative}, surf, domain, ::Nothing; kwargs...)
-    domain_coords = ustrip.(_coords(domain.cloud))
-    # println("domain_coords: ", domain_coords)
-    surf_coords = ustrip.(_coords(surf))
-    # println("surf_coords: ", surf_coords)
-    normals_vec = surface_normals(surf)
-    # println("normals_vec: ", normals_vec)
-    d = directional(domain_coords, surf_coords, normals_vec)
-    return d.weights
+function compute_local_derivative_weights(
+        ::Type{StandardDerivative}, ctx, A, global_i, local_i; kwargs...)
+
+    # Get neighbors from A (assuming structural symmetry)
+    nbs = view(A.rowval, A.colptr[global_i]:(A.colptr[global_i + 1] - 1))
+
+    # Get coords
+    surf_pt = get_node_coords(ctx.surf, local_i)
+    nbs_coords = [get_node_coords(ctx.domain.cloud, nb) for nb in nbs]
+
+    # Compute weights
+    n = ustrip(ctx.normals[local_i])
+    d = directional(nbs_coords, [surf_pt], n)
+
+    # d.weights is (1, length(nbs))
+    return nbs, d.weights[1, :]
 end
 
-# First order shadow points: (u_surf - u_shadow) / Δ = ∂u/∂n
-function compute_derivative_weights(
-        ::Type{ShadowPointsFirstOrder}, surf, domain, shadow_op; kwargs...)
-    # TODO:Strip units from all coordinates (temporary?)
-    coords = ustrip.(_coords(domain.cloud))
-    surf_coords = ustrip.(_coords(surf))
+# First order shadow points
+function compute_local_derivative_weights(
+        ::Type{ShadowPointsFirstOrder}, ctx, A, global_i, local_i; kwargs...)
+    nbs = view(A.rowval, A.colptr[global_i]:(A.colptr[global_i + 1] - 1))
 
-    # TODO: Get spacing and normal (dimensionless)
-    Δ = get_spacing(shadow_op, surf)
-    normal = surface_normals(surf)
+    surf_pt = get_node_coords(ctx.surf, local_i)
+    nbs_coords = [get_node_coords(ctx.domain.cloud, nb) for nb in nbs]
 
-    # TODO: Manually compute shadow points: shadow = surface - normal * Δ
-    # (WhatsThePoint's generate_shadows giving issues)
-    shadow_coords1 = map(surf_coords) do pt
-        pt .- normal .* Δ
-    end
+    n = ustrip(ctx.normals[local_i])
+    d = ctx.spacing[local_i]
 
-    # Build interpolation weights (all coordinates are now dimensionless)
-    surf_weights = regrid(coords, surf_coords; kwargs...)
-    update_weights!(surf_weights)
+    # Shadow point
+    shadow_pt = surf_pt .- n .* d
 
-    shadow1 = regrid(coords, shadow_coords1; kwargs...)
-    update_weights!(shadow1)
+    # Interpolation weights for surface point (regrid)
+    op_surf = regrid(nbs_coords, [surf_pt]; kwargs...)
+    update_weights!(op_surf)
+    w_surf = op_surf.weights[1, :]
 
-    # First-order finite difference
-    return columnwise_div(
-        surf_weights.weights .- shadow1.weights,
-        Δ
-    )
+    # Interpolation weights for shadow point
+    op_shadow = regrid(nbs_coords, [shadow_pt]; kwargs...)
+    update_weights!(op_shadow)
+    w_shadow = op_shadow.weights[1, :]
+
+    # Derivative weights: (w_surf - w_shadow) / d
+    w_deriv = (w_surf .- w_shadow) ./ d
+
+    return nbs, w_deriv
 end
 
-# Second order shadow points: (3·u_surf - 4·u_shadow1 + u_shadow2) / (2·Δ) = ∂u/∂n
-function compute_derivative_weights(
-        ::Type{ShadowPointsSecondOrder}, surf, domain, shadow_op; kwargs...)
-    # again needed to strip units (temporary?)
-    coords = ustrip.(_coords(domain.cloud))
-    surf_coords = ustrip.(_coords(surf))
+# Second order shadow points
+function compute_local_derivative_weights(
+        ::Type{ShadowPointsSecondOrder}, ctx, A, global_i, local_i; kwargs...)
+    nbs = view(A.rowval, A.colptr[global_i]:(A.colptr[global_i + 1] - 1))
 
-    # Get spacing and normal (dimensionless)
-    Δ_val = get_spacing(shadow_op, surf)
-    normal = surface_normals(surf)
+    surf_pt = get_node_coords(ctx.surf, local_i)
+    nbs_coords = [get_node_coords(ctx.domain.cloud, nb) for nb in nbs]
 
-    # Manually compute shadow points for both layers 
-    # First layer: shadow1 = surface - normal * Δ
-    shadow_coords1 = map(surf_coords) do pt
-        pt .- normal .* Δ_val
-    end
+    n = ustrip(ctx.normals[local_i])
+    d = ctx.spacing[local_i]
 
-    # Second layer: shadow2 = surface - normal * 2Δ
-    shadow_coords2 = map(surf_coords) do pt
-        pt .- normal .* (2 * Δ_val)
-    end
+    shadow_pt1 = surf_pt .- n .* d
+    shadow_pt2 = surf_pt .- n .* (2 * d)
 
-    # Build interpolation weights (all coordinates are now dimensionless)
-    surf_weights = regrid(coords, surf_coords; kwargs...)
-    update_weights!(surf_weights)
+    op_surf = regrid(nbs_coords, [surf_pt]; kwargs...)
+    update_weights!(op_surf)
+    w_surf = op_surf.weights[1, :]
 
-    shadow1 = regrid(coords, shadow_coords1; kwargs...)
-    update_weights!(shadow1)
+    op_shadow1 = regrid(nbs_coords, [shadow_pt1]; kwargs...)
+    update_weights!(op_shadow1)
+    w_shadow1 = op_shadow1.weights[1, :]
 
-    shadow2 = regrid(coords, shadow_coords2; kwargs...)
-    update_weights!(shadow2)
+    op_shadow2 = regrid(nbs_coords, [shadow_pt2]; kwargs...)
+    update_weights!(op_shadow2)
+    w_shadow2 = op_shadow2.weights[1, :]
 
-    # Second-order finite difference
-    return columnwise_div(
-        3 * surf_weights.weights .- 4 * shadow1.weights .+ shadow2.weights,
-        2 * Δ_val
-    )
-end
+    # (3*u_s - 4*u_sh1 + u_sh2) / 2d
+    w_deriv = (3 .* w_surf .- 4 .* w_shadow1 .+ w_shadow2) ./ (2 * d)
 
-# Helper functions for shadow points
-function columnwise_div(A::SparseMatrixCSC, B::AbstractVector)
-    I, J, V = findnz(A)
-    for idx in eachindex(V)
-        V[idx] /= B[I[idx]]
-    end
-    return sparse(I, J, V)
-end
-
-columnwise_div(A::SparseMatrixCSC, B::Number) = A ./ B
-
-### These are not used currently but may be useful in future (TODO)
-function replace_rows(A, weights, ids, offset)
-    I, J, V = findnz(A)
-    I2, J2, V2 = findnz(weights)
-    i = findall(i -> i ∈ ids, I)
-    i2 = findall(i -> i ∈ (ids .- offset), I2)
-    deleteat!(I, i)
-    deleteat!(J, i)
-    deleteat!(V, i)
-    append!(I, I2[i2] .+ offset)
-    append!(J, J2[i2])
-    append!(V, V2[i2])
-    return sparse(I, J, V)
-end
-
-function cone(cloud, surf, k)
-    all_points = _coords(cloud)
-    surf_points = _coords(surf)
-    normal = surface_normals(surf)
-    offset = first(only(surf.points.indices))
-
-    tree = KDTree(all_points)
-    adjl, _ = knn(tree, surf_points, k, true)
-
-    for (i, neighbors) in enumerate(adjl)
-        O = all_points[first(neighbors)]
-        n = -normal  # Use the single normal vector directly (all normals are equal)
-        L = 0
-        new_k = k
-        local new_neighbors
-        while L < k
-            a, _ = knn(tree, O, new_k, true)
-            new_neighbors = filter(a) do i
-                v = all_points[i] - O
-                abs(∠(v, n)) < (56 * π / 180)
-            end
-            L = length(new_neighbors)
-            new_k += 10
-        end
-        adjl[i] = new_neighbors
-    end
-    return adjl
+    return nbs, w_deriv
 end
