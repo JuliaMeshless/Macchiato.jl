@@ -1,42 +1,72 @@
-# ============================================================================
-# Boundary Condition System
-# ============================================================================
-#
-# This file orchestrates the boundary condition system, which consists of:
-#
-# 1. Core Infrastructure (core/):
-#    - physics_traits.jl: Physics domain trait system for BC-model validation
-#    - bc_hierarchy.jl: Mathematical BC type hierarchy (Dirichlet, Neumann, Robin)
-#    - generic_types.jl: Reusable generic BC types (FixedValue, Flux, ZeroGradient)
-#
-# 2. Numerical Methods (numerical/):
-#    - derivatives.jl: Derivative computation for Neumann and Robin BCs
-#
-# 3. Physics-Specific BCs (at package level):
-#    - energy.jl: Energy/thermal boundary conditions
-#    - fluids.jl: Fluid dynamics boundary conditions
-#    - walls.jl: Wall boundary conditions
-#
-# ============================================================================
-
 # Core infrastructure
 include("core/physics_traits.jl")
+include("core/time_traits.jl")
 include("core/bc_hierarchy.jl")
 include("core/generic_types.jl")
 
+# Main dispatch functions for applying BCs to system matrices/vectors
+
+#case of LinearProblem (probably steady state)
 function make_bc!(A, b, boundary::T, surf, domain, ids; kwargs...) where {T}
     return make_bc!(bc_family(T), A, b, boundary, surf, domain, ids; kwargs...)
 end
 
+#case of ODEProblem (time-dependent)
+function make_bc(
+        boundary::T, surf, domain, ids; kwargs...) where {T <: AbstractBoundaryCondition}
+    return make_bc(bc_family(T), boundary, surf, domain, ids; kwargs...)
+end
+
+# Dispatch implementations of Dirichlet BC
+
+# case of LinearProblem (steady state)
 function make_bc!(::Type{Dirichlet}, A, b, boundary, surf, domain, ids; kwargs...)
     return write_bc_dirichlet!(A, b, ids, boundary, surf)
 end
 
+# case of ODEProblem (time-dependent)
+function make_bc(::Type{Dirichlet}, boundary, surf, domain, ids; kwargs...)
+    # Dispatch based on the time dependence trait of the boundary value
+    val = boundary()
+    return make_bc_dirichlet(time_dependence(val), val, surf, domain, ids; kwargs...)
+end
+
+# 1. Steady: Constant in time -> du/dt = 0
+function make_bc_dirichlet(::SteadyTime, val, surf, domain, ids; kwargs...)
+    return function (du, u, p, t)
+        du[ids] .= 0.0
+        return nothing
+    end
+end
+
+# 2. Transient: Function of (x, t) -> Compute time derivative
+function make_bc_dirichlet(::Transient, func, surf, domain, ids; kwargs...)
+    # Get the time derivative function (handles FD logic)
+    df_dt = time_derivative(func)
+
+    return function (du, u, p, t)
+        for i in ids
+            # Evaluate derivative at (x, t)
+            # get_bc_value_at_index handles the coordinate lookup and (x,t) dispatch
+            du[i] = get_bc_value_at_index(df_dt, surf, ids, i, t)
+        end
+        return nothing
+    end
+end
+
+# Dispatch implementations of Neumann and Robin BCs
+# case of LinearProblem (steady state)
 function make_bc!(::Type{DerivativeBoundaryCondition}, A, b, boundary, surf, domain, ids;
         scheme = nothing, kwargs...)
     # scheme comes from kwargs, passed down from LinearProblem
     return write_bc_derivative!(
         bc_type(typeof(boundary)), A, b, ids, boundary, surf, domain, scheme; kwargs...)
+end
+
+# case of ODEProblem (time-dependent) (not implemented yet)
+function make_bc(
+        ::Type{<:DerivativeBoundaryCondition}, boundary, surf, domain, ids; kwargs...)
+    return (du, u, p, t) -> nothing
 end
 
 function write_bc_derivative!(
@@ -63,8 +93,24 @@ end
 function get_bc_value_at_index(value::Function, surf, ids, i)
     # Function - evaluate at surface point
     local_idx = i - first(ids) + 1
-    point = coordinates(surf)[local_idx]
+    point = _coords(surf)[local_idx]
     return value(point)
+end
+
+function get_bc_value_at_index(val, surf, ids, i, t)
+    get_bc_value_at_index(time_dependence(val), val, surf, ids, i, t)
+end
+
+# 1. SteadyTime: Ignore time 't', just use spatial index
+function get_bc_value_at_index(::SteadyTime, val, surf, ids, i, t)
+    return get_bc_value_at_index(val, surf, ids, i) # Call existing spatial-only version
+end
+
+# 2. Transient: Must be a function f(x, t)
+function get_bc_value_at_index(::Transient, func, surf, ids, i, t)
+    local_idx = i - first(ids) + 1
+    point = _coords(surf)[local_idx]
+    return func(point, t)
 end
 
 function write_bc_dirichlet!(A::AbstractMatrix{TA}, b::AbstractVector{TB},

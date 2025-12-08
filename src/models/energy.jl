@@ -15,7 +15,7 @@ function make_f(model::SolidEnergy, domain; neighbors = 40, kwargs...)
     all_points = _coords(domain.cloud)
 
     method = KNearestSearch(domain.cloud, neighbors)
-    adjl = search.(domain.cloud.volume.points, Ref(method))
+    adjl = map(Vector, search.(domain.cloud.volume.points, Ref(method)))
 
     ∇² = laplacian(_ustrip(all_points), _ustrip(vol); k = neighbors, adjl = adjl)
     update_weights!(∇²)

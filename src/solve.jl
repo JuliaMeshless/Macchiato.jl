@@ -2,22 +2,44 @@ abstract type AbstractProblem end
 
 function MultiphysicsProblem(
         domain::Domain{Dim}, u0, tspan; kwargs...) where {Dim}
-    boundary_funcs = mapreduce(vcat, domain.boundaries) do b
-        ids, bc = b.second
-        surf = domain.cloud[b.first]
-        make_bc(bc, surf, domain, ids; kwargs...)
-    end
-    model_funcs = mapreduce(
-        m -> make_f(m, domain; kwargs...), vcat, domain.models)
+    # create initial system matrix and rhs based on physics model
+    # current setup only works when you have one physics model
+    A, b = make_system(only(domain.models), domain; kwargs...)
 
-    model_funcs = model_funcs isa Vector ? model_funcs : [model_funcs]
+    # Apply Neumann/Robin BCs to the system matrix A and vector b
+    # We do NOT apply Dirichlet BCs here, as they are handled explicitly in the ODE function
+    for boundary in domain.boundaries
+        ids, bc = boundary.second
+        if !(bc isa Dirichlet)
+            surf = domain.cloud[boundary.first]
+            make_bc!(A, b, bc, surf, domain, ids; kwargs...)
+        end
+    end
+
+    # Create functions for Dirichlet BCs to override du/dt
+    boundary_funcs = []
+    for boundary in domain.boundaries
+        ids, bc = boundary.second
+        if bc isa Dirichlet
+            # Zero out the rows in the system matrix and vector for Dirichlet nodes
+            # This ensures they don't contribute to the physics calculation
+            # and avoids wasted computation.
+            A[ids, :] .= 0
+            b[ids] .= 0
+
+            surf = domain.cloud[boundary.first]
+            push!(boundary_funcs, make_bc(bc, surf, domain, ids; kwargs...))
+        end
+    end
 
     function f(du, u, p, t)
-        for model in model_funcs
-            model(du, u, p, t)
-        end
-        for bc in boundary_funcs
-            bc(du, u, p, t)
+        # 1. Compute physics (including Neumann/Robin BCs via modified A)
+        mul!(du, A, u)
+        du .+= b
+
+        # 2. Apply Dirichlet BCs (override du/dt)
+        for bc_func in boundary_funcs
+            bc_func(du, u, p, t)
         end
         return nothing
     end
