@@ -6,6 +6,9 @@ end
 
 _num_vars(::SolidEnergy, _) = 1
 
+# Physics domain trait - imported from boundary_conditions/physics_domains.jl
+physics_domain(::Type{<:SolidEnergy}) = EnergyPhysics()
+
 function make_f(model::SolidEnergy, domain; neighbors = 40, kwargs...)
     (; k, ρ, cₚ) = model
     vol = _coords(domain.cloud.volume)

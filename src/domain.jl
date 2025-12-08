@@ -14,6 +14,20 @@ function Domain(cloud::PointCloud, boundaries, models)
     # make sure it is a vector so we can push! to it later
     models = models isa Vector ? models : [models]
 
+    # Validate BC-model compatibility using physics domain traits
+    for (surf_name, bc) in boundaries
+        bc_domain = physics_domain(typeof(bc))
+        for model in models
+            model_domain = physics_domain(typeof(model))
+            if !is_compatible(bc_domain, model_domain)
+                throw(ArgumentError(
+                    "Boundary condition '$surf_name' ($(typeof(bc))) with physics domain $bc_domain " *
+                    "is not compatible with model $(typeof(model)) with physics domain $model_domain. " *
+                    "Please check that you are using appropriate boundary conditions for your model."))
+            end
+        end
+    end
+
     ids_bcs = Dict{Symbol, Tuple{UnitRange, AbstractBoundaryCondition}}()
     offset = 0
     for surf_name in names(cloud.boundary)

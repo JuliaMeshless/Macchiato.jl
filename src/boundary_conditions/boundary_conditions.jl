@@ -1,16 +1,28 @@
-abstract type AbstractBoundaryCondition end
-abstract type DerivativeBoundaryCondition <: AbstractBoundaryCondition end
+# ============================================================================
+# Boundary Condition System
+# ============================================================================
+#
+# This file orchestrates the boundary condition system, which consists of:
+#
+# 1. Core Infrastructure (core/):
+#    - physics_traits.jl: Physics domain trait system for BC-model validation
+#    - bc_hierarchy.jl: Mathematical BC type hierarchy (Dirichlet, Neumann, Robin)
+#    - generic_types.jl: Reusable generic BC types (FixedValue, Flux, ZeroGradient)
+#
+# 2. Numerical Methods (numerical/):
+#    - derivatives.jl: Derivative computation for Neumann and Robin BCs
+#
+# 3. Physics-Specific BCs (at package level):
+#    - energy.jl: Energy/thermal boundary conditions
+#    - fluids.jl: Fluid dynamics boundary conditions
+#    - walls.jl: Wall boundary conditions
+#
+# ============================================================================
 
-abstract type Dirichlet <: AbstractBoundaryCondition end
-abstract type Neumann <: DerivativeBoundaryCondition end
-abstract type Robin <: DerivativeBoundaryCondition end
-
-bc_family(::Type{<:Dirichlet}) = Dirichlet
-bc_family(::Type{<:DerivativeBoundaryCondition}) = DerivativeBoundaryCondition
-
-bc_type(::Type{<:Dirichlet}) = Dirichlet
-bc_type(::Type{<:Neumann}) = Neumann
-bc_type(::Type{<:Robin}) = Robin
+# Core infrastructure
+include("core/physics_traits.jl")
+include("core/bc_hierarchy.jl")
+include("core/generic_types.jl")
 
 function make_bc!(A, b, boundary::T, surf, domain, ids; kwargs...) where {T}
     return make_bc!(bc_family(T), A, b, boundary, surf, domain, ids; kwargs...)

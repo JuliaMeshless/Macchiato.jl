@@ -70,7 +70,7 @@ cₚ = 0.465 * 1e3 # J / (kg K)]
 α = k / (cₚ * ρ) # mm^2 / s
 
 bcs = Dict(
-    :surface1 => Temperature(10), :surface2 => Temperature(0), :surface3 => Temperature(5))
+    :surface1 => MM.Temperature(10), :surface2 => MM.Temperature(0), :surface3 => MM.Temperature(5))
 
 domain = MM.Domain(cloud, bcs, SolidEnergy(k = k, ρ = ρ, cₚ = cₚ))
 
