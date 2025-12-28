@@ -1,23 +1,5 @@
-# ============================================================================
 # Boundary Condition System
-# ============================================================================
-#
-# This file orchestrates the boundary condition system, which consists of:
-#
-# 1. Core Infrastructure (core/):
-#    - physics_traits.jl: Physics domain trait system for BC-model validation
-#    - bc_hierarchy.jl: Mathematical BC type hierarchy (Dirichlet, Neumann, Robin)
-#    - generic_types.jl: Reusable generic BC types (FixedValue, Flux, ZeroGradient)
-#
-# 2. Numerical Methods (numerical/):
-#    - derivatives.jl: Derivative computation for Neumann and Robin BCs
-#
-# 3. Physics-Specific BCs (at package level):
-#    - energy.jl: Energy/thermal boundary conditions
-#    - fluids.jl: Fluid dynamics boundary conditions
-#    - walls.jl: Wall boundary conditions
-#
-# ============================================================================
+# Includes: core traits, BC hierarchy, generic types, and numerical methods
 
 # Core infrastructure
 include("core/physics_traits.jl")

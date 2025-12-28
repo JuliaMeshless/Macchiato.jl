@@ -1,3 +1,4 @@
+"""Method type hierarchy for computing boundary derivative weights."""
 abstract type DerivativeMethod end
 
 abstract type StandardDerivative <: DerivativeMethod end
@@ -5,12 +6,15 @@ abstract type ShadowPointsMethod <: DerivativeMethod end
 abstract type ShadowPointsFirstOrder <: ShadowPointsMethod end
 abstract type ShadowPointsSecondOrder <: ShadowPointsMethod end
 
-# Trait accessor
+"""Map shadow operator to derivative method type for dispatch."""
 derivative_method(::Nothing) = StandardDerivative
 derivative_method(::WhatsThePoint.ShadowPoints{1}) = ShadowPointsFirstOrder
 derivative_method(::WhatsThePoint.ShadowPoints{2}) = ShadowPointsSecondOrder
 
-# Compute local weights for a single point
+"""
+Compute derivative weights for a boundary point. Dispatches to method-specific implementation.
+Returns (neighbor_indices, weights).
+"""
 function compute_local_derivative_weights(
         surf, domain, shadow_op, A, global_i, local_i, normals;
         kwargs...)::Tuple{Vector{Int}, Vector{Float64}}
@@ -18,7 +22,7 @@ function compute_local_derivative_weights(
         surf, domain, shadow_op, A, global_i, local_i, normals; kwargs...)
 end
 
-# Standard directional derivative
+"""Standard directional derivative using direct finite difference."""
 function compute_local_derivative_weights(
         ::Type{StandardDerivative}, surf, domain, shadow_op, A, global_i, local_i, normals; kwargs...)
 
@@ -37,7 +41,7 @@ function compute_local_derivative_weights(
     return nbs, d.weights[1, :]
 end
 
-# First order shadow points
+"""First-order shadow points: ∂u/∂n ≈ (u_surface - u_shadow)/Δ."""
 function compute_local_derivative_weights(
         ::Type{ShadowPointsFirstOrder}, surf, domain, shadow_op, A, global_i, local_i, normals; kwargs...)
     nbs = view(A.rowval, A.colptr[global_i]:(A.colptr[global_i + 1] - 1))
@@ -67,7 +71,7 @@ function compute_local_derivative_weights(
     return nbs, w_deriv
 end
 
-# Second order shadow points
+"""Second-order shadow points: ∂u/∂n ≈ (3·u_surface - 4·u_shadow1 + u_shadow2)/(2·Δ)."""
 function compute_local_derivative_weights(
         ::Type{ShadowPointsSecondOrder}, surf, domain, shadow_op, A, global_i, local_i, normals; kwargs...)
     nbs = view(A.rowval, A.colptr[global_i]:(A.colptr[global_i + 1] - 1))

@@ -5,21 +5,8 @@
 """
     Temperature{T} <: Dirichlet
 
-Prescribed temperature boundary condition.
-
-Internally represented as `FixedValue{EnergyPhysics, T}`.
-
-# Examples
-```julia
-# Constant temperature
-bc = Temperature(100.0)
-
-# Spatially varying temperature
-bc = Temperature([100.0, 120.0, 110.0])
-
-# Function-based temperature
-bc = Temperature(x -> 100.0 + 10.0 * x[1])
-```
+Prescribed temperature boundary condition (alias for `FixedValue{EnergyPhysics, T}`).
+Value can be a Number, Vector, or Function.
 """
 const Temperature{T} = FixedValue{EnergyPhysics, T}
 
@@ -47,21 +34,8 @@ Base.show(io::IO, bc::Temperature) = print(io, "Temperature: $(bc.value)")
 """
     HeatFlux{Q} <: Neumann
 
-Prescribed heat flux boundary condition (∂T/∂n = q).
-
-Internally represented as `Flux{EnergyPhysics, Q}`.
-
-# Examples
-```julia
-# Constant heat flux
-bc = HeatFlux(100.0)
-
-# Spatially varying heat flux
-bc = HeatFlux([100.0, 120.0, 110.0])
-
-# Function-based heat flux
-bc = HeatFlux(x -> 100.0 * sin(x[1]))
-```
+Prescribed heat flux: ∂T/∂n = q (alias for `Flux{EnergyPhysics, Q}`).
+Flux can be a Number, Vector, or Function.
 """
 const HeatFlux{Q} = Flux{EnergyPhysics, Q}
 
@@ -89,11 +63,7 @@ Base.show(io::IO, bc::HeatFlux) = print(io, "HeatFlux: $(bc.flux)")
 """
     Convection{H, K, T} <: Robin
 
-Convective heat transfer: h·T + k·∂T/∂n = h·T∞
-
-Newton's law of cooling at boundary.
-
-This is a physics-specific boundary condition with semantic field names.
+Convective heat transfer: h·T + k·∂T/∂n = h·T∞ (Newton's law of cooling).
 """
 struct Convection{H, K, T} <: Robin
     h::H   # heat transfer coefficient
@@ -126,17 +96,7 @@ end
 """
     Adiabatic <: Neumann
 
-Thermally insulated boundary: ∂T/∂n = 0
-
-Internally represented as `ZeroGradient{EnergyPhysics}`.
-
-The numerical method (standard derivative vs shadow points) is controlled
-by the `scheme` parameter passed to `LinearProblem`, not by the BC itself.
-
-# Usage
-```julia
-bc = Adiabatic()
-```
+Thermally insulated boundary: ∂T/∂n = 0 (alias for `ZeroGradient{EnergyPhysics}`).
 """
 const Adiabatic = ZeroGradient{EnergyPhysics}
 

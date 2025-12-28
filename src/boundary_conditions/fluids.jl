@@ -5,21 +5,8 @@
 """
     VelocityInlet{T} <: Dirichlet
 
-Prescribed velocity at inlet boundary.
-
-Internally represented as `FixedValue{FluidPhysics, T}`.
-
-# Examples
-```julia
-# Constant velocity
-bc = VelocityInlet(1.0)
-
-# Spatially varying velocity
-bc = VelocityInlet([1.0, 1.2, 1.1])
-
-# Function-based velocity
-bc = VelocityInlet(x -> 1.0 * (1.0 - x[2]^2))  # Parabolic profile
-```
+Prescribed velocity at inlet (alias for `FixedValue{FluidPhysics, T}`).
+Value can be a Number, Vector, or Function.
 """
 const VelocityInlet{T} = FixedValue{FluidPhysics, T}
 
@@ -44,8 +31,6 @@ Base.show(io::IO, bc::VelocityInlet) = print(io, "VelocityInlet: $(bc.value)")
     PressureOutlet{T} <: Dirichlet
 
 Prescribed pressure at outlet boundary.
-
-This is a physics-specific boundary condition that targets the pressure field.
 """
 struct PressureOutlet{T} <: Dirichlet
     p::T
@@ -73,16 +58,8 @@ Base.show(io::IO, bc::PressureOutlet) = print(io, "PressureOutlet: $(bc.p)")
 """
     VelocityOutlet <: Neumann
 
-Zero-gradient velocity outlet: ∂v/∂n = 0
-
-Internally represented as `ZeroGradient{FluidPhysics}`.
-
-Commonly used for outflow boundaries where the velocity profile is fully developed.
-
-# Usage
-```julia
-bc = VelocityOutlet()
-```
+Zero-gradient velocity outlet: ∂v/∂n = 0 (alias for `ZeroGradient{FluidPhysics}`).
+Used for fully developed outflow boundaries.
 """
 const VelocityOutlet = ZeroGradient{FluidPhysics}
 
