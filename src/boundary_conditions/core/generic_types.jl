@@ -3,61 +3,87 @@
 # ============================================================================
 
 """
-    FixedValue{P<:PhysicsDomain, T} <: Dirichlet
+    PrescribedValue{P<:PhysicsDomain, F<:Function} <: Dirichlet
 
-Generic Dirichlet BC that prescribes a fixed value across physics domains.
+Generic Dirichlet BC that prescribes a value via a function.
+
+The function has signature `f(x, t) -> value` where:
+- `x`: spatial coordinate of the boundary point
+- `t`: time
+- Returns the prescribed value at that location and time
 
 # Type Parameters
 - `P`: Physics domain (EnergyPhysics, FluidPhysics, etc.)
-- `T`: Value type (Number, Vector, or Function)
+- `F`: Function type with signature (x, t) -> value
 
 Use physics-specific aliases instead of this directly (e.g., `Temperature`, `VelocityInlet`).
 """
-struct FixedValue{P<:PhysicsDomain, T} <: Dirichlet
-    value::T
+struct PrescribedValue{P<:PhysicsDomain, F<:Function} <: Dirichlet
+    f::F
 end
 
-# BC value accessor
-(bc::FixedValue)() = bc.value
+# Convenience constructors
+PrescribedValue{P}(value::Number) where {P} = PrescribedValue{P}((x, t) -> value)
+PrescribedValue{P}(f::Function) where {P} = PrescribedValue{P, typeof(f)}(f)
+
+# BC evaluation: bc(x, t) returns the prescribed value at (x, t)
+(bc::PrescribedValue)(x, t) = bc.f(x, t)
 
 # Physics domain trait
-physics_domain(::Type{<:FixedValue{P}}) where {P} = P()
+physics_domain(::Type{<:PrescribedValue{P}}) where {P} = P()
+
+# ============================================================================
 
 """
-    Flux{P<:PhysicsDomain, Q} <: Neumann
+    PrescribedFlux{P<:PhysicsDomain, F<:Function} <: Neumann
 
-Generic Neumann BC that prescribes a flux (∂u/∂n = q).
+Generic Neumann BC that prescribes a flux (normal derivative) via a function.
+
+The flux condition is: ∂u/∂n = f(x, t)
+
+The function has signature `f(x, t) -> flux_value` where:
+- `x`: spatial coordinate of the boundary point
+- `t`: time
+- Returns the prescribed flux value at that location and time
 
 # Type Parameters
 - `P`: Physics domain (EnergyPhysics, FluidPhysics, etc.)
-- `Q`: Flux type (Number, Vector, or Function)
+- `F`: Function type with signature (x, t) -> flux
 
 Use physics-specific aliases instead of this directly (e.g., `HeatFlux`, `Traction`).
 """
-struct Flux{P<:PhysicsDomain, Q} <: Neumann
-    flux::Q
+struct PrescribedFlux{P<:PhysicsDomain, F<:Function} <: Neumann
+    f::F
 end
 
-# BC value accessor
-(bc::Flux)() = bc.flux
+# Convenience constructors
+PrescribedFlux{P}(flux::Number) where {P} = PrescribedFlux{P}((x, t) -> flux)
+PrescribedFlux{P}(f::Function) where {P} = PrescribedFlux{P, typeof(f)}(f)
+
+# BC evaluation: bc(x, t) returns the prescribed flux at (x, t)
+(bc::PrescribedFlux)(x, t) = bc.f(x, t)
 
 # Physics domain trait
-physics_domain(::Type{<:Flux{P}}) where {P} = P()
+physics_domain(::Type{<:PrescribedFlux{P}}) where {P} = P()
+
+# ============================================================================
 
 """
-    ZeroGradient{P<:PhysicsDomain} <: Neumann
+    ZeroFlux{P<:PhysicsDomain} <: Neumann
 
-Generic Neumann BC with zero flux (∂u/∂n = 0). Represents symmetry, insulation, or fully-developed flow.
+Generic Neumann BC with zero flux: ∂u/∂n = 0.
+
+Represents symmetry, insulation, or fully-developed flow depending on physics domain.
 
 # Type Parameters
 - `P`: Physics domain (EnergyPhysics, FluidPhysics, etc.)
 
 Use physics-specific aliases instead of this directly (e.g., `Adiabatic`, `VelocityOutlet`).
 """
-struct ZeroGradient{P<:PhysicsDomain} <: Neumann end
+struct ZeroFlux{P<:PhysicsDomain} <: Neumann end
 
-# BC value accessor
-(bc::ZeroGradient)() = 0.0
+# BC evaluation: always returns 0
+(bc::ZeroFlux)(x, t) = 0.0
 
 # Physics domain trait
-physics_domain(::Type{<:ZeroGradient{P}}) where {P} = P()
+physics_domain(::Type{<:ZeroFlux{P}}) where {P} = P()

@@ -3,64 +3,38 @@
 # ============================================================================
 
 """
-    VelocityInlet{T} <: Dirichlet
+    VelocityInlet(velocity)
 
-Prescribed velocity at inlet (alias for `FixedValue{FluidPhysics, T}`).
-Value can be a Number, Vector, or Function.
+Prescribed velocity at inlet. Value can be a Number or Function `(x, t) -> velocity`.
 """
-const VelocityInlet{T} = FixedValue{FluidPhysics, T}
+VelocityInlet(velocity::Number) = PrescribedValue{FluidPhysics}(velocity)
+VelocityInlet(f::Function) = PrescribedValue{FluidPhysics}(f)
 
-# Constructor for convenience
-VelocityInlet(value::T) where {T} = FixedValue{FluidPhysics, T}(value)
-
-# Time evolution - return closure for ODE: (du, u, p, t) -> modify u
-# function make_bc(boundary::VelocityInlet, surf, domain::Domain{Dim}; kwargs...) where {Dim}
-#     s = domain.cloud[surf]
-#     surf_ids = only(s.points.indices)
-#     v = boundary.v
-#     (du, u, p, t) -> (u[surf_ids] .= v; nothing)
-# end
-
-Base.show(io::IO, bc::VelocityInlet) = print(io, "VelocityInlet: $(bc.value)")
+Base.show(io::IO, bc::PrescribedValue{FluidPhysics}) = print(io, "VelocityInlet")
 
 # ============================================================================
 # PressureOutlet (Dirichlet)
 # ============================================================================
 
 """
-    PressureOutlet{T} <: Dirichlet
+    PressureOutlet(pressure)
 
-Prescribed pressure at outlet boundary.
+Prescribed pressure at outlet. Value can be a Number or Function `(x, t) -> pressure`.
 """
-struct PressureOutlet{T} <: Dirichlet
-    p::T
-end
+PressureOutlet(pressure::Number) = PrescribedValue{FluidPhysics}(pressure)
+PressureOutlet(f::Function) = PrescribedValue{FluidPhysics}(f)
 
-(bc::PressureOutlet)() = bc.p
-
-# Physics domain trait
-physics_domain(::Type{<:PressureOutlet}) = FluidPhysics()
-
-# Time evolution - return closure for ODE: (du, u, p, t) -> modify u
-# function make_bc(boundary::PressureOutlet, surf, domain::Domain{Dim}; kwargs...) where {Dim}
-#     s = domain.cloud[surf]
-#     ids = only(s.points.indices)
-#     p_val = boundary.p
-#     (du, u, p, t) -> (u[ids] .= p_val; nothing)
-# end
-
-Base.show(io::IO, bc::PressureOutlet) = print(io, "PressureOutlet: $(bc.p)")
+Base.show(io::IO, bc::PrescribedValue{FluidPhysics}) = print(io, "PressureOutlet")
 
 # ============================================================================
 # VelocityOutlet (Neumann with zero gradient)
 # ============================================================================
 
 """
-    VelocityOutlet <: Neumann
+    VelocityOutlet()
 
-Zero-gradient velocity outlet: ∂v/∂n = 0 (alias for `ZeroGradient{FluidPhysics}`).
-Used for fully developed outflow boundaries.
+Zero-gradient velocity outlet: ∂v/∂n = 0. Used for fully developed outflow.
 """
-const VelocityOutlet = ZeroGradient{FluidPhysics}
+const VelocityOutlet = ZeroFlux{FluidPhysics}
 
-Base.show(io::IO, ::VelocityOutlet) = print(io, "VelocityOutlet (zero gradient)")
+Base.show(io::IO, ::ZeroFlux{FluidPhysics}) = print(io, "VelocityOutlet")

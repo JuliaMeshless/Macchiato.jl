@@ -1,20 +1,19 @@
 """
-    Wall{T} <: Dirichlet
+    Wall(velocity)
+    Wall()
 
-No-slip wall (v=0) or moving wall with prescribed velocity.
-Uses `WallPhysics` domain (compatible with fluid and energy models).
+No-slip wall or moving wall BC. Value can be a Number or Function `(x, t) -> velocity`.
+No arguments creates stationary wall (v=0). Uses `WallPhysics` domain.
 """
-struct Wall{T} <: Dirichlet
-    v::T
+Wall(velocity::Number) = PrescribedValue{WallPhysics}(velocity)
+Wall(f::Function) = PrescribedValue{WallPhysics}(f)
+Wall() = PrescribedValue{WallPhysics}(0.0)
+
+Base.show(io::IO, bc::PrescribedValue{WallPhysics}) = begin
+    v = bc(zeros(3), 0.0)
+    if v ≈ 0.0
+        print(io, "Wall (no-slip)")
+    else
+        print(io, "Wall (moving): v≈$v")
+    end
 end
-
-"""Stationary wall (no-slip): velocity = 0."""
-Wall() = Wall(nothing)
-
-(bc::Wall)() = bc.v === nothing ? 0 : bc.v
-
-# Physics domain trait - WallPhysics is compatible with both fluids and energy
-physics_domain(::Type{<:Wall}) = WallPhysics()
-
-Base.show(io::IO, bc::Wall{Nothing}) = print(io, "Wall (no-slip)")
-Base.show(io::IO, bc::Wall) = print(io, "Wall (moving): v=$(bc.v)")
