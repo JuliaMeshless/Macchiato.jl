@@ -1,30 +1,10 @@
-"""Method type hierarchy for computing boundary derivative weights."""
-abstract type DerivativeMethod end
-
-abstract type StandardDerivative <: DerivativeMethod end
-abstract type ShadowPointsMethod <: DerivativeMethod end
-abstract type ShadowPointsFirstOrder <: ShadowPointsMethod end
-abstract type ShadowPointsSecondOrder <: ShadowPointsMethod end
-
-"""Map shadow operator to derivative method type for dispatch."""
-derivative_method(::Nothing) = StandardDerivative
-derivative_method(::WhatsThePoint.ShadowPoints{1}) = ShadowPointsFirstOrder
-derivative_method(::WhatsThePoint.ShadowPoints{2}) = ShadowPointsSecondOrder
-
 """
-Compute derivative weights for a boundary point. Dispatches to method-specific implementation.
+Compute derivative weights for a boundary point using standard directional derivative.
+No shadow points - uses direct finite difference.
 Returns (neighbor_indices, weights).
 """
 function compute_local_derivative_weights(
-        surf, domain, shadow_op, A, global_i, local_i, normals;
-        kwargs...)::Tuple{Vector{Int}, Vector{Float64}}
-    return compute_local_derivative_weights(derivative_method(shadow_op),
-        surf, domain, shadow_op, A, global_i, local_i, normals; kwargs...)
-end
-
-"""Standard directional derivative using direct finite difference."""
-function compute_local_derivative_weights(
-        ::Type{StandardDerivative}, surf, domain, shadow_op, A, global_i, local_i, normals; kwargs...)
+        surf, domain, shadow_op::Nothing, A, global_i, local_i, normals; kwargs...)
 
     # Get neighbors from A (assuming structural symmetry)
     nbs = view(A.rowval, A.colptr[global_i]:(A.colptr[global_i + 1] - 1))
@@ -38,12 +18,17 @@ function compute_local_derivative_weights(
     d = directional(nbs_coords, [surf_pt], n)
 
     # d.weights is (1, length(nbs))
-    return nbs, d.weights[1, :]
+    return Vector(nbs), Vector(d.weights[1, :])
 end
 
-"""First-order shadow points: ∂u/∂n ≈ (u_surface - u_shadow)/Δ."""
+"""
+Compute derivative weights for a boundary point using 1st order shadow points.
+First-order shadow points: ∂u/∂n ≈ (u_surface - u_shadow)/Δ.
+Returns (neighbor_indices, weights).
+"""
 function compute_local_derivative_weights(
-        ::Type{ShadowPointsFirstOrder}, surf, domain, shadow_op, A, global_i, local_i, normals; kwargs...)
+        surf, domain, shadow_op::WhatsThePoint.ShadowPoints{1},
+        A, global_i, local_i, normals; kwargs...)
     nbs = view(A.rowval, A.colptr[global_i]:(A.colptr[global_i + 1] - 1))
 
     surf_pt = get_node_coords(surf, local_i)
@@ -68,12 +53,17 @@ function compute_local_derivative_weights(
     # Derivative weights: (w_surf - w_shadow) / d
     w_deriv = (w_surf .- w_shadow) ./ d
 
-    return nbs, w_deriv
+    return Vector(nbs), Vector(w_deriv)
 end
 
-"""Second-order shadow points: ∂u/∂n ≈ (3·u_surface - 4·u_shadow1 + u_shadow2)/(2·Δ)."""
+"""
+Compute derivative weights for a boundary point using 2nd order shadow points.
+Second-order shadow points: ∂u/∂n ≈ (3·u_surface - 4·u_shadow1 + u_shadow2)/(2·Δ).
+Returns (neighbor_indices, weights).
+"""
 function compute_local_derivative_weights(
-        ::Type{ShadowPointsSecondOrder}, surf, domain, shadow_op, A, global_i, local_i, normals; kwargs...)
+        surf, domain, shadow_op::WhatsThePoint.ShadowPoints{2},
+        A, global_i, local_i, normals; kwargs...)
     nbs = view(A.rowval, A.colptr[global_i]:(A.colptr[global_i + 1] - 1))
 
     surf_pt = get_node_coords(surf, local_i)
@@ -100,5 +90,5 @@ function compute_local_derivative_weights(
     # (3*u_s - 4*u_sh1 + u_sh2) / 2d
     w_deriv = (3 .* w_surf .- 4 .* w_shadow1 .+ w_shadow2) ./ (2 * d)
 
-    return nbs, w_deriv
+    return Vector(nbs), Vector(w_deriv)
 end
