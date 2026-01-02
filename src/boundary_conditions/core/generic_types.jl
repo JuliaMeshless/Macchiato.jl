@@ -18,7 +18,7 @@ The function has signature `f(x, t) -> value` where:
 
 Use physics-specific aliases instead of this directly (e.g., `Temperature`, `VelocityInlet`).
 """
-struct PrescribedValue{P<:PhysicsDomain, F<:Function} <: Dirichlet
+struct PrescribedValue{P <: PhysicsDomain, F <: Function} <: Dirichlet
     f::F
 end
 
@@ -52,7 +52,7 @@ The function has signature `f(x, t) -> flux_value` where:
 
 Use physics-specific aliases instead of this directly (e.g., `HeatFlux`, `Traction`).
 """
-struct PrescribedFlux{P<:PhysicsDomain, F<:Function} <: Neumann
+struct PrescribedFlux{P <: PhysicsDomain, F <: Function} <: Neumann
     f::F
 end
 
@@ -80,10 +80,11 @@ Represents symmetry, insulation, or fully-developed flow depending on physics do
 
 Use physics-specific aliases instead of this directly (e.g., `Adiabatic`, `VelocityOutlet`).
 """
-struct ZeroFlux{P<:PhysicsDomain} <: Neumann end
+struct ZeroFlux{P <: PhysicsDomain} <: Neumann end
 
 # BC evaluation: always returns 0
-(bc::ZeroFlux)(x, t) = 0.0
+(bc::ZeroFlux)(x::AbstractVector{T}, t::T) where {T} = zero(T)
+#TODO: Consider (bc::ZeroFlux)(x::AbstractVector{A}, t::B) where {A, B} = zero(promote_type(A, B))
 
 # Physics domain trait
 physics_domain(::Type{<:ZeroFlux{P}}) where {P} = P()
