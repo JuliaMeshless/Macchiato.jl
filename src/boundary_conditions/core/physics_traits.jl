@@ -54,7 +54,22 @@ function physics_domain end
 Check if a BC's physics domain is compatible with a model's physics domain.
 Domains are compatible with themselves; `WallPhysics` is also compatible with fluid and energy domains.
 """
-is_compatible(::T, ::T) where {T<:PhysicsDomain} = true
+#same domain
+is_compatible(::T, ::T) where {T <: PhysicsDomain} = true
+
+#different models with WallPhysics
 is_compatible(::WallPhysics, ::FluidPhysics) = true
 is_compatible(::WallPhysics, ::EnergyPhysics) = true
-is_compatible(::PhysicsDomain, ::PhysicsDomain) = false
+
+#Fallback rule: different domains are compatible but give warning
+function is_compatible(bc::PhysicsDomain, model::PhysicsDomain)
+    @warn """
+    UNDEFINED PHYSICS DOMAIN COMPATIBILITY:
+    BC domain: $(typeof(bc))
+    Model domain: $(typeof(model))
+
+    There is no compatibility rule defined for these domains.
+        This BC will be allowed, but consider defining explicit compatibility rules in `physics_traits.jl`.
+        """
+    return true
+end
