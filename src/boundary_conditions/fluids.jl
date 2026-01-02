@@ -10,7 +10,8 @@ Prescribed velocity at inlet. Value can be a Number or Function `(x, t) -> veloc
 VelocityInlet(velocity::Number) = PrescribedValue{FluidPhysics}(velocity)
 VelocityInlet(f::Function) = PrescribedValue{FluidPhysics}(f)
 
-Base.show(io::IO, bc::PrescribedValue{FluidPhysics}) = print(io, "VelocityInlet")
+# Note: show method removed - can't distinguish VelocityInlet from PressureOutlet
+# since both are PrescribedValue{FluidPhysics}
 
 # ============================================================================
 # PressureOutlet (Dirichlet)
@@ -24,7 +25,8 @@ Prescribed pressure at outlet. Value can be a Number or Function `(x, t) -> pres
 PressureOutlet(pressure::Number) = PrescribedValue{FluidPhysics}(pressure)
 PressureOutlet(f::Function) = PrescribedValue{FluidPhysics}(f)
 
-Base.show(io::IO, bc::PrescribedValue{FluidPhysics}) = print(io, "PressureOutlet")
+# Note: show method removed - can't distinguish VelocityInlet from PressureOutlet
+# since both are PrescribedValue{FluidPhysics}
 
 # ============================================================================
 # VelocityOutlet (Neumann with zero gradient)
