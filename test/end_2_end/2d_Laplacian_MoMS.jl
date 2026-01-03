@@ -44,9 +44,6 @@ conv = repel!(cloud, ConstantSpacing(Δ); α = Δ / 20, max_iters = 500)
 # ============================================================================
 # Step 3: Set up boundary conditions from analytical solution
 # ============================================================================
-#visualize surfaces
-#figsize = (800, 800)
-#markersize = 0.0025
 
 #surface1 is bottom
 #surface2 is right
