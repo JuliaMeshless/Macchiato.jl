@@ -1,35 +1,42 @@
+# ============================================================================
+# VelocityInlet (Dirichlet)
+# ============================================================================
 
-abstract type FluidBoundaryCondition <: AbstractBoundaryCondition end
+"""
+    VelocityInlet(velocity)
 
-struct VelocityInlet{T} <: FluidBoundaryCondition
-    v::T
-end
-(bc::VelocityInlet)() = bc.v
-(bc::VelocityInlet{<:Function})(x, t) = bc.v(x, t)
+Prescribed velocity at inlet. Value can be a Number or Function `(x, t) -> velocity`.
+"""
+VelocityInlet(velocity::Number) = PrescribedValue{FluidPhysics}(velocity)
+VelocityInlet(f::Function) = PrescribedValue{FluidPhysics}(f)
 
-function make_bc(boundary::VelocityInlet, surf, domain::Domain{Dim}; kwargs...) where {Dim}
-    s = domain.cloud[surf]
-    surf_ids = only(s.points.indices)
-    offset = length(domain.cloud)
-    function bc(du, u, p, t)
-        u[ids] .= boundary.v
-        return nothing
-    end
-    return bc
-end
+# Note: show method removed - can't distinguish VelocityInlet from PressureOutlet
+# since both are PrescribedValue{FluidPhysics}
 
-struct PressureOutlet{T} <: FluidBoundaryCondition
-    p::T
-end
-(bc::PressureOutlet)() = bc.p
-(bc::PressureOutlet{<:Function})(x, t) = bc.p(x, t)
+# ============================================================================
+# PressureOutlet (Dirichlet)
+# ============================================================================
 
-function make_bc(boundary::PressureOutlet, surf, domain::Domain{Dim}; kwargs...) where {Dim}
-    s = domain.cloud[surf]
-    ids = only(s.points.indices)
-    function bc(du, u, p, t)
-        u[ids] .= boundary.p
-        return nothing
-    end
-    return bc
-end
+"""
+    PressureOutlet(pressure)
+
+Prescribed pressure at outlet. Value can be a Number or Function `(x, t) -> pressure`.
+"""
+PressureOutlet(pressure::Number) = PrescribedValue{FluidPhysics}(pressure)
+PressureOutlet(f::Function) = PrescribedValue{FluidPhysics}(f)
+
+# Note: show method removed - can't distinguish VelocityInlet from PressureOutlet
+# since both are PrescribedValue{FluidPhysics}
+
+# ============================================================================
+# VelocityOutlet (Neumann with zero gradient)
+# ============================================================================
+
+"""
+    VelocityOutlet()
+
+Zero-gradient velocity outlet: ∂v/∂n = 0. Used for fully developed outflow.
+"""
+const VelocityOutlet = ZeroFlux{FluidPhysics}
+
+Base.show(io::IO, ::ZeroFlux{FluidPhysics}) = print(io, "VelocityOutlet")

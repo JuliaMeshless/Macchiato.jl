@@ -27,7 +27,9 @@ function MultiphysicsProblem(
     return ODEProblem(f, repeat(u0, num_vars), tspan)
 end
 
-function LinearProblem(domain::Domain; kwargs...)
+function LinearSolve.LinearProblem(domain::Domain;
+        scheme = nothing,
+        kwargs...)
     # create initial system matrix and rhs based on physics model
     # current setup only works when you have one physics model
     println("Creating linear problem")
@@ -38,7 +40,7 @@ function LinearProblem(domain::Domain; kwargs...)
         ids, bc = boundary.second
         println("Applying boundary condition: ", boundary.first)
         surf = domain.cloud[boundary.first]
-        @time A = make_bc!(A, b, bc, surf, domain, ids; kwargs...)
+        @time make_bc!(A, b, bc, surf, domain, ids; scheme = scheme, kwargs...)
     end
 
     println("Done creating linear problem")

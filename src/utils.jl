@@ -22,7 +22,7 @@ function findmin_turbo(x, ids)
 end
 
 function _coords(cloud::Union{PointCloud{𝔼{2}}, PointSurface{𝔼{2}}})
-    map(pointify(cloud)) do p
+    map(points(cloud)) do p
         c = coords(p)
         SVector(c.x, c.y)
     end
@@ -36,8 +36,8 @@ function _coords(points::AbstractVector{<:Point{𝔼{2}}})
 end
 
 function _coords(cloud::Union{PointCloud{𝔼{3}}, PointSurface{𝔼{3}}})
-    points = pointify(cloud)
-    map(points) do p
+    pts = points(cloud)
+    map(pts) do p
         c = coords(p)
         SVector(c.x, c.y, c.z)
     end
@@ -50,6 +50,18 @@ function _coords(points::AbstractVector{<:Point{𝔼{3}}})
     end
 end
 
-_coords(vol::PointVolume) = _coords(vol.points.geoms)
+_coords(vol::PointVolume) = _coords(points(vol))
 
 _ustrip(x::AbstractVector{<:AbstractVector}) = map(x -> ustrip.(x), x)
+
+function get_node_coords(cloud::Union{PointCloud{𝔼{2}}, PointSurface{𝔼{2}}}, i)
+    p = points(cloud)[i]
+    c = coords(p)
+    return ustrip.(SVector(c.x, c.y))
+end
+
+function get_node_coords(cloud::Union{PointCloud{𝔼{3}}, PointSurface{𝔼{3}}}, i)
+    p = points(cloud)[i]
+    c = coords(p)
+    return ustrip.(SVector(c.x, c.y, c.z))
+end

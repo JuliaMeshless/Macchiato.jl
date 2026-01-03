@@ -15,32 +15,38 @@ using LinearAlgebra
 using RadialBasisFunctions
 using SparseArrays
 using OrdinaryDiffEq
-using LinearSolve
 using OhMyThreads
 using WriteVTK
+
+import LinearSolve
 
 include("utils.jl")
 
 #################### Abstract Types ####################
-abstract type AbstractBoundaryCondition end
 abstract type AbstractModel end
+
+#################### Boundary Conditions ####################
+include("boundary_conditions/numerical/derivatives.jl")
+include("boundary_conditions/boundary_conditions.jl")
+
+export AbstractBoundaryCondition
+# Physics domain traits
+export PhysicsDomain, EnergyPhysics, FluidPhysics, WallPhysics
+export physics_domain, is_compatible
+# Generic BC types
+export FixedValue, Flux, ZeroGradient
 
 #################### Domains ####################
 include("domain.jl")
 export Domain
 
-#################### Boundary Conditions ####################
-export AbstractBoundaryCondition
-
 include("boundary_conditions/walls.jl")
 export Wall
 
 include("boundary_conditions/fluids.jl")
-export FluidBoundaryCondition
-export VelocityInlet, PressureOutlet
+export VelocityInlet, PressureOutlet, VelocityOutlet
 
 include("boundary_conditions/energy.jl")
-export EnergyBoundaryCondition
 export Adiabatic, Temperature, HeatFlux, Convection
 
 export make_bc, make_bc!
