@@ -53,7 +53,7 @@ visualize(part; markersize = 1.5markersize, size = figsize)
 Δ = dx
 cloud = WhatsThePoint.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
 
-conv = repel!(cloud, ConstantSpacing(Δ); α = Δ / 20, max_iters = 1000)
+cloud, conv = repel(cloud, ConstantSpacing(Δ); α = Δ / 20, max_iters = 1000)
 display(lineplot(conv))
 
 visualize(cloud; markersize = markersize, size = figsize)
@@ -81,5 +81,5 @@ prob = MM.LinearProblem(domain)
 @time sol = solve(prob)
 T = sol.u
 
-#exportvtk("heat-equation-2d", pointify(cloud), [T], ["T"])
+#exportvtk("heat-equation-2d", points(cloud), [T], ["T"])
 viz_2d(domain, T; markersize = markersize, size = figsize, levels = 32)

@@ -15,8 +15,8 @@ function viz_2d(
     #boundary
     for b in domain.boundaries
         ids = b.second[1]
-        points = pointify(domain.cloud[b.first])
-        c = coords.(points)
+        pts = points(domain.cloud[b.first])
+        c = coords.(pts)
         x = map(c -> ustrip(c.x), c)
         y = map(c -> ustrip(c.y), c)
         meshscatter!(
@@ -36,7 +36,7 @@ function viz_2d(
         b[2][1][end]
     end + 1
     ids = start:(start + length(domain.cloud.volume) - 1)
-    c = coords.(domain.cloud.volume.points)
+    c = coords.(points(domain.cloud.volume))
     x = map(c -> ustrip(c.x), c)
     y = map(c -> ustrip(c.y), c)
     meshscatter!(
@@ -74,8 +74,8 @@ function viz_3d(
 
     for b in domain.boundaries
         ids = b.second[1]
-        points = pointify(domain.cloud[b.first])
-        c = coords.(points)
+        pts = points(domain.cloud[b.first])
+        c = coords.(pts)
         filtered_ids = findall(f_filter, c)
         c = c[filtered_ids]
         x = map(c -> ustrip(c.x), c)
@@ -98,7 +98,7 @@ function viz_3d(
         b[2][1][end]
     end + 1
     ids = start:(start + length(domain.cloud.volume) - 1)
-    c = coords.(domain.cloud.volume.points)
+    c = coords.(points(domain.cloud.volume))
     filtered_ids = findall(f_filter, c)
     c = c[filtered_ids]
     x = map(c -> ustrip(c.x), c)

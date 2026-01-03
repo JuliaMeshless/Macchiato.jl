@@ -27,7 +27,7 @@ function MultiphysicsProblem(
     return ODEProblem(f, repeat(u0, num_vars), tspan)
 end
 
-function LinearProblem(domain::Domain;
+function LinearSolve.LinearProblem(domain::Domain;
         scheme = nothing,
         kwargs...)
     # create initial system matrix and rhs based on physics model

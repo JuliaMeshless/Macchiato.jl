@@ -15,9 +15,10 @@ using LinearAlgebra
 using RadialBasisFunctions
 using SparseArrays
 using OrdinaryDiffEq
-using LinearSolve
 using OhMyThreads
 using WriteVTK
+
+import LinearSolve
 
 include("utils.jl")
 

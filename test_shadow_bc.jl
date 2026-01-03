@@ -52,7 +52,7 @@ println("\n2. Creating point cloud...")
 cloud = WhatsThePoint.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
 
 println("   Total points in cloud: ", size(cloud))
-println("   Volume points: ", length(cloud.volume.points))
+println("   Volume points: ", length(cloud.volume))
 for (key, val) in cloud.boundary.surfaces
     println("   Surface $key: ", length(val), " points")
 end

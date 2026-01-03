@@ -28,7 +28,7 @@ markersize = 0.015
 Δ = 0.04m
 #cloud = load(joinpath(@__DIR__, "rectangle-0.04.jld2"), "cloud")
 cloud = WhatsThePoint.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
-conv = repel!(cloud, ConstantSpacing(Δ); α = Δ / 100, max_iters = 1e2)
+cloud, conv = repel(cloud, ConstantSpacing(Δ); α = Δ / 100, max_iters = 1e2)
 display(lineplot(conv))
 visualize(cloud; markersize = 0.7markersize, size = figsize)
 #save(joinpath(@__DIR__, "rectangle-0.04.jld2"), Dict("cloud"=>cloud))
@@ -64,7 +64,7 @@ vol_ids = start:(start + length(domain.cloud.volume) - 1)
 
 u0 = zeros(length(domain.cloud))
 #u0[vol_ids] .= 0
-#visualize(cloud.volume.points.geoms, u0[vol_ids], markersize = markersize, size = figsize)
+#visualize(points(cloud.volume), u0[vol_ids], markersize = markersize, size = figsize)
 
 function viz(
         domain,
@@ -86,8 +86,8 @@ function viz(
 
     for b in domain.boundaries
         ids = b.second[1]
-        points = pointify(domain.cloud[b.first])
-        c = coords.(points)
+        pts = points(domain.cloud[b.first])
+        c = coords.(pts)
         filtered_ids = findall(f_filter, c)
         c = c[filtered_ids]
         x = map(c -> ustrip(c.x), c)
@@ -111,7 +111,7 @@ function viz(
         b[2][1][end]
     end + 1
     ids = start:(start + length(domain.cloud.volume) - 1)
-    c = coords.(domain.cloud.volume.points)
+    c = coords.(points(domain.cloud.volume))
     filtered_ids = findall(f_filter, c)
     c = c[filtered_ids]
     x = map(c -> ustrip(c.x), c)

@@ -48,7 +48,8 @@ function make_f(
     update_weights!(∇²)
     α = k / (cₚ * ρ)
     w = α * ∇².weights
-    vol_ids = only(domain.cloud.volume.points.indices)
+    n_boundary = length(boundary(domain.cloud))
+    vol_ids = (n_boundary + 1):(n_boundary + length(domain.cloud.volume))
 
     function f(du, u, p, t)
         # calculate intermediate velocity
