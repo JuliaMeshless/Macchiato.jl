@@ -10,6 +10,7 @@ using CoordRefSystems
 using Accessors
 using ProgressMeter
 using Unitful
+using Unitful: ustrip
 using StaticArrays
 using LinearAlgebra
 using RadialBasisFunctions
@@ -17,6 +18,7 @@ using SparseArrays
 using OrdinaryDiffEq
 using OhMyThreads
 using WriteVTK
+using JLD2
 
 import LinearSolve
 
@@ -83,6 +85,17 @@ export upwind
 #################### IO ####################
 include("io.jl")
 export exportvtk, savevtk!, save
+
+#################### Simulation API ####################
+include("callbacks.jl")
+include("output_writers.jl")
+include("set.jl")
+include("simulation.jl")
+
+export Simulation, run!, set!
+export Callback, AbstractSchedule, IterationInterval, TimeInterval, WallTimeInterval, SpecifiedTimes
+export AbstractOutputWriter, VTKOutputWriter, JLD2OutputWriter
+export temperature, velocity, pressure
 
 # test funcs
 export node_drop, findmin_turbo
