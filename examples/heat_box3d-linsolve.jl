@@ -4,8 +4,6 @@ using RadialBasisFunctions
 using WhatsThePoint
 using StaticArrays
 using LinearAlgebra
-using DifferentialEquations
-using LinearSolve
 using CUDA
 using CUDA.CUSPARSE
 import GLMakie
@@ -57,14 +55,6 @@ bcs = Dict(:surface1 => Temperature(0),
 
 domain = Domain(cloud, bcs, SolidEnergy(k = k, ρ = ρ, cₚ = cₚ))
 
-start = maximum(domain.boundaries) do b
-    b[2][1][end]
-end + 1
-vol_ids = start:(start + length(domain.cloud.volume) - 1)
-
-u0 = zeros(length(domain.cloud))
-#u0[vol_ids] .= 0
-#visualize(points(cloud.volume), u0[vol_ids], markersize = markersize, size = figsize)
 
 function viz(
         domain,
@@ -133,20 +123,20 @@ end
 
 ##
 
-# iterative solve using DifferentialEquations.jl
+# iterative solve using Simulation API
 dt = 0.001 * (ustrip(Δ))^2 / α
-prob = MM.MultiphysicsProblem(domain, u0, (0.0, 3e-4))
-@time sol = solve(prob, Euler(), dt = dt, save_everystep = false, save_end = true)
-T = Vector(sol.u[end])
-u0 = copy(T)
+sim = Simulation(domain; Δt = dt, stop_time = 3e-4, solver = :Euler)
+set!(sim, T = 0.0)
+@time run!(sim)
+T = temperature(sim)
 
 viz(domain, T, c -> c.y > 0m; markersize = markersize, size = figsize)
 
 ##
 
-# direct solve using LinearSolve.jl
-prob = MM.LinearProblem(domain)
-@time sol = solve(prob)
-T = sol.u
+# direct solve using Simulation API
+sim = Simulation(domain)
+@time run!(sim)
+T = temperature(sim)
 
 viz(domain, T, c -> c.y > 0m; markersize = markersize, size = figsize)
