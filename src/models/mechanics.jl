@@ -21,11 +21,11 @@ model = LinearElasticity(E=200e3, ν=0.3)
 model = LinearElasticity(E=200e3, ν=0.3, body_force=x -> (0.0, -9.81))
 ```
 """
-@kwdef struct LinearElasticity{E, Nu, Rho, F} <: Solid
-    E::E
-    ν::Nu
-    ρ::Rho = nothing
-    body_force::F = nothing
+@kwdef struct LinearElasticity{TE, TNu, TRho, TF} <: Solid
+    E::TE
+    ν::TNu
+    ρ::TRho = nothing
+    body_force::TF = nothing
 end
 
 _num_vars(::LinearElasticity, dim::Int) = dim

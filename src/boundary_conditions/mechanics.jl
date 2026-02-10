@@ -123,6 +123,7 @@ So the traction rows become:
 function make_bc!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
         bc::Traction, surf, domain, ids;
         λstar::Real, μ_lame::Real,
+        scheme=nothing,
         kwargs...) where {TA, TB}
     N = div(size(A, 1), 2)
     normals = normal(surf)
@@ -130,9 +131,9 @@ function make_bc!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
 
     # Build first-derivative operators evaluated at all boundary points in this surface
     eval_pts = [get_node_coords(surf, i) for i in 1:length(ids)]
-    ∂x_op = partial(coords_all, eval_pts, 1, 1; k = 40)
+    ∂x_op = partial(coords_all, eval_pts, 1, 1; k = 40, kwargs...)
     update_weights!(∂x_op)
-    ∂y_op = partial(coords_all, eval_pts, 1, 2; k = 40)
+    ∂y_op = partial(coords_all, eval_pts, 1, 2; k = 40, kwargs...)
     update_weights!(∂y_op)
 
     for (local_i, global_i) in enumerate(ids)

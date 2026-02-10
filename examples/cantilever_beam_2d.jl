@@ -15,15 +15,19 @@
 #
 # where I = 2D³/3 is the second moment of area.
 # ============================================================================
+using Pkg
+Pkg.activate(@__DIR__)
 
 using MeshlessMultiphysics
 import MeshlessMultiphysics as MM
 using WhatsThePoint
 import WhatsThePoint as WTP
+using RadialBasisFunctions: PHS
 using Unitful: m, °, ustrip
 using LinearAlgebra
 using LinearSolve
 using Statistics: mean
+using CairoMakie
 
 # ============================================================================
 # Problem Parameters
@@ -52,7 +56,7 @@ end
 # Domain Setup
 # ============================================================================
 
-dx = 0.2 * m  # Point spacing
+dx = 0.1 * m  # Point spacing
 
 # Create rectangular boundary
 rx = dx:dx:((L * m) - dx)
@@ -84,9 +88,30 @@ split_surface!(part, 75°)
 
 Δ = dx
 cloud = WTP.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
-cloud, _ = repel(cloud, ConstantSpacing(Δ); α = Δ / 20, max_iters = 500)
+cloud, _ = repel(cloud, ConstantSpacing(Δ); α = Δ / 50, max_iters = 5000)
 
-println("Total points: ", length(cloud))
+# ============================================================================
+# Visualize Point Cloud
+# ============================================================================
+
+fig_cloud = Figure(; size = (1000, 400));
+ax_cloud = Axis(fig_cloud[1, 1]; title = "Point Cloud", xlabel = "x", ylabel = "y", aspect = DataAspect())
+
+for surf_name in WTP.names(cloud.boundary)
+    pts_s = WTP.points(cloud[surf_name])
+    c_s = WTP.coords.(pts_s)
+    xs = [ustrip(c.x) for c in c_s]
+    ys = [ustrip(c.y) for c in c_s]
+    scatter!(ax_cloud, xs, ys; markersize = 10, label = string(surf_name))
+end
+
+pts_v = WTP.points(cloud.volume)
+c_v = WTP.coords.(pts_v)
+xv = [ustrip(c.x) for c in c_v]
+yv = [ustrip(c.y) for c in c_v]
+scatter!(ax_cloud, xv, yv; markersize = 8, color = :gray, label = "interior")
+axislegend(ax_cloud; position = :rb)
+fig_cloud
 
 # ============================================================================
 # Boundary Conditions
@@ -118,7 +143,7 @@ domain = MM.Domain(cloud, bcs, model)
 
 sim = Simulation(domain)
 set!(sim, ux = 0.0, uy = 0.0)
-run!(sim)
+run!(sim; basis=PHS(3; poly_deg=4))
 
 # ============================================================================
 # Compare with Analytical Solution
@@ -134,10 +159,13 @@ uy_ana = [v_exact(ustrip(pt.x), ustrip(pt.y)) for pt in coords]
 err_ux = ux_sim .- ux_ana
 err_uy = uy_sim .- uy_ana
 
-L2_ux = norm(err_ux) / sqrt(N)
-L2_uy = norm(err_uy) / sqrt(N)
-Linf_ux = norm(err_ux, Inf)
-Linf_uy = norm(err_uy, Inf)
+pct_err_ux = 100.0 .* abs.(err_ux) ./ max.(abs.(ux_ana), eps())
+pct_err_uy = 100.0 .* abs.(err_uy) ./ max.(abs.(uy_ana), eps())
+
+mean_pct_ux = mean(pct_err_ux)
+mean_pct_uy = mean(pct_err_uy)
+max_pct_ux = maximum(pct_err_ux)
+max_pct_uy = maximum(pct_err_uy)
 
 println("\n========================================")
 println("Cantilever Beam Results")
@@ -145,9 +173,9 @@ println("========================================")
 println("Beam: L=$L, D=$D, P=$P, E=$E_val, ν=$ν_val")
 println("Points: $N")
 println()
-println("Error Analysis (vs Timoshenko):")
-println("  ux: L2 = $L2_ux, L∞ = $Linf_ux")
-println("  uy: L2 = $L2_uy, L∞ = $Linf_uy")
+println("Percent Error (vs Timoshenko):")
+println("  ux: mean = $(round(mean_pct_ux; digits=4))%, max = $(round(max_pct_ux; digits=4))%")
+println("  uy: mean = $(round(mean_pct_uy; digits=4))%, max = $(round(max_pct_uy; digits=4))%")
 println()
 
 # Max tip deflection (analytical at x=L, y=0):
@@ -160,6 +188,57 @@ tip_indices = findall(i -> abs(ustrip(coords[i].x) - max_x) < 0.01 &&
                            abs(ustrip(coords[i].y)) < 0.01 + ustrip(dx), 1:N)
 if !isempty(tip_indices)
     v_tip_num = mean(uy_sim[tip_indices])
+    tip_pct_err = 100.0 * abs(v_tip_num - v_tip_exact) / abs(v_tip_exact)
     println("Tip deflection (numerical): $v_tip_num")
-    println("Relative error: $(abs(v_tip_num - v_tip_exact) / abs(v_tip_exact))")
+    println("Tip deflection error: $(round(tip_pct_err; digits=4))%")
 end
+
+# ============================================================================
+# Visualization
+# ============================================================================
+
+x = [ustrip(pt.x) for pt in coords]
+y = [ustrip(pt.y) for pt in coords]
+
+displacement_mag = sqrt.(ux_sim .^ 2 .+ uy_sim .^ 2)
+ana_mag = sqrt.(ux_ana .^ 2 .+ uy_ana .^ 2)
+error_mag = sqrt.(err_ux .^ 2 .+ err_uy .^ 2)
+
+fig = Figure(; size = (1400, 1800));
+
+# Row 1: analytical displacement components
+ax1 = Axis(fig[1, 1]; title = "uₓ (analytical)", xlabel = "x", ylabel = "y", aspect = DataAspect())
+sc1 = scatter!(ax1, x, y; color = ux_ana, colormap = :RdBu, markersize = 6)
+Colorbar(fig[1, 2], sc1)
+
+ax2 = Axis(fig[1, 3]; title = "uᵧ (analytical)", xlabel = "x", ylabel = "y", aspect = DataAspect())
+sc2 = scatter!(ax2, x, y; color = uy_ana, colormap = :RdBu, markersize = 6)
+Colorbar(fig[1, 4], sc2)
+
+# Row 2: numerical displacement components
+ax3 = Axis(fig[2, 1]; title = "uₓ (numerical)", xlabel = "x", ylabel = "y", aspect = DataAspect())
+sc3 = scatter!(ax3, x, y; color = ux_sim, colormap = :RdBu, markersize = 6)
+Colorbar(fig[2, 2], sc3)
+
+ax4 = Axis(fig[2, 3]; title = "uᵧ (numerical)", xlabel = "x", ylabel = "y", aspect = DataAspect())
+sc4 = scatter!(ax4, x, y; color = uy_sim, colormap = :RdBu, markersize = 6)
+Colorbar(fig[2, 4], sc4)
+
+# Row 3: displacement magnitude (analytical vs numerical)
+ax5 = Axis(fig[3, 1]; title = "‖u‖ (analytical)", xlabel = "x", ylabel = "y", aspect = DataAspect())
+sc5 = scatter!(ax5, x, y; color = ana_mag, colormap = :viridis, markersize = 6)
+Colorbar(fig[3, 2], sc5)
+
+ax6 = Axis(fig[3, 3]; title = "‖u‖ (numerical)", xlabel = "x", ylabel = "y", aspect = DataAspect())
+sc6 = scatter!(ax6, x, y; color = displacement_mag, colormap = :viridis, markersize = 6)
+Colorbar(fig[3, 4], sc6)
+
+# Row 4: percent error
+ax7 = Axis(fig[4, 1]; title = "% error uₓ", xlabel = "x", ylabel = "y", aspect = DataAspect())
+sc7 = scatter!(ax7, x, y; color = pct_err_ux, colormap = :inferno, markersize = 6)
+Colorbar(fig[4, 2], sc7)
+
+ax8 = Axis(fig[4, 3]; title = "% error uᵧ", xlabel = "x", ylabel = "y", aspect = DataAspect())
+sc8 = scatter!(ax8, x, y; color = pct_err_uy, colormap = :inferno, markersize = 6)
+Colorbar(fig[4, 4], sc8)
+fig
