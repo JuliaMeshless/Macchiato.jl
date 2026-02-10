@@ -33,7 +33,7 @@ include("boundary_conditions/boundary_conditions.jl")
 
 export AbstractBoundaryCondition
 # Physics domain traits
-export PhysicsDomain, EnergyPhysics, FluidPhysics, WallPhysics
+export PhysicsDomain, EnergyPhysics, FluidPhysics, WallPhysics, MechanicsPhysics
 export physics_domain, is_compatible
 # Generic BC types
 export FixedValue, Flux, ZeroGradient
@@ -51,6 +51,9 @@ export VelocityInlet, PressureOutlet, VelocityOutlet
 include("boundary_conditions/energy.jl")
 export Adiabatic, Temperature, HeatFlux, Convection
 
+include("boundary_conditions/mechanics.jl")
+export Displacement, Traction, TractionFree
+
 export make_bc, make_bc!
 
 #################### Models ####################
@@ -67,6 +70,9 @@ export IncompressibleNavierStokes
 
 include("models/energy.jl")
 export SolidEnergy
+
+include("models/mechanics.jl")
+export LinearElasticity, lame_parameters
 
 export make_f, make_system
 export _num_vars
@@ -95,7 +101,7 @@ include("simulation.jl")
 export Simulation, run!, set!
 export Callback, AbstractSchedule, IterationInterval, TimeInterval, WallTimeInterval, SpecifiedTimes
 export AbstractOutputWriter, VTKOutputWriter, JLD2OutputWriter
-export temperature, velocity, pressure
+export temperature, velocity, pressure, displacement
 
 # test funcs
 export node_drop, findmin_turbo

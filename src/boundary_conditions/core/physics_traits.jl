@@ -31,6 +31,13 @@ Physics domain for wall BCs. Compatible with both fluid and energy models.
 """
 struct WallPhysics <: PhysicsDomain end
 
+"""
+    MechanicsPhysics <: PhysicsDomain
+
+Physics domain for solid mechanics models and BCs (displacement, traction).
+"""
+struct MechanicsPhysics <: PhysicsDomain end
+
 # ============================================================================
 # Trait Accessors
 # ============================================================================
@@ -60,6 +67,7 @@ is_compatible(::T, ::T) where {T <: PhysicsDomain} = true
 #different models with WallPhysics
 is_compatible(::WallPhysics, ::FluidPhysics) = true
 is_compatible(::WallPhysics, ::EnergyPhysics) = true
+is_compatible(::WallPhysics, ::MechanicsPhysics) = true
 
 #Fallback rule: different domains are compatible but give warning
 function is_compatible(bc::PhysicsDomain, model::PhysicsDomain)

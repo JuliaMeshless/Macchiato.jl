@@ -8,7 +8,8 @@ testfiles = [
     "simulation/test_callbacks.jl",
     "simulation/test_set.jl",
     "simulation/test_output_writers.jl",
-    "simulation/test_simulation.jl"
+    "simulation/test_simulation.jl",
+    "models/test_linear_elasticity.jl"
 ]
 
 @testset "MeshlessMultiphysics.jl" begin
