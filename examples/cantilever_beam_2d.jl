@@ -11,7 +11,7 @@
 #
 # Timoshenko beam solution (plane stress):
 #   u(x,y) = -P/(6EI) [y((6L-3x)x + (2+ν)(y²-D²))]
-#   v(x,y) = P/(6EI) [3νy²(L-x) + (4+5ν)D²x/4 + (3L-x)x²]
+#   v(x,y) = P/(6EI) [3νy²(L-x) + (4+5ν)D²x + (3L-x)x²]
 #
 # where I = 2D³/3 is the second moment of area.
 # ============================================================================
@@ -26,6 +26,7 @@ using RadialBasisFunctions: PHS
 using Unitful: m, °, ustrip
 using LinearAlgebra
 using LinearSolve
+using SparseArrays: nnz
 using Statistics: mean
 using CairoMakie
 
@@ -49,7 +50,7 @@ function u_exact(x, y)
 end
 
 function v_exact(x, y)
-    return P / (6E_val * I) * (3ν_val * y^2 * (L - x) + (4 + 5ν_val) * D^2 * x / 4 + (3L - x) * x^2)
+    return P / (6E_val * I) * (3ν_val * y^2 * (L - x) + (4 + 5ν_val) * D^2 * x + (3L - x) * x^2)
 end
 
 # ============================================================================
@@ -120,12 +121,11 @@ fig_cloud
 # Left (clamped): exact displacement from Timoshenko solution
 bc_left(x, t) = (u_exact(x[1], x[2]), v_exact(x[1], x[2]))
 
-# Right: parabolic shear traction  τ = P(D²-y²)/(2I)
+# Right: parabolic shear traction  σ₁₂ = P(D²-y²)/(2I)
 # The traction vector at x=L with n=(1,0) is:
-#   tx = σ₁₁·nx = σ₁₁  (need to compute from exact solution)
-#   ty = σ₁₂·nx = σ₁₂
-# From Timoshenko: σ₁₂ = -P(D²-y²)/(2I), σ₁₁ = 0 at x=L
-bc_right(x, t) = (0.0, -P * (D^2 - x[2]^2) / (2I))
+#   tx = σ₁₁·nx = 0  (σ₁₁ = 0 at x=L)
+#   ty = σ₁₂·nx = P(D²-y²)/(2I)
+bc_right(x, t) = (0.0, P * (D^2 - x[2]^2) / (2I))
 
 bcs = Dict(
     :surface1 => TractionFree(),                   # Bottom: free surface
@@ -143,7 +143,20 @@ domain = MM.Domain(cloud, bcs, model)
 
 sim = Simulation(domain)
 set!(sim, ux = 0.0, uy = 0.0)
-run!(sim; basis=PHS(3; poly_deg=4))
+
+basis_kw = (; basis = PHS(3; poly_deg = 3))
+
+# Warmup (JIT compilation)
+prob = LinearSolve.LinearProblem(sim.domain; basis_kw...)
+sol = LinearSolve.solve(prob)
+
+# Timed runs
+GC.gc()
+t_assembly = @elapsed prob = LinearSolve.LinearProblem(sim.domain; basis_kw...)
+t_solve = @elapsed sol = LinearSolve.solve(prob)
+
+sim._solution = sol.u
+sim.iteration = 1
 
 # ============================================================================
 # Compare with Analytical Solution
@@ -159,23 +172,34 @@ uy_ana = [v_exact(ustrip(pt.x), ustrip(pt.y)) for pt in coords]
 err_ux = ux_sim .- ux_ana
 err_uy = uy_sim .- uy_ana
 
-pct_err_ux = 100.0 .* abs.(err_ux) ./ max.(abs.(ux_ana), eps())
-pct_err_uy = 100.0 .* abs.(err_uy) ./ max.(abs.(uy_ana), eps())
+abs_err_ux = abs.(err_ux)
+abs_err_uy = abs.(err_uy)
 
-mean_pct_ux = mean(pct_err_ux)
-mean_pct_uy = mean(pct_err_uy)
-max_pct_ux = maximum(pct_err_ux)
-max_pct_uy = maximum(pct_err_uy)
+mean_abs_ux = mean(abs_err_ux)
+mean_abs_uy = mean(abs_err_uy)
+max_abs_ux = maximum(abs_err_ux)
+max_abs_uy = maximum(abs_err_uy)
 
 println("\n========================================")
+println("Performance Summary")
+println("========================================")
+println("Method:        Meshless (PHS RBF)")
+println("Points:        $N")
+println("DOFs:          $(2N)")
+println("System nnz:    $(nnz(prob.A))")
+println("Assembly time: $(round(t_assembly; digits=4)) s")
+println("Solve time:    $(round(t_solve; digits=4)) s")
+println("Total time:    $(round(t_assembly + t_solve; digits=4)) s")
+println()
+println("========================================")
 println("Cantilever Beam Results")
 println("========================================")
 println("Beam: L=$L, D=$D, P=$P, E=$E_val, ν=$ν_val")
 println("Points: $N")
 println()
-println("Percent Error (vs Timoshenko):")
-println("  ux: mean = $(round(mean_pct_ux; digits=4))%, max = $(round(max_pct_ux; digits=4))%")
-println("  uy: mean = $(round(mean_pct_uy; digits=4))%, max = $(round(max_pct_uy; digits=4))%")
+println("Absolute Error (vs Timoshenko):")
+println("  ux: mean = $(round(mean_abs_ux; digits=8)), max = $(round(max_abs_ux; digits=8))")
+println("  uy: mean = $(round(mean_abs_uy; digits=8)), max = $(round(max_abs_uy; digits=8))")
 println()
 
 # Max tip deflection (analytical at x=L, y=0):
@@ -188,9 +212,9 @@ tip_indices = findall(i -> abs(ustrip(coords[i].x) - max_x) < 0.01 &&
                            abs(ustrip(coords[i].y)) < 0.01 + ustrip(dx), 1:N)
 if !isempty(tip_indices)
     v_tip_num = mean(uy_sim[tip_indices])
-    tip_pct_err = 100.0 * abs(v_tip_num - v_tip_exact) / abs(v_tip_exact)
+    tip_abs_err = abs(v_tip_num - v_tip_exact)
     println("Tip deflection (numerical): $v_tip_num")
-    println("Tip deflection error: $(round(tip_pct_err; digits=4))%")
+    println("Tip deflection error: $(round(tip_abs_err; digits=8))")
 end
 
 # ============================================================================
@@ -233,12 +257,12 @@ ax6 = Axis(fig[3, 3]; title = "‖u‖ (numerical)", xlabel = "x", ylabel = "y",
 sc6 = scatter!(ax6, x, y; color = displacement_mag, colormap = :viridis, markersize = 6)
 Colorbar(fig[3, 4], sc6)
 
-# Row 4: percent error
-ax7 = Axis(fig[4, 1]; title = "% error uₓ", xlabel = "x", ylabel = "y", aspect = DataAspect())
-sc7 = scatter!(ax7, x, y; color = pct_err_ux, colormap = :inferno, markersize = 6)
+# Row 4: absolute error
+ax7 = Axis(fig[4, 1]; title = "abs error uₓ", xlabel = "x", ylabel = "y", aspect = DataAspect())
+sc7 = scatter!(ax7, x, y; color = abs_err_ux, colormap = :inferno, markersize = 6)
 Colorbar(fig[4, 2], sc7)
 
-ax8 = Axis(fig[4, 3]; title = "% error uᵧ", xlabel = "x", ylabel = "y", aspect = DataAspect())
-sc8 = scatter!(ax8, x, y; color = pct_err_uy, colormap = :inferno, markersize = 6)
+ax8 = Axis(fig[4, 3]; title = "abs error uᵧ", xlabel = "x", ylabel = "y", aspect = DataAspect())
+sc8 = scatter!(ax8, x, y; color = abs_err_uy, colormap = :inferno, markersize = 6)
 Colorbar(fig[4, 4], sc8)
 fig
