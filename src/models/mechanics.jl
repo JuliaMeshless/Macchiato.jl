@@ -95,16 +95,14 @@ function make_system(model::LinearElasticity, domain; kwargs...)
     coords = _ustrip(_coords(domain.cloud))
     N = length(coords)
 
-    # Build RBF operators for second partial derivatives
-    ∂²x = partial(coords, 2, 1; k = 40, kwargs...)
-    update_weights!(∂²x)
+    # Pre-compute shared KNN adjacency list (same coords and k for all 3 operators)
+    k = get(kwargs, :k, 40)
+    adjl = find_neighbors(coords, k)
 
-    ∂²y = partial(coords, 2, 2; k = 40, kwargs...)
-    update_weights!(∂²y)
-
-    # Mixed partial ∂²/∂x∂y via custom operator
-    ∂²xy = custom(coords, _ℒ_mixed_partial; k = 40, kwargs...)
-    update_weights!(∂²xy)
+    # Build RBF operators (KernelAbstractions parallelizes internally)
+    ∂²x = partial(coords, 2, 1; k=k, adjl=adjl, kwargs...)
+    ∂²y = partial(coords, 2, 2; k=k, adjl=adjl, kwargs...)
+    ∂²xy = custom(coords, _ℒ_mixed_partial; k=k, adjl=adjl, kwargs...)
 
     # Assemble 2N×2N system from blocks
     W_∂²x = ∂²x.weights
