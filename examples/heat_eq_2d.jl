@@ -5,8 +5,6 @@ using WhatsThePoint
 import WhatsThePoint as WTP
 using StaticArrays
 using LinearAlgebra
-using DifferentialEquations
-using LinearSolve
 using CUDA
 using CUDA.CUSPARSE
 using GLMakie
@@ -74,12 +72,9 @@ bcs = Dict(
 
 domain = MM.Domain(cloud, bcs, SolidEnergy(k = k, ρ = ρ, cₚ = cₚ))
 
-u0 = zeros(length(domain.cloud))
-
-# solve using LinearSolve.jl
-prob = MM.LinearProblem(domain)
-@time sol = solve(prob)
-T = sol.u
+sim = Simulation(domain)
+@time run!(sim)
+T = temperature(sim)
 
 #exportvtk("heat-equation-2d", points(cloud), [T], ["T"])
 viz_2d(domain, T; markersize = markersize, size = figsize, levels = 32)

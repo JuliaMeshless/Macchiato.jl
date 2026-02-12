@@ -7,7 +7,42 @@ include("core/bc_hierarchy.jl")
 include("core/generic_types.jl")
 
 # ============================================================================
-# BC Application Dispatchers
+# ODE-style BC Application (for transient problems)
+# ============================================================================
+
+"""
+    make_bc(bc, surf, domain, ids; kwargs...)
+
+Create boundary condition function for ODE integration.
+Returns a function `f(du, u, p, t)` that applies the BC to du.
+"""
+function make_bc(bc::T, surf, domain, ids; kwargs...) where {T}
+    return make_bc(bc_family(T), bc, surf, domain, ids; kwargs...)
+end
+
+function make_bc(::Type{Dirichlet}, bc, surf, domain, ids; kwargs...)
+    function bc_func(du, u, p, t)
+        for (local_i, global_i) in enumerate(ids)
+            x = get_node_coords(surf, local_i)
+            du[global_i] = bc(x, t) - u[global_i]
+        end
+        return nothing
+    end
+    return bc_func
+end
+
+function make_bc(::Type{DerivativeBoundaryCondition}, bc, surf, domain, ids; kwargs...)
+    function bc_func(du, u, p, t)
+        for (local_i, global_i) in enumerate(ids)
+            du[global_i] = zero(eltype(du))
+        end
+        return nothing
+    end
+    return bc_func
+end
+
+# ============================================================================
+# Matrix-style BC Application Dispatchers (for steady-state problems)
 # ============================================================================
 
 function make_bc!(A, b, boundary::T, surf, domain, ids; kwargs...) where {T}
