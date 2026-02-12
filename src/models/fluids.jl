@@ -45,7 +45,6 @@ function make_f(
     vol = _coords(domain.cloud.volume)
     all_points = _coords(domain.cloud)
     ∇² = laplacian(all_points, vol; k = 40)
-    update_weights!(∇²)
     α = k / (cₚ * ρ)
     w = α * ∇².weights
     n_boundary = length(boundary(domain.cloud))

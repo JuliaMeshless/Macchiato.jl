@@ -3,7 +3,6 @@ Compute interpolation weights at a point, returning dense vector.
 """
 @inline function interpolation_weights(nbs_coords, pt; kwargs...)
     op = regrid(nbs_coords, [pt]; kwargs...)
-    update_weights!(op)
     return collect(op.weights[1, :])
 end
 

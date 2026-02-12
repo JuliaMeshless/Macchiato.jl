@@ -19,7 +19,6 @@ function make_f(model::SolidEnergy, domain; neighbors = 40, kwargs...)
     adjl = search.(points(domain.cloud.volume), Ref(method))
 
     ∇² = laplacian(_ustrip(all_points), _ustrip(vol); k = neighbors, adjl = adjl)
-    update_weights!(∇²)
     α = k / (cₚ * ρ)
     w = α * ∇².weights
 
@@ -50,7 +49,6 @@ function make_system(model::SolidEnergy, domain; kwargs...)
     (; k, ρ, cₚ, source) = model
     coords = _coords(domain.cloud)
     ∇² = laplacian(_ustrip(coords); k = 40, kwargs...)
-    update_weights!(∇²)
     α = k / (cₚ * ρ)
     A = α * ∇².weights
 

@@ -79,28 +79,11 @@ TractionFree() = Traction(0.0, 0.0)
     make_bc!(A, b, bc::Displacement, surf, domain, ids; kwargs...)
 
 Apply displacement (Dirichlet) BC to the 2N×2N mechanics system.
-For each boundary node i:
-  - Row i:   A[i, :] = 0, A[i, i] = 1, b[i] = ux
-  - Row i+N: A[i+N, :] = 0, A[i+N, i+N] = 1, b[i+N] = uy
+Dispatches to the generalized `write_bc_dirichlet!` with `n_vars=2`.
 """
-function make_bc!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        bc::Displacement, surf, domain, ids;
-        kwargs...) where {TA, TB}
-    N = div(size(A, 1), 2)
-    for (local_i, global_i) in enumerate(ids)
-        x = get_node_coords(surf, local_i)
-        ux, uy = bc(x, 0.0)
-
-        # x-displacement row
-        A[global_i, :] .= zero(TA)
-        A[global_i, global_i] = one(TA)
-        b[global_i] = convert(TB, ux)
-
-        # y-displacement row
-        A[global_i + N, :] .= zero(TA)
-        A[global_i + N, global_i + N] = one(TA)
-        b[global_i + N] = convert(TB, uy)
-    end
+function make_bc!(A::AbstractMatrix, b::AbstractVector,
+        bc::Displacement, surf, domain, ids; kwargs...)
+    write_bc_dirichlet!(A, b, ids, bc, surf, 2)
 end
 
 """
@@ -118,7 +101,7 @@ The stress-displacement relation (plane stress):
 
 So the traction rows become:
   Row i:   nx[(λ*+2μ)∂/∂x]u + ny[μ∂/∂y]u + nx[λ*∂/∂y]v + ny[μ∂/∂x]v = tx
-  Row i+N: nx[μ∂/∂y]u + ny[μ∂/∂x]u + nx[λ*∂/∂x]v + ny[(λ*+2μ)∂/∂y]v = ty
+  Row i+N: nx[μ∂/∂y]u + ny[λ*∂/∂x]u + nx[μ∂/∂x]v + ny[(λ*+2μ)∂/∂y]v = ty
 """
 function make_bc!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
         bc::Traction, surf, domain, ids;
@@ -129,12 +112,30 @@ function make_bc!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
     normals = normal(surf)
     coords_all = _ustrip(_coords(domain.cloud))
 
-    # Build first-derivative operators evaluated at all boundary points in this surface
+    # Build first-derivative operators with shared KNN adjacency list
     eval_pts = [get_node_coords(surf, i) for i in 1:length(ids)]
-    ∂x_op = partial(coords_all, eval_pts, 1, 1; k = 40, kwargs...)
-    update_weights!(∂x_op)
-    ∂y_op = partial(coords_all, eval_pts, 1, 2; k = 40, kwargs...)
-    update_weights!(∂y_op)
+    k = get(kwargs, :k, 40)
+    adjl = find_neighbors(coords_all, eval_pts, k)
+
+    # Build operators (KernelAbstractions parallelizes internally)
+    ∂x_op = partial(coords_all, eval_pts, 1, 1; k=k, adjl=adjl, kwargs...)
+    ∂y_op = partial(coords_all, eval_pts, 1, 2; k=k, adjl=adjl, kwargs...)
+
+    # Zero all traction BC rows in a single O(nnz) pass
+    row_set = Set{Int}()
+    for global_i in ids
+        push!(row_set, global_i)
+        push!(row_set, global_i + N)
+    end
+    zero_rows!(A, row_set)
+
+    # Pre-allocate weight buffers for the inner loop (sized to max stencil width)
+    max_k = maximum(length, adjl)
+    w_dx_buf = Vector{Float64}(undef, max_k)
+    w_dy_buf = Vector{Float64}(undef, max_k)
+
+    W_dx = ∂x_op.weights
+    W_dy = ∂y_op.weights
 
     for (local_i, global_i) in enumerate(ids)
         x = get_node_coords(surf, local_i)
@@ -142,37 +143,39 @@ function make_bc!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
         n = ustrip(normals[local_i])
         n_x, n_y = n[1], n[2]
 
-        # Extract sparse weight rows and find non-zero entries (stencil neighbors)
-        w_dx_sv = ∂x_op.weights[local_i, :]
-        w_dy_sv = ∂y_op.weights[local_i, :]
+        # Collect unique nonzero column indices from both weight rows
+        # Use the adjacency list directly — it gives us the stencil indices
+        stencil = adjl[local_i]
+        n_stencil = length(stencil)
 
-        nbs_dx_idx, _ = findnz(w_dx_sv)
-        nbs_dy_idx, _ = findnz(w_dy_sv)
-        all_nbs = sort(unique(vcat(nbs_dx_idx, nbs_dy_idx)))
-
-        # Build weight vectors for all neighbors
-        w_∂x = [w_dx_sv[nb] for nb in all_nbs]
-        w_∂y = [w_dy_sv[nb] for nb in all_nbs]
+        # Read weights for this row's stencil points
+        @inbounds for j in 1:n_stencil
+            col = stencil[j]
+            w_dx_buf[j] = W_dx[local_i, col]
+            w_dy_buf[j] = W_dy[local_i, col]
+        end
 
         # Row i (x-traction): nx(λ*+2μ)∂u/∂x + nyμ∂u/∂y + nxλ*∂v/∂y + nyμ∂v/∂x = tx
-        w_u = n_x * (λstar + 2μ_lame) .* w_∂x .+ n_y * μ_lame .* w_∂y
-        w_v = n_x * λstar .* w_∂y .+ n_y * μ_lame .* w_∂x
-
-        A[global_i, :] .= zero(TA)
-        for (j, nb) in enumerate(all_nbs)
-            A[global_i, nb] = convert(TA, w_u[j])
-            A[global_i, nb + N] = convert(TA, w_v[j])
+        c_ux = n_x * (λstar + 2μ_lame)
+        c_uy = n_y * μ_lame
+        c_vx = n_y * μ_lame
+        c_vy = n_x * λstar
+        @inbounds for j in 1:n_stencil
+            col = stencil[j]
+            A[global_i, col] = convert(TA, c_ux * w_dx_buf[j] + c_uy * w_dy_buf[j])
+            A[global_i, col + N] = convert(TA, c_vy * w_dy_buf[j] + c_vx * w_dx_buf[j])
         end
         b[global_i] = convert(TB, tx)
 
-        # Row i+N (y-traction): nxμ∂u/∂y + nyμ∂u/∂x + nxλ*∂v/∂x + ny(λ*+2μ)∂v/∂y = ty
-        w_u2 = n_x * μ_lame .* w_∂y .+ n_y * μ_lame .* w_∂x
-        w_v2 = n_x * λstar .* w_∂x .+ n_y * (λstar + 2μ_lame) .* w_∂y
-
-        A[global_i + N, :] .= zero(TA)
-        for (j, nb) in enumerate(all_nbs)
-            A[global_i + N, nb] = convert(TA, w_u2[j])
-            A[global_i + N, nb + N] = convert(TA, w_v2[j])
+        # Row i+N (y-traction): nxμ∂u/∂y + nyλ*∂u/∂x + nxμ∂v/∂x + ny(λ*+2μ)∂v/∂y = ty
+        c_ux2 = n_y * λstar
+        c_uy2 = n_x * μ_lame
+        c_vx2 = n_x * μ_lame
+        c_vy2 = n_y * (λstar + 2μ_lame)
+        @inbounds for j in 1:n_stencil
+            col = stencil[j]
+            A[global_i + N, col] = convert(TA, c_ux2 * w_dx_buf[j] + c_uy2 * w_dy_buf[j])
+            A[global_i + N, col + N] = convert(TA, c_vx2 * w_dx_buf[j] + c_vy2 * w_dy_buf[j])
         end
         b[global_i + N] = convert(TB, ty)
     end
