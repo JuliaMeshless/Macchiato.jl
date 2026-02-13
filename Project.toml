@@ -1,7 +1,7 @@
 name = "MeshlessMultiphysics"
 uuid = "cd40ceae-7681-4e2e-9056-ba6e356aca3e"
-authors = ["Kyle Beggs"]
 version = "0.1.0"
+authors = ["Kyle Beggs"]
 
 [deps]
 Accessors = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
@@ -28,22 +28,22 @@ WhatsThePoint = "5faae8f1-f507-432f-bd56-cf2f1161ab6f"
 WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 
 [compat]
-CUDA = "5"
 Accessors = "0.1"
+CUDA = "5"
 CoordRefSystems = "0.19"
 FileIO = "1.16.6"
 JLD2 = "0.4, 0.5"
 LinearSolve = "3.50"
 LoopVectorization = "0.12"
 Meshes = "0.56"
-OhMyThreads = "0.7, 0.8"
 NearestNeighbors = "0.4"
+OhMyThreads = "0.7, 0.8"
 OrdinaryDiffEq = "6"
-StaticArrays = "1"
-TestItemRunner = "1"
-RadialBasisFunctions = "0.3"
 ProgressMeter = "1"
+RadialBasisFunctions = "0.3, 0.2"
+StaticArrays = "1"
 Statistics = "1"
+TestItemRunner = "1"
 Unitful = "1"
 WhatsThePoint = "0.1"
 WriteVTK = "1.21"
