@@ -20,7 +20,7 @@ struct Displacement{F <: Function} <: Dirichlet
 end
 
 Displacement(ux::Number, uy::Number) = Displacement((x, t) -> (ux, uy))
-Displacement(ux::Function, uy::Function) = Displacement((x, t) -> (ux(x, t), uy(x, t)))
+Displacement(ux::Function, uy::Function) = Displacement((x, t) -> (ux(x), uy(x)))
 
 (bc::Displacement)(x, t) = bc.f(x, t)
 

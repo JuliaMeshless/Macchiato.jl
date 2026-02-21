@@ -8,7 +8,7 @@ end
 function Domain(cloud::PointCloud, boundaries, models)
     for bc_surf_name in keys(boundaries)
         if !hassurface(cloud.boundary, bc_surf_name)
-            throw(ArgumentError("The boundary condition $bc_name is not associated with a `PointCloud` boundary."))
+            throw(ArgumentError("The boundary condition $bc_surf_name is not associated with a `PointCloud` boundary."))
         end
     end
     # make sure it is a vector so we can push! to it later
@@ -36,8 +36,6 @@ function Domain(cloud::PointCloud, boundaries, models)
         offset += N
         ids_bcs[surf_name] = (ids, boundaries[surf_name])
     end
-
-    display(ids_bcs)
 
     return Domain(cloud, Dict(ids_bcs), models, :domain1)
 end
