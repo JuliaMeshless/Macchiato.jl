@@ -4,8 +4,6 @@ This tutorial walks through a complete 2D steady-state heat conduction simulatio
 
 ## Installation
 
-MeshlessMultiphysics.jl depends on the other JuliaMeshless packages. Install all three:
-
 ```julia
 using Pkg
 Pkg.add(url="https://github.com/JuliaMeshless/WhatsThePoint.jl")
@@ -29,11 +27,7 @@ split_surface!(part, 75°)
 # This creates :surface1 (bottom), :surface2 (right), :surface3 (top), :surface4 (left)
 ```
 
-**Why point clouds instead of meshes?** Meshless methods don't need element connectivity — just point positions and (for boundary points) outward normals. This avoids all mesh quality issues and makes refinement trivial.
-
-**Why split surfaces?** Boundary conditions are assigned per surface. Splitting at corners lets you prescribe different conditions on each edge.
-
-Now fill the interior:
+Splitting at corners creates named surfaces so you can assign different boundary conditions to each edge. Now fill the interior:
 
 ```julia
 # Discretize: place interior points at ~1/33 m spacing
@@ -56,15 +50,7 @@ using MeshlessMultiphysics
 model = SolidEnergy(k=1.0, ρ=1.0, cₚ=1.0)
 ```
 
-This defines the heat equation with thermal conductivity `k`, density `ρ`, and specific heat `cₚ`. The thermal diffusivity is `α = k/(ρ cₚ)`.
-
-All models subtype `AbstractModel`. The type hierarchy is:
-- `AbstractModel`
-  - `Solid` — solid-body models (`SolidEnergy`, `LinearElasticity`)
-  - `Fluid` — fluid models (`IncompressibleNavierStokes`)
-  - `Time` — time mode markers (`Steady`, `Unsteady`)
-
-Each model defines a `physics_domain` trait (e.g., `EnergyPhysics()`) that is used to validate compatibility with boundary conditions.
+This defines the heat equation with thermal conductivity `k`, density `ρ`, and specific heat `cₚ`.
 
 ## Step 3: Define Boundary Conditions
 
@@ -100,20 +86,17 @@ Adiabatic()
 Convection(10.0, 1.0, 25.0)
 ```
 
-Under the hood, `Temperature` is an alias for `PrescribedValue{EnergyPhysics}`. Each physics domain has its own set of aliases — see the [API Reference](@ref) for the complete list.
+See the [API Reference](@ref) for the complete list of boundary condition types.
 
 ## Step 4: Create the Domain
 
-The [`Domain`](@ref) ties geometry, boundary conditions, and models together:
+The [`Domain`](@ref) ties geometry, boundary conditions, and model together:
 
 ```julia
 domain = Domain(cloud, bcs, model)
 ```
 
-At construction, the `Domain`:
-1. Verifies that every BC key (`:surface1`, etc.) matches a surface in the point cloud
-2. Validates that each BC's physics domain is compatible with the model's physics domain
-3. Computes the global index ranges for each surface's points
+The `Domain` validates that every BC key matches a surface in the point cloud and that each BC is compatible with the chosen physics model.
 
 ## Step 5: Create and Run the Simulation
 
