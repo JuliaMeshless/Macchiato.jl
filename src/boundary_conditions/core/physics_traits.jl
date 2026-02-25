@@ -61,8 +61,7 @@ function physics_domain end
 Check if a BC's physics domain is compatible with a model's physics domain.
 Domains are compatible with themselves; `WallPhysics` is also compatible with fluid and energy domains.
 """
-#same domain
-is_compatible(::T, ::T) where {T <: PhysicsDomain} = true
+is_compatible(::T, ::T) where {T <: PhysicsDomain} = true # same domain
 
 #different models with WallPhysics
 is_compatible(::WallPhysics, ::FluidPhysics) = true

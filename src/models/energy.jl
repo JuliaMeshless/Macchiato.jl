@@ -1,3 +1,24 @@
+"""
+    SolidEnergy(; k, ρ, cₚ, source=nothing)
+
+Solid-body energy (heat) transport model.
+
+Solves the heat equation in a solid medium:
+- **Steady-state**: `k ∇²T = -f` (Poisson equation)
+- **Transient**: `ρ cₚ ∂T/∂t = k ∇²T + f`
+
+# Fields
+- `k`: Thermal conductivity
+- `ρ`: Density
+- `cₚ`: Specific heat capacity
+- `source`: Optional volumetric source term `f(x, t) -> value` (default: `nothing`)
+
+# Example
+```julia
+model = SolidEnergy(k=50.0, ρ=7800.0, cₚ=500.0)
+model = SolidEnergy(k=1.0, ρ=1.0, cₚ=1.0, source=(x, t) -> -4.0)
+```
+"""
 @kwdef struct SolidEnergy{K, P, C, S} <: AbstractModel
     k::K
     ρ::P
