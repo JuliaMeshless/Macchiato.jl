@@ -11,8 +11,8 @@ Steady-state heat conduction on a 1m × 1m square with fixed temperatures on eac
 ```julia
 using WhatsThePoint
 import WhatsThePoint as WTP
-using MeshlessMultiphysics
-import MeshlessMultiphysics as MM
+using Macchiato
+import Macchiato as MM
 using Unitful: m, °, ustrip
 using CairoMakie
 
@@ -96,8 +96,8 @@ where I = 2D³/3 is the second moment of area.
 ```julia
 using WhatsThePoint
 import WhatsThePoint as WTP
-using MeshlessMultiphysics
-import MeshlessMultiphysics as MM
+using Macchiato
+import Macchiato as MM
 using RadialBasisFunctions: PHS
 using Unitful: m, °, ustrip
 using LinearAlgebra

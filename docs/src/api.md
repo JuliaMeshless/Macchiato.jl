@@ -1,7 +1,7 @@
 # API Reference
 
 ```@meta
-CurrentModule = MeshlessMultiphysics
+CurrentModule = Macchiato
 ```
 
 ## Domain

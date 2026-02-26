@@ -1,4 +1,4 @@
-module MeshlessMultiphysics
+module Macchiato
 
 using CUDA
 using LinearAlgebra
@@ -113,7 +113,7 @@ export findmin_turbo
 function __init__()
     threads = Threads.nthreads()
     if threads > 1
-        @info "MeshlessMultiphysics will use $threads threads"
+        @info "Macchiato will use $threads threads"
     end
 
     if CUDA.has_cuda()

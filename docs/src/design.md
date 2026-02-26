@@ -1,6 +1,6 @@
 # Package Design
 
-This page describes the architecture of MeshlessMultiphysics.jl for users who want to understand the internals or extend the package with new physics.
+This page describes the architecture of Macchiato.jl for users who want to understand the internals or extend the package with new physics.
 
 ## Simulation Pipeline
 
@@ -184,7 +184,7 @@ end
 
 ### 4. Register in the module
 
-In `src/MeshlessMultiphysics.jl`:
+In `src/Macchiato.jl`:
 
 ```julia
 export ElectrostaticPhysics

@@ -8,7 +8,7 @@ This tutorial walks through a complete 2D steady-state heat conduction simulatio
 using Pkg
 Pkg.add(url="https://github.com/JuliaMeshless/WhatsThePoint.jl")
 Pkg.add(url="https://github.com/JuliaMeshless/RadialBasisFunctions.jl")
-Pkg.add(url="https://github.com/JuliaMeshless/MeshlessMultiphysics.jl")
+Pkg.add(url="https://github.com/JuliaMeshless/Macchiato.jl")
 ```
 
 ## Step 1: Define the Geometry
@@ -45,7 +45,7 @@ The resulting `PointCloud` contains both boundary points (organized by surface) 
 Physics models define the PDE being solved. For heat conduction, use [`SolidEnergy`](@ref):
 
 ```julia
-using MeshlessMultiphysics
+using Macchiato
 
 model = SolidEnergy(k=1.0, ρ=1.0, cₚ=1.0)
 ```

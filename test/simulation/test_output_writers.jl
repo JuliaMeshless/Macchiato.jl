@@ -1,6 +1,6 @@
 using Test
-using MeshlessMultiphysics
-import MeshlessMultiphysics as MM
+using Macchiato
+import Macchiato as MM
 using WhatsThePoint
 import WhatsThePoint as WTP
 using Unitful: m, °

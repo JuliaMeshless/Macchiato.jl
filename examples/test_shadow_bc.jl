@@ -1,5 +1,5 @@
-using MeshlessMultiphysics
-import MeshlessMultiphysics as MM
+using Macchiato
+import Macchiato as MM
 using RadialBasisFunctions
 using WhatsThePoint
 import WhatsThePoint as WTP

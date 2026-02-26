@@ -1,5 +1,5 @@
-using MeshlessMultiphysics
-const MM = MeshlessMultiphysics
+using Macchiato
+const MM = Macchiato
 using RadialBasisFunctions
 using WhatsThePoint
 using StaticArrays

@@ -1,30 +1,30 @@
-# MeshlessMultiphysics.jl
+# Macchiato.jl
 
-[![Build Status](https://github.com/JuliaMeshless/MeshlessMultiphysics.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/JuliaMeshless/MeshlessMultiphysics.jl/actions/workflows/CI.yml?query=branch%3Amain)
-[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://JuliaMeshless.github.io/MeshlessMultiphysics.jl/stable)
-[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://JuliaMeshless.github.io/MeshlessMultiphysics.jl/dev)
-[![License File](https://img.shields.io/badge/license-MIT-blue)](https://github.com/JuliaMeshless/MeshlessMultiphysics.jl/blob/master/LICENSE)
+[![Build Status](https://github.com/JuliaMeshless/Macchiato.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/JuliaMeshless/Macchiato.jl/actions/workflows/CI.yml?query=branch%3Amain)
+[![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://JuliaMeshless.github.io/Macchiato.jl/stable)
+[![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://JuliaMeshless.github.io/Macchiato.jl/dev)
+[![License File](https://img.shields.io/badge/license-MIT-blue)](https://github.com/JuliaMeshless/Macchiato.jl/blob/master/LICENSE)
 
-A Julia framework for solving partial differential equations using radial basis function (RBF) meshless methods. Instead of generating and managing a mesh, MeshlessMultiphysics.jl operates directly on scattered point clouds — simplifying geometry handling, avoiding mesh quality issues, and enabling straightforward refinement by simply adding points.
+A Julia framework for solving partial differential equations using radial basis function (RBF) meshless methods. Instead of generating and managing a mesh, Macchiato.jl operates directly on scattered point clouds — simplifying geometry handling, avoiding mesh quality issues, and enabling straightforward refinement by simply adding points.
 
 ## The JuliaMeshless Ecosystem
 
-MeshlessMultiphysics.jl is part of the [JuliaMeshless](https://github.com/JuliaMeshless) organization, which provides three composable packages:
+Macchiato.jl is part of the [JuliaMeshless](https://github.com/JuliaMeshless) organization, which provides three composable packages:
 
 | Package | Role |
 |---------|------|
 | [**WhatsThePoint.jl**](https://github.com/JuliaMeshless/WhatsThePoint.jl) | Point cloud generation — boundary discretization, surface splitting, interior fill algorithms |
 | [**RadialBasisFunctions.jl**](https://github.com/JuliaMeshless/RadialBasisFunctions.jl) | RBF interpolation and differential operators — Laplacian, gradient, partial derivatives, custom operators |
-| [**MeshlessMultiphysics.jl**](https://github.com/JuliaMeshless/MeshlessMultiphysics.jl) | Physics simulation framework — models, boundary conditions, solvers, and post-processing |
+| [**Macchiato.jl**](https://github.com/JuliaMeshless/Macchiato.jl) | Physics simulation framework — models, boundary conditions, solvers, and post-processing |
 
-WhatsThePoint.jl creates the geometry, RadialBasisFunctions.jl provides the numerical building blocks, and MeshlessMultiphysics.jl ties them together into complete simulations.
+WhatsThePoint.jl creates the geometry, RadialBasisFunctions.jl provides the numerical building blocks, and Macchiato.jl ties them together into complete simulations.
 
 ## Quick Example
 
 Steady-state heat conduction on a unit square with prescribed temperatures:
 
 ```julia
-using WhatsThePoint, MeshlessMultiphysics, LinearSolve, Unitful: m
+using WhatsThePoint, Macchiato, LinearSolve, Unitful: m
 
 # Geometry: unit square point cloud
 part = PointBoundary(rectangle(1m, 1m)...)
@@ -69,19 +69,19 @@ All BCs accept constant values or functions `(x, t) -> value` for spatially/temp
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/JuliaMeshless/MeshlessMultiphysics.jl")
+Pkg.add(url="https://github.com/JuliaMeshless/Macchiato.jl")
 ```
 
 Or for development:
 
 ```julia
-Pkg.develop(url="https://github.com/JuliaMeshless/MeshlessMultiphysics.jl")
+Pkg.develop(url="https://github.com/JuliaMeshless/Macchiato.jl")
 ```
 
 ## Documentation
 
-Full documentation is available at [juliameshless.github.io/MeshlessMultiphysics.jl](https://JuliaMeshless.github.io/MeshlessMultiphysics.jl/dev).
+Full documentation is available at [juliameshless.github.io/Macchiato.jl](https://JuliaMeshless.github.io/Macchiato.jl/dev).
 
 ## Contributing
 
-Contributions are welcome! The package uses a trait-based design that makes it straightforward to add new physics domains. See the [Package Design](https://JuliaMeshless.github.io/MeshlessMultiphysics.jl/dev/design/) section of the docs for the architecture overview and extension guide.
+Contributions are welcome! The package uses a trait-based design that makes it straightforward to add new physics domains. See the [Package Design](https://JuliaMeshless.github.io/Macchiato.jl/dev/design/) section of the docs for the architecture overview and extension guide.

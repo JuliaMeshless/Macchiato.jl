@@ -1,15 +1,15 @@
 ```@meta
-CurrentModule = MeshlessMultiphysics
+CurrentModule = Macchiato
 ```
 
-# MeshlessMultiphysics.jl
+# Macchiato.jl
 
 Solve partial differential equations on scattered point clouds — no mesh required.
 
 ## Quick Start
 
 ```julia
-using WhatsThePoint, MeshlessMultiphysics
+using WhatsThePoint, Macchiato
 using Unitful: m, °
 
 # 1. Geometry: 1m × 1m rectangle point cloud
@@ -51,15 +51,15 @@ See the [Examples](@ref) page for complete worked examples with visualization co
 - **Easy refinement** — add more points where you need accuracy; no remeshing required
 - **Natural for moving boundaries** — points move freely without topological constraints
 
-MeshlessMultiphysics.jl uses **radial basis function (RBF)** collocation, where differential operators are approximated at each point using its local neighborhood of nearest neighbors.
+Macchiato.jl uses **radial basis function (RBF)** collocation, where differential operators are approximated at each point using its local neighborhood of nearest neighbors.
 
 ## The JuliaMeshless Ecosystem
 
-MeshlessMultiphysics.jl is part of the [JuliaMeshless](https://github.com/JuliaMeshless) organization — three composable packages that form a complete simulation pipeline:
+Macchiato.jl is part of the [JuliaMeshless](https://github.com/JuliaMeshless) organization — three composable packages that form a complete simulation pipeline:
 
 ```
 ┌─────────────────────┐     ┌──────────────────────────┐     ┌─────────────────────────────┐
-│   WhatsThePoint.jl  │     │ RadialBasisFunctions.jl  │     │  MeshlessMultiphysics.jl    │
+│   WhatsThePoint.jl  │     │ RadialBasisFunctions.jl  │     │  Macchiato.jl    │
 │                     │     │                          │     │                             │
 │  Boundary creation  │────▶│  RBF interpolation       │────▶│  Physics models             │
 │  Surface splitting  │     │  Differential operators   │     │  Boundary conditions        │
@@ -71,7 +71,7 @@ MeshlessMultiphysics.jl is part of the [JuliaMeshless](https://github.com/JuliaM
 
 - [**WhatsThePoint.jl**](https://github.com/JuliaMeshless/WhatsThePoint.jl) — Point cloud generation from geometric primitives, surface splitting, interior fill, and point repulsion.
 - [**RadialBasisFunctions.jl**](https://github.com/JuliaMeshless/RadialBasisFunctions.jl) — RBF interpolation and meshless differential operators (Laplacian, partial, gradient, custom) with automatic stencil selection.
-- [**MeshlessMultiphysics.jl**](https://github.com/JuliaMeshless/MeshlessMultiphysics.jl) — Physics models, boundary conditions, steady-state and transient solvers, field extraction, and VTK export.
+- [**Macchiato.jl**](https://github.com/JuliaMeshless/Macchiato.jl) — Physics models, boundary conditions, steady-state and transient solvers, field extraction, and VTK export.
 
 ## Supported Physics
 

@@ -1,4 +1,4 @@
-using MeshlessMultiphysics
+using Macchiato
 using TestItemRunner
 using Test
 
@@ -12,7 +12,7 @@ testfiles = [
     "models/test_linear_elasticity.jl"
 ]
 
-@testset "MeshlessMultiphysics.jl" begin
+@testset "Macchiato.jl" begin
     for testfile in testfiles
         println("testing $testfile...")
         include(testfile)

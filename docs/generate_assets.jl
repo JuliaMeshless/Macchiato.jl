@@ -6,8 +6,8 @@ using Pkg
 Pkg.activate(joinpath(@__DIR__))
 Pkg.instantiate()
 
-using MeshlessMultiphysics
-import MeshlessMultiphysics as MM
+using Macchiato
+import Macchiato as MM
 using WhatsThePoint
 import WhatsThePoint as WTP
 using RadialBasisFunctions: PHS
