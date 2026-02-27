@@ -3,7 +3,7 @@
 # ============================================================================
 
 """
-    PrescribedValue{P<:PhysicsDomain, F<:Function} <: Dirichlet
+    PrescribedValue{F<:Function} <: Dirichlet
 
 Generic Dirichlet BC that prescribes a value via a function.
 
@@ -12,30 +12,31 @@ The function has signature `f(x, t) -> value` where:
 - `t`: time
 - Returns the prescribed value at that location and time
 
-# Type Parameters
-- `P`: Physics domain (EnergyPhysics, FluidPhysics, etc.)
-- `F`: Function type with signature (x, t) -> value
+# Fields
+- `f`: Function with signature (x, t) -> value
+- `name`: Display name (e.g., `:Temperature`, `:PrescribedValue`)
 
-Use physics-specific aliases instead of this directly (e.g., `Temperature`, `VelocityInlet`).
+For built-in physics, use named constructors (e.g., `Temperature`, `VelocityInlet`).
+For custom PDEs, use the unparameterized constructors directly: `PrescribedValue(0.0)`.
 """
-struct PrescribedValue{P <: PhysicsDomain, F <: Function} <: Dirichlet
+struct PrescribedValue{F <: Function} <: Dirichlet
     f::F
+    name::Symbol
 end
 
-# Convenience constructors
-PrescribedValue{P}(value::Number) where {P} = PrescribedValue{P}((x, t) -> value)
-PrescribedValue{P}(f::Function) where {P} = PrescribedValue{P, typeof(f)}(f)
+# Unparameterized constructors for custom PDEs
+PrescribedValue(v::Number) = PrescribedValue((x, t) -> v, :PrescribedValue)
+PrescribedValue(f::Function) = PrescribedValue{typeof(f)}(f, :PrescribedValue)
 
 # BC evaluation: bc(x, t) returns the prescribed value at (x, t)
 (bc::PrescribedValue)(x, t) = bc.f(x, t)
 
-# Physics domain trait
-physics_domain(::Type{<:PrescribedValue{P}}) where {P} = P()
+Base.show(io::IO, bc::PrescribedValue) = print(io, bc.name)
 
 # ============================================================================
 
 """
-    PrescribedFlux{P<:PhysicsDomain, F<:Function} <: Neumann
+    PrescribedFlux{F<:Function} <: Neumann
 
 Generic Neumann BC that prescribes a flux (normal derivative) via a function.
 
@@ -46,45 +47,50 @@ The function has signature `f(x, t) -> flux_value` where:
 - `t`: time
 - Returns the prescribed flux value at that location and time
 
-# Type Parameters
-- `P`: Physics domain (EnergyPhysics, FluidPhysics, etc.)
-- `F`: Function type with signature (x, t) -> flux
+# Fields
+- `f`: Function with signature (x, t) -> flux
+- `name`: Display name (e.g., `:HeatFlux`, `:PrescribedFlux`)
 
-Use physics-specific aliases instead of this directly (e.g., `HeatFlux`, `Traction`).
+For built-in physics, use named constructors (e.g., `HeatFlux`, `Traction`).
+For custom PDEs, use the unparameterized constructors directly: `PrescribedFlux(1.0)`.
 """
-struct PrescribedFlux{P <: PhysicsDomain, F <: Function} <: Neumann
+struct PrescribedFlux{F <: Function} <: Neumann
     f::F
+    name::Symbol
 end
 
-# Convenience constructors
-PrescribedFlux{P}(flux::Number) where {P} = PrescribedFlux{P}((x, t) -> flux)
-PrescribedFlux{P}(f::Function) where {P} = PrescribedFlux{P, typeof(f)}(f)
+# Unparameterized constructors for custom PDEs
+PrescribedFlux(v::Number) = PrescribedFlux((x, t) -> v, :PrescribedFlux)
+PrescribedFlux(f::Function) = PrescribedFlux{typeof(f)}(f, :PrescribedFlux)
 
 # BC evaluation: bc(x, t) returns the prescribed flux at (x, t)
 (bc::PrescribedFlux)(x, t) = bc.f(x, t)
 
-# Physics domain trait
-physics_domain(::Type{<:PrescribedFlux{P}}) where {P} = P()
+Base.show(io::IO, bc::PrescribedFlux) = print(io, bc.name)
 
 # ============================================================================
 
 """
-    ZeroFlux{P<:PhysicsDomain} <: Neumann
+    ZeroFlux <: Neumann
 
 Generic Neumann BC with zero flux: ∂u/∂n = 0.
 
-Represents symmetry, insulation, or fully-developed flow depending on physics domain.
+Represents symmetry, insulation, or fully-developed flow depending on context.
 
-# Type Parameters
-- `P`: Physics domain (EnergyPhysics, FluidPhysics, etc.)
+# Fields
+- `name`: Display name (e.g., `:Adiabatic`, `:VelocityOutlet`, `:ZeroFlux`)
 
-Use physics-specific aliases instead of this directly (e.g., `Adiabatic`, `VelocityOutlet`).
+For built-in physics, use named constructors (e.g., `Adiabatic`, `VelocityOutlet`).
+For custom PDEs, use the unparameterized constructor directly: `ZeroFlux()`.
 """
-struct ZeroFlux{P <: PhysicsDomain} <: Neumann end
+struct ZeroFlux <: Neumann
+    name::Symbol
+end
+
+# Unparameterized constructor for custom PDEs
+ZeroFlux() = ZeroFlux(:ZeroFlux)
 
 # BC evaluation: always returns 0
-(bc::ZeroFlux)(x::AbstractVector{T}, t::T) where {T} = zero(T)
-#TODO: Consider (bc::ZeroFlux)(x::AbstractVector{A}, t::B) where {A, B} = zero(promote_type(A, B))
+(::ZeroFlux)(x, t) = 0.0
 
-# Physics domain trait
-physics_domain(::Type{<:ZeroFlux{P}}) where {P} = P()
+Base.show(io::IO, bc::ZeroFlux) = print(io, bc.name)

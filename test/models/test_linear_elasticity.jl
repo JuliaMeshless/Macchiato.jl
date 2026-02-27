@@ -37,18 +37,14 @@ include(joinpath(@__DIR__, "..", "end_2_end", "2d_square.jl"))
         μ, λstar = lame_parameters(model)
         @test isfinite(μ)
         @test isfinite(λstar)
-        # For ν → 0.5 (plane stress): λ* → E/3
-        @test λstar ≈ 1.0 / 3 rtol = 0.01
+        # For ν → 0.5 (plane stress): λ* → 2μ = 2E/3
+        @test λstar ≈ 2.0 / 3 rtol = 0.01
     end
 
     @testset "_num_vars" begin
         model = LinearElasticity(E = 200e3, ν = 0.3)
         @test MM._num_vars(model, 2) == 2
         @test MM._num_vars(model, 3) == 3
-    end
-
-    @testset "physics_domain" begin
-        @test MM.physics_domain(LinearElasticity{Float64, Float64, Nothing, Nothing}) isa MechanicsPhysics
     end
 
     @testset "show method" begin
@@ -76,10 +72,6 @@ end
         @test bc3([3.0, 4.0], 0.0) == (3.0, -4.0)
     end
 
-    @testset "Displacement physics domain" begin
-        @test MM.physics_domain(typeof(Displacement(0.0, 0.0))) isa MechanicsPhysics
-    end
-
     @testset "Traction construction" begin
         bc1 = Traction(0.0, -1000.0)
         @test bc1([0.0, 0.0], 0.0) == (0.0, -1000.0)
@@ -93,9 +85,6 @@ end
         @test bc([0.0, 0.0], 0.0) == (0.0, 0.0)
     end
 
-    @testset "BC compatibility with LinearElasticity" begin
-        @test MM.is_compatible(MechanicsPhysics(), MechanicsPhysics())
-    end
 end
 
 # ============================================================================

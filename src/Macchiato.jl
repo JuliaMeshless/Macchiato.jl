@@ -32,11 +32,8 @@ include("boundary_conditions/numerical/derivatives.jl")
 include("boundary_conditions/boundary_conditions.jl")
 
 export AbstractBoundaryCondition
-# Physics domain traits
-export PhysicsDomain, EnergyPhysics, FluidPhysics, WallPhysics, MechanicsPhysics
-export physics_domain, is_compatible
 # Generic BC types
-export FixedValue, Flux, ZeroGradient
+export PrescribedValue, PrescribedFlux, ZeroFlux
 
 #################### Domains ####################
 include("domain.jl")

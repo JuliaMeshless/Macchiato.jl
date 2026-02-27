@@ -24,8 +24,6 @@ Displacement(ux::Function, uy::Function) = Displacement((x, t) -> (ux(x), uy(x))
 
 (bc::Displacement)(x, t) = bc.f(x, t)
 
-physics_domain(::Type{<:Displacement}) = MechanicsPhysics()
-
 Base.show(io::IO, ::Displacement) = print(io, "Displacement")
 
 # ============================================================================
@@ -55,8 +53,6 @@ Traction(tx::Number, ty::Number) = Traction((x, t) -> (tx, ty))
 Traction(tx::Function, ty::Function) = Traction((x, t) -> (tx(x, t), ty(x, t)))
 
 (bc::Traction)(x, t) = bc.f(x, t)
-
-physics_domain(::Type{<:Traction}) = MechanicsPhysics()
 
 Base.show(io::IO, ::Traction) = print(io, "Traction")
 

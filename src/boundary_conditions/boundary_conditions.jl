@@ -2,7 +2,6 @@
 # Includes: core traits, BC hierarchy, generic types, and numerical methods
 
 # Core infrastructure
-include("core/physics_traits.jl")
 include("core/bc_hierarchy.jl")
 include("core/generic_types.jl")
 

@@ -30,8 +30,6 @@ end
 
 _num_vars(::LinearElasticity, dim::Int) = dim
 
-physics_domain(::Type{<:LinearElasticity}) = MechanicsPhysics()
-
 """
     lame_parameters(model::LinearElasticity)
 
