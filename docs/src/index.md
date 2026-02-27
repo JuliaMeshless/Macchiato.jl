@@ -6,6 +6,8 @@ CurrentModule = Macchiato
 
 Solve partial differential equations on scattered point clouds — no mesh required.
 
+Macchiato.jl is a **general-purpose meshless PDE framework**. Define any PDE by implementing a small model interface, and Macchiato handles operator assembly, boundary condition application, and time integration. The package ships with ready-to-use models for heat transfer, linear elasticity, and fluid dynamics — but these are convenience built-ins, not the whole story. See [Custom PDEs](@ref) to learn how to solve your own equations.
+
 ## Quick Start
 
 ```julia
@@ -59,21 +61,23 @@ Macchiato.jl is part of the [JuliaMeshless](https://github.com/JuliaMeshless) or
 
 ```
 ┌─────────────────────┐     ┌──────────────────────────┐     ┌─────────────────────────────┐
-│   WhatsThePoint.jl  │     │ RadialBasisFunctions.jl  │     │  Macchiato.jl    │
+│   WhatsThePoint.jl  │     │ RadialBasisFunctions.jl  │     │  Macchiato.jl               │
 │                     │     │                          │     │                             │
-│  Boundary creation  │────▶│  RBF interpolation       │────▶│  Physics models             │
+│  Boundary creation  │────▶│  RBF interpolation       │────▶│  PDE model interface        │
 │  Surface splitting  │     │  Differential operators   │     │  Boundary conditions        │
 │  Interior fill      │     │  (∇², ∂/∂x, custom)      │     │  Simulation & time stepping │
 │  Point repulsion    │     │  KNN stencil selection    │     │  Field extraction & VTK I/O │
 └─────────────────────┘     └──────────────────────────┘     └─────────────────────────────┘
-        Geometry                   Numerics                        Physics
+        Geometry                   Numerics                      PDE Framework
 ```
 
 - [**WhatsThePoint.jl**](https://github.com/JuliaMeshless/WhatsThePoint.jl) — Point cloud generation from geometric primitives, surface splitting, interior fill, and point repulsion.
 - [**RadialBasisFunctions.jl**](https://github.com/JuliaMeshless/RadialBasisFunctions.jl) — RBF interpolation and meshless differential operators (Laplacian, partial, gradient, custom) with automatic stencil selection.
-- [**Macchiato.jl**](https://github.com/JuliaMeshless/Macchiato.jl) — Physics models, boundary conditions, steady-state and transient solvers, field extraction, and VTK export.
+- [**Macchiato.jl**](https://github.com/JuliaMeshless/Macchiato.jl) — General-purpose PDE framework: define custom models or use built-in physics (heat, elasticity, fluids), with boundary conditions, steady-state and transient solvers, field extraction, and VTK export.
 
-## Supported Physics
+## Built-in Models
+
+Macchiato ships with ready-to-use models for common physics. You can also [define your own](@ref "Custom PDEs") for any PDE.
 
 | Physics | Model | Status |
 |---------|-------|--------|
@@ -84,6 +88,7 @@ Macchiato.jl is part of the [JuliaMeshless](https://github.com/JuliaMeshless) or
 ## Next Steps
 
 - [Getting Started](@ref) — step-by-step tutorial from geometry to results
+- [Custom PDEs](@ref) — define and solve your own equations
 - [Examples](@ref) — complete worked examples with visualization
 - [Package Design](@ref) — architecture and extension guide
 - [API Reference](@ref) — full type and function documentation

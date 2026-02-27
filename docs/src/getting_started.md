@@ -52,6 +52,9 @@ model = SolidEnergy(k=1.0, ρ=1.0, cₚ=1.0)
 
 This defines the heat equation with thermal conductivity `k`, density `ρ`, and specific heat `cₚ`.
 
+!!! tip "Solving your own PDE?"
+    `SolidEnergy` is one of several built-in models, but you can define a model for **any** PDE. See the [Custom PDEs](@ref) tutorial to learn how.
+
 ## Step 3: Define Boundary Conditions
 
 Boundary conditions are specified as a `Dict` mapping surface names to BC objects:
@@ -87,6 +90,9 @@ Convection(10.0, 1.0, 25.0)
 ```
 
 See the [API Reference](@ref) for the complete list of boundary condition types.
+
+!!! tip "Named BCs are aliases for generic types"
+    `Temperature`, `HeatFlux`, and `Adiabatic` are convenience aliases for `PrescribedValue{EnergyEquations}`, `PrescribedFlux{EnergyEquations}`, and `ZeroFlux{EnergyEquations}`. When defining a [custom PDE](@ref "Custom PDEs"), you can use the generic constructors directly — `PrescribedValue(0.0)`, `PrescribedFlux(1.0)`, `ZeroFlux()` — with no trait boilerplate required.
 
 ## Step 4: Create the Domain
 

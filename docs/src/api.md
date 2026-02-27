@@ -56,15 +56,16 @@ Robin
 DerivativeBoundaryCondition
 ```
 
-### Physics Domain Traits
+### Equation Set Traits
 
 ```@docs
-PhysicsDomain
-EnergyPhysics
-FluidPhysics
-WallPhysics
-MechanicsPhysics
-physics_domain
+EquationSet
+EnergyEquations
+FluidEquations
+UniversalEquations
+MechanicsEquations
+GenericEquations
+equation_set
 is_compatible
 ```
 
@@ -75,6 +76,9 @@ PrescribedValue
 PrescribedFlux
 ZeroFlux
 ```
+
+!!! note
+    These generic types work with **any** equation set — not just the built-in ones. For custom PDEs, use the unparameterized constructors directly: `PrescribedValue(0.0)`, `PrescribedFlux(1.0)`, `ZeroFlux()`. See [Custom PDEs](@ref) for a complete example.
 
 ### Energy BCs
 

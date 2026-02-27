@@ -33,18 +33,21 @@ AbstractModel
     └── Unsteady
 ```
 
+`AbstractModel` represents **any PDE** — the built-in subtypes (`SolidEnergy`, `LinearElasticity`, etc.) are convenience models that ship with the package. You can define your own model for any equation; see [Custom PDEs](@ref) for a complete walkthrough.
+
 Every model must implement:
-- `physics_domain(::Type{<:MyModel})` — returns a `PhysicsDomain` trait for BC compatibility checking
 - `_num_vars(::MyModel, dim)` — number of solution variables (1 for scalar, `dim` for vector, `dim+1` for velocity+pressure)
 - `make_system(::MyModel, domain)` — assemble `(A, b)` for steady-state
 - `make_f(::MyModel, domain)` — return `f(du, u, p, t)` for transient ODE integration
+
+Optionally, models can implement `equation_set(::Type{<:MyModel})` to return an [`EquationSet`](@ref) trait for BC compatibility checking. If not defined, it defaults to `GenericEquations()` which is compatible with everything.
 
 ### Boundary Conditions
 
 ```
 AbstractBoundaryCondition
 ├── Dirichlet                    # u = g
-│   ├── PrescribedValue{P, F}   # Generic: parameterized by PhysicsDomain P
+│   ├── PrescribedValue{P, F}   # Generic: parameterized by EquationSet P
 │   └── Displacement             # Mechanics-specific (vector-valued)
 └── DerivativeBoundaryCondition
     ├── Neumann                  # ∂u/∂n = q
@@ -57,7 +60,7 @@ AbstractBoundaryCondition
 
 ## Boundary Condition System
 
-The BC system separates **mathematical type** from **physics domain** using a two-axis design:
+The BC system separates **mathematical type** from **equation set** using a two-axis design:
 
 ### Mathematical Axis
 
@@ -66,44 +69,53 @@ The mathematical type determines *how* the BC modifies the linear system:
 - **Neumann** → replace the row with normal derivative weights: `A[i,:] = ∂/∂n weights`, `b[i] = q`
 - **Robin** → combine value and derivative: `A[i,:] = α·eᵢ + β·∂/∂n weights`, `b[i] = g`
 
-### Physics Domain Axis
+### Equation Set Axis
 
-The physics domain determines *which models* a BC is compatible with:
-
-```julia
-abstract type PhysicsDomain end
-struct EnergyPhysics    <: PhysicsDomain end
-struct FluidPhysics     <: PhysicsDomain end
-struct MechanicsPhysics <: PhysicsDomain end
-struct WallPhysics      <: PhysicsDomain end  # compatible with Energy, Fluids, Mechanics
-```
-
-Compatibility is checked at `Domain` construction via `is_compatible(bc_domain, model_domain)`. Same-domain pairs are always compatible. `WallPhysics` is compatible with all other domains.
-
-### Generic Types and Physics Aliases
-
-The generic BC types are parameterized by physics domain:
+The equation set determines *which models* a BC is compatible with:
 
 ```julia
-struct PrescribedValue{P <: PhysicsDomain, F <: Function} <: Dirichlet ... end
-struct PrescribedFlux{P <: PhysicsDomain, F <: Function} <: Neumann ... end
-struct ZeroFlux{P <: PhysicsDomain} <: Neumann end
+abstract type EquationSet end
+struct EnergyEquations      <: EquationSet end
+struct FluidEquations       <: EquationSet end
+struct MechanicsEquations   <: EquationSet end
+struct UniversalEquations   <: EquationSet end  # compatible with all equation sets
+struct GenericEquations     <: EquationSet end  # default for custom PDEs, compatible with all
 ```
 
-Physics-specific aliases provide user-friendly names:
+Compatibility is checked at `Domain` construction via `is_compatible(bc_set, model_set)`. Same-type pairs are always compatible. `UniversalEquations` and `GenericEquations` are compatible with all other equation sets.
+
+### Generic Types and Named Aliases
+
+The generic BC types are parameterized by equation set:
+
+```julia
+struct PrescribedValue{P <: EquationSet, F <: Function} <: Dirichlet ... end
+struct PrescribedFlux{P <: EquationSet, F <: Function} <: Neumann ... end
+struct ZeroFlux{P <: EquationSet} <: Neumann end
+```
+
+For custom PDEs, unparameterized constructors default to `GenericEquations`:
+
+```julia
+PrescribedValue(0.0)    # equivalent to PrescribedValue{GenericEquations}(0.0)
+PrescribedFlux(1.0)     # equivalent to PrescribedFlux{GenericEquations}(1.0)
+ZeroFlux()              # equivalent to ZeroFlux{GenericEquations}()
+```
+
+Built-in physics aliases provide user-friendly names:
 
 ```julia
 # Energy aliases
-Temperature(value) = PrescribedValue{EnergyPhysics}(value)
-HeatFlux(flux)     = PrescribedFlux{EnergyPhysics}(flux)
-const Adiabatic    = ZeroFlux{EnergyPhysics}
+Temperature(value) = PrescribedValue{EnergyEquations}(value)
+HeatFlux(flux)     = PrescribedFlux{EnergyEquations}(flux)
+const Adiabatic    = ZeroFlux{EnergyEquations}
 
 # Fluid aliases
-VelocityInlet(v)     = PrescribedValue{FluidPhysics}(v)
-const VelocityOutlet = ZeroFlux{FluidPhysics}
+VelocityInlet(v)     = PrescribedValue{FluidEquations}(v)
+const VelocityOutlet = ZeroFlux{FluidEquations}
 ```
 
-This design means adding a new physics domain requires zero changes to the BC application machinery — you just define new aliases using the existing generic types.
+This design means adding a new equation set requires zero changes to the BC application machinery — you just define new aliases using the existing generic types.
 
 ## Steady-State vs Transient
 
@@ -136,17 +148,16 @@ Domain → make_f(model, domain) → f_model(du, u, p, t)
 
 The model builds an in-place ODE function that computes `du/dt`. Each BC also returns an in-place function. They are composed into a single `f(du, u, p, t)` that is passed to OrdinaryDiffEq.jl.
 
-## Extending: Adding a New Physics Domain
+## Extending: Adding a New Built-in Physics
 
-To add a new physics (e.g., electrostatics), follow these steps:
+To add a new physics (e.g., electrostatics) as a built-in, follow these steps:
 
-### 1. Define the physics domain trait
+### 1. Define the equation set trait
 
-In `src/boundary_conditions/core/physics_traits.jl`:
+In `src/boundary_conditions/core/equation_set.jl`:
 
 ```julia
-struct ElectrostaticPhysics <: PhysicsDomain end
-is_compatible(::ElectrostaticPhysics, ::ElectrostaticPhysics) = true
+struct ElectrostaticEquations <: EquationSet end
 ```
 
 ### 2. Create BC aliases
@@ -155,13 +166,13 @@ Create `src/boundary_conditions/electrostatics.jl`:
 
 ```julia
 # Dirichlet: prescribed voltage
-Voltage(value) = PrescribedValue{ElectrostaticPhysics}(value)
+Voltage(value) = PrescribedValue{ElectrostaticEquations}(value)
 
 # Neumann: prescribed surface charge density
-SurfaceCharge(σ) = PrescribedFlux{ElectrostaticPhysics}(σ)
+SurfaceCharge(σ) = PrescribedFlux{ElectrostaticEquations}(σ)
 
 # Neumann: zero normal electric field
-const Insulating = ZeroFlux{ElectrostaticPhysics}
+const Insulating = ZeroFlux{ElectrostaticEquations}
 ```
 
 ### 3. Create the physics model
@@ -173,7 +184,7 @@ struct Electrostatics{E} <: Solid
     ε::E  # permittivity
 end
 
-physics_domain(::Type{<:Electrostatics}) = ElectrostaticPhysics()
+equation_set(::Type{<:Electrostatics}) = ElectrostaticEquations()
 _num_vars(::Electrostatics, _) = 1
 
 function make_system(model::Electrostatics, domain; kwargs...)
@@ -187,7 +198,7 @@ end
 In `src/Macchiato.jl`:
 
 ```julia
-export ElectrostaticPhysics
+export ElectrostaticEquations
 include("boundary_conditions/electrostatics.jl")
 export Voltage, SurfaceCharge, Insulating
 include("models/electrostatics.jl")
@@ -195,3 +206,6 @@ export Electrostatics
 ```
 
 The generic BC implementations (`PrescribedValue`, `PrescribedFlux`, `ZeroFlux`) handle all the matrix/ODE application logic automatically. No changes to the solver infrastructure are needed.
+
+!!! tip "Custom PDEs don't need any of this"
+    If you're defining a custom PDE outside the package, you don't need to define an equation set trait at all. Just create your model struct, implement `_num_vars` and `make_system`, and use the generic BC constructors (`PrescribedValue(0.0)`, etc.). See [Custom PDEs](@ref) for the minimal approach.

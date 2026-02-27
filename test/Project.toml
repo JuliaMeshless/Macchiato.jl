@@ -1,4 +1,8 @@
 [deps]
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+LinearSolve = "7ed4a6bd-45f5-4d41-b270-4a48e9bafcae"
 Macchiato = "cd40ceae-7681-4e2e-9056-ba6e356aca3e"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 TestItemRunner = "f8b46487-2199-4994-9208-9a1283c18c0a"
+Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
+WhatsThePoint = "5faae8f1-f507-432f-bd56-cf2f1161ab6f"
