@@ -154,57 +154,21 @@ end
 end
 
 # ============================================================================
-# Method of Manufactured Solutions Test for 2D Linear Elasticity
+# Patch Test for 2D Linear Elasticity
 # ============================================================================
 
-@testset "2D Linear Elasticity MMS (Dirichlet only)" begin
-    # Manufactured displacement field (polynomial):
-    # u(x, y) = x²y
-    # v(x, y) = -xy²
-    #
-    # Partial derivatives:
-    # ∂u/∂x = 2xy,     ∂u/∂y = x²
-    # ∂²u/∂x² = 2y,    ∂²u/∂y² = 0
-    # ∂²u/∂x∂y = 2x
-    #
-    # ∂v/∂x = -y²,     ∂v/∂y = -2xy
-    # ∂²v/∂x² = 0,     ∂²v/∂y² = -2x
-    # ∂²v/∂x∂y = -2y
-    #
-    # Navier-Cauchy (plane stress):
-    # fₓ = -[(λ*+2μ)∂²u/∂x² + μ∂²u/∂y² + (λ*+μ)∂²v/∂x∂y]
-    # fᵧ = -[(λ*+μ)∂²u/∂x∂y + μ∂²v/∂x² + (λ*+2μ)∂²v/∂y²]
-    #
-    # fₓ = -[(λ*+2μ)(2y) + μ(0) + (λ*+μ)(-2y)]
-    #     = -[2y(λ*+2μ) - 2y(λ*+μ)]
-    #     = -[2y·μ]
-    #     = -2μy
-    #
-    # fᵧ = -[(λ*+μ)(2x) + μ(0) + (λ*+2μ)(-2x)]
-    #     = -[2x(λ*+μ) - 2x(λ*+2μ)]
-    #     = -[-2x·μ]
-    #     = 2μx
-
-    E_val = 1.0
-    ν_val = 0.3
-    μ_val = E_val / (2 * (1 + ν_val))
-    λ_full = E_val * ν_val / ((1 + ν_val) * (1 - 2ν_val))
-    λstar_val = 2μ_val * λ_full / (λ_full + 2μ_val)
-
-    u_exact(x, y) = x^2 * y
-    v_exact(x, y) = -x * y^2
-
-    fx_exact(x, y) = -2μ_val * y
-    fy_exact(x, y) = 2μ_val * x
-
-    body_force(x) = (fx_exact(x[1], x[2]), fy_exact(x[1], x[2]))
+@testset "2D Linear Elasticity Patch Test" begin
+    # Linear displacement: u = a + bx + cy, v = d + ex + fy
+    # Constant strain everywhere => body force = 0
+    # Must be reproduced to near machine precision
+    u_exact(x, y) = 1e-3 + 2e-3 * x + 3e-3 * y
+    v_exact(x, y) = 4e-3 + 5e-3 * x + 6e-3 * y
 
     bc_func(x, t) = (u_exact(x[1], x[2]), v_exact(x[1], x[2]))
 
-    dx = 1 / 25 * m
+    dx = 1 / 17 * m
     part = create_2d_square_domain(dx)
     cloud = WTP.discretize(part, ConstantSpacing(dx), alg = VanDerSandeFornberg())
-    cloud, _ = repel(cloud, ConstantSpacing(dx); α = dx / 20, max_iters = 500)
 
     bcs = Dict(
         :surface1 => Displacement(bc_func),
@@ -212,13 +176,8 @@ end
         :surface3 => Displacement(bc_func),
         :surface4 => Displacement(bc_func),
     )
-
-    model = LinearElasticity(E = E_val, ν = ν_val, body_force = body_force)
+    model = LinearElasticity(E = 1.0, ν = 0.3)
     domain = MM.Domain(cloud, bcs, model)
-
-    println("\nMMS Model: ", model)
-    println("μ = $μ_val, λ* = $λstar_val")
-
     prob = MM.LinearProblem(domain)
     sol = solve(prob)
 
@@ -230,24 +189,74 @@ end
     u_ana = [u_exact(ustrip(pt.x), ustrip(pt.y)) for pt in coords]
     v_ana = [v_exact(ustrip(pt.x), ustrip(pt.y)) for pt in coords]
 
-    err_u = u_num .- u_ana
-    err_v = v_num .- v_ana
+    @test norm(u_num .- u_ana, Inf) < 1e-10
+    @test norm(v_num .- v_ana, Inf) < 1e-10
+end
 
-    L2_u = norm(err_u) / sqrt(N)
-    L2_v = norm(err_v) / sqrt(N)
-    Linf_u = norm(err_u, Inf)
-    Linf_v = norm(err_v, Inf)
+# ============================================================================
+# MMS Convergence Rate Test for 2D Linear Elasticity
+# ============================================================================
 
-    println("\nMMS Error Analysis:")
-    println("  u-displacement: L2=$L2_u, L∞=$Linf_u")
-    println("  v-displacement: L2=$L2_v, L∞=$Linf_v")
+@testset "2D Linear Elasticity MMS Convergence" begin
+    # Manufactured solution: u = x²y, v = -xy²
+    # Body forces: fx = -2μy, fy = 2μx
 
-    @test L2_u < 5e-2
-    @test L2_v < 5e-2
-    @test Linf_u < 1e-1
-    @test Linf_v < 1e-1
+    E_val = 1.0
+    ν_val = 0.3
+    μ_val = E_val / (2 * (1 + ν_val))
 
-    println("\n  2D Linear Elasticity MMS validated")
+    u_exact(x, y) = x^2 * y
+    v_exact(x, y) = -x * y^2
+    body_force(x) = (-2μ_val * x[2], 2μ_val * x[1])
+    bc_func(x, t) = (u_exact(x[1], x[2]), v_exact(x[1], x[2]))
+
+    resolutions = [1 / 15, 1 / 21, 1 / 29]
+    L2_errors = Float64[]
+
+    for res in resolutions
+        dx = res * m
+        part = create_2d_square_domain(dx)
+        cloud = WTP.discretize(part, ConstantSpacing(dx), alg = VanDerSandeFornberg())
+        cloud, _ = repel(cloud, ConstantSpacing(dx); α = dx / 20, max_iters = 500)
+
+        bcs = Dict(
+            :surface1 => Displacement(bc_func),
+            :surface2 => Displacement(bc_func),
+            :surface3 => Displacement(bc_func),
+            :surface4 => Displacement(bc_func),
+        )
+        model = LinearElasticity(E = E_val, ν = ν_val, body_force = body_force)
+        domain = MM.Domain(cloud, bcs, model)
+        prob = MM.LinearProblem(domain)
+        sol = solve(prob)
+
+        N = length(cloud)
+        u_num = sol.u[1:N]
+        v_num = sol.u[(N + 1):(2N)]
+        coords = MM._coords(cloud)
+        u_ana = [u_exact(ustrip(pt.x), ustrip(pt.y)) for pt in coords]
+        v_ana = [v_exact(ustrip(pt.x), ustrip(pt.y)) for pt in coords]
+
+        L2 = sqrt(norm(u_num .- u_ana)^2 + norm(v_num .- v_ana)^2) / sqrt(2N)
+        push!(L2_errors, L2)
+    end
+
+    # Compute convergence rates between successive refinements
+    h = Float64.(resolutions)
+    rates = [log(L2_errors[i] / L2_errors[i + 1]) / log(h[i] / h[i + 1])
+             for i in 1:(length(h) - 1)]
+
+    println("\nMMS Convergence:")
+    for (i, res) in enumerate(resolutions)
+        println("  h=$(round(res, digits=4)): L2=$(L2_errors[i])")
+    end
+    println("  Rates: ", rates)
+
+    # RBF with polyharmonic spline basis expects ~2nd order convergence
+    # Threshold of 1.5 accounts for meshless method variability
+    for rate in rates
+        @test rate > 1.5
+    end
 end
 
 # ============================================================================

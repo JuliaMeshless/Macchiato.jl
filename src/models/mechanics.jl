@@ -59,17 +59,41 @@ function _ℒ_mixed_partial(basis::RadialBasisFunctions.AbstractRadialBasis)
 end
 
 """
-    _ℒ_mixed_partial(basis::MonomialBasis)
+    _ℒ_mixed_partial(basis::MonomialBasis{2, Deg})
 
-Mixed partial derivative ∂²/∂x∂y for monomial basis.
-Computes by differentiating first w.r.t. x (dim=1) then w.r.t. y (dim=2).
+Mixed partial derivative ∂²/∂x∂y for 2D monomial basis.
+
+Hand-coded to match the MonomialBasis evaluation ordering. The generic
+`∂exponents`/`monomial_recursive_list`/`build_monomial_basis` pipeline
+produces results in `multiexponents` ordering which differs from the
+`MonomialBasis` evaluator ordering used in the RBF-FD collocation matrix.
 """
-function _ℒ_mixed_partial(basis::RadialBasisFunctions.MonomialBasis{Dim, Deg}) where {Dim, Deg}
-    me = RadialBasisFunctions.∂exponents(basis, 1, 1)
-    RadialBasisFunctions.∂exponents!(me.exponents, me.coeffs, 1, 2)
-    ids = RadialBasisFunctions.monomial_recursive_list(basis, me)
-    basis_func = RadialBasisFunctions.build_monomial_basis(ids, me.coeffs)
-    return RadialBasisFunctions.ℒMonomialBasis(Dim, Deg, basis_func)
+function _ℒ_mixed_partial(::RadialBasisFunctions.MonomialBasis{2, 0})
+    function basis!(b, x)
+        b .= zero(eltype(x))
+        return nothing
+    end
+    return RadialBasisFunctions.ℒMonomialBasis(2, 0, basis!)
+end
+
+function _ℒ_mixed_partial(::RadialBasisFunctions.MonomialBasis{2, 1})
+    function basis!(b, x)
+        b .= zero(eltype(x))
+        return nothing
+    end
+    return RadialBasisFunctions.ℒMonomialBasis(2, 1, basis!)
+end
+
+function _ℒ_mixed_partial(::RadialBasisFunctions.MonomialBasis{2, 2})
+    # Monomial ordering: [1, x, y, xy, x², y²]
+    # ∂²/∂x∂y:          [0, 0, 0,  1,  0,  0]
+    function basis!(b, x)
+        T = eltype(x)
+        b .= zero(T)
+        b[4] = one(T)
+        return nothing
+    end
+    return RadialBasisFunctions.ℒMonomialBasis(2, 2, basis!)
 end
 
 """
@@ -121,12 +145,13 @@ function make_system(model::LinearElasticity, domain; kwargs...)
          A₁₂ A₂₂]
 
     # Build RHS from body force
+    # PDE: L[u] + f = 0  =>  A*u = -f
     b = zeros(eltype(A), 2N)
     if model.body_force !== nothing
         for (i, pt) in enumerate(coords)
             fx, fy = model.body_force(pt)
-            b[i] = fx
-            b[i + N] = fy
+            b[i] = -fx
+            b[i + N] = -fy
         end
     end
 
