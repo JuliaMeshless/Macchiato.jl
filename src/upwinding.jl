@@ -1,13 +1,33 @@
+"""
+    Upwind{L, T} <: AbstractOperator
+
+Upwind-biased derivative operator for advection-dominated problems. Stores a callable
+operator `ℒ` and the spatial dimension `dim` it differentiates along.
+"""
 struct Upwind{L <: Function, T <: Int} <: AbstractOperator
     ℒ::L
     dim::T
 end
 
-# convienience constructors
 """
-    function upwind(data, dim, basis; k=autoselect_k(data, basis))
+    upwind(data, eval_points, dim[, basis]; Δ=nothing, k=autoselect_k(data, basis))
+    upwind(data, dim[, basis]; Δ=nothing, k=autoselect_k(data, basis))
 
-Builds a `RadialBasisOperator` where the operator is the partial derivative, `Partial`, of `order` with respect to `dim`.
+Build an upwind finite-difference-style operator using RBF interpolation.
+
+Computes backward, forward, and centered partial derivatives with respect to dimension `dim`,
+then returns a function `(ϕ, v, θ)` that blends them based on flow direction `v` and
+upwind parameter `θ ∈ [0, 1]` (1 = full upwind, 0 = centered).
+
+The single-argument form `upwind(data, dim)` evaluates at the data points themselves.
+
+# Arguments
+- `data`: Stencil points for RBF approximation
+- `eval_points`: Points where the derivative is evaluated
+- `dim`: Spatial dimension (1 = x, 2 = y, …)
+- `basis`: Radial basis function (default: `PHS(3; poly_deg=2)`)
+- `Δ`: Virtual node offset distance (auto-detected if `nothing`)
+- `k`: Number of nearest neighbors for stencil
 """
 function upwind(
         data::AbstractVector,

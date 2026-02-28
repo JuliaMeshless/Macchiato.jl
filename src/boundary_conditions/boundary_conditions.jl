@@ -2,7 +2,6 @@
 # Includes: core traits, BC hierarchy, generic types, and numerical methods
 
 # Core infrastructure
-include("core/physics_traits.jl")
 include("core/bc_hierarchy.jl")
 include("core/generic_types.jl")
 
@@ -74,13 +73,32 @@ end
 # ============================================================================
 
 function write_bc_dirichlet!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        ids, boundary, surf, t = 0.0) where {TA, TB}
+        ids, bc, surf, n_vars::Int = 1, t = 0.0) where {TA, TB}
+    N = div(size(A, 1), n_vars)
+
+    # Batch zero all BC rows in a single O(nnz) pass
+    row_set = Set{Int}()
+    for global_i in ids
+        for v in 0:(n_vars - 1)
+            push!(row_set, global_i + v * N)
+        end
+    end
+    zero_rows!(A, row_set)
+
+    # Set diagonals and RHS
     for (local_i, global_i) in enumerate(ids)
         x = get_node_coords(surf, local_i)
-
-        A[global_i, :] .= zero(TA)
-        A[global_i, global_i] = one(TA)
-        b[global_i] = convert(TB, boundary(x, t))
+        vals = bc(x, t)
+        if n_vars == 1
+            A[global_i, global_i] = one(TA)
+            b[global_i] = convert(TB, vals)
+        else
+            for v in 1:n_vars
+                row = global_i + (v - 1) * N
+                A[row, row] = one(TA)
+                b[row] = convert(TB, vals[v])
+            end
+        end
     end
 end
 

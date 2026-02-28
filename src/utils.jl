@@ -65,3 +65,19 @@ function get_node_coords(cloud::Union{PointCloud{𝔼{3}}, PointSurface{𝔼{3}}
     c = coords(p)
     return ustrip.(SVector(c.x, c.y, c.z))
 end
+
+"""
+    zero_rows!(A::SparseMatrixCSC, row_set::Set{Int})
+
+Zero all entries in `row_set` rows with a single pass over the sparse matrix.
+O(nnz) total instead of O(|row_set| * nnz) from repeated `A[row, :] .= 0`.
+"""
+function zero_rows!(A::SparseMatrixCSC{T}, row_set::Set{Int}) where {T}
+    @inbounds for col in 1:size(A, 2)
+        for idx in nzrange(A, col)
+            if A.rowval[idx] in row_set
+                A.nzval[idx] = zero(T)
+            end
+        end
+    end
+end

@@ -107,7 +107,7 @@ Execute the simulation. Dispatches to `_run_transient!` or `_run_steady!` based 
 
 Returns the simulation object for chaining.
 """
-function run!(sim::Simulation)
+function run!(sim::Simulation; kwargs...)
     sim.running = true
 
     _initialize_callbacks!(sim)
@@ -117,7 +117,7 @@ function run!(sim::Simulation)
         if sim.mode == Transient
             _run_transient!(sim)
         else
-            _run_steady!(sim)
+            _run_steady!(sim; kwargs...)
         end
     finally
         sim.running = false
@@ -158,8 +158,8 @@ function _run_transient!(sim::Simulation)
     return nothing
 end
 
-function _run_steady!(sim::Simulation)
-    prob = LinearSolve.LinearProblem(sim.domain)
+function _run_steady!(sim::Simulation; kwargs...)
+    prob = LinearSolve.LinearProblem(sim.domain; kwargs...)
     sol = LinearSolve.solve(prob)
 
     sim._solution = sol.u

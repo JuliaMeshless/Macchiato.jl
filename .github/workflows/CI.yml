@@ -54,6 +54,6 @@ jobs:
       - run: |
           julia --project=docs -e '
             using Documenter: DocMeta, doctest
-            using MeshlessMultiphysics
-            DocMeta.setdocmeta!(MeshlessMultiphysics, :DocTestSetup, :(using MeshlessMultiphysics); recursive=true)
-            doctest(MeshlessMultiphysics)'
+            using Macchiato
+            DocMeta.setdocmeta!(Macchiato, :DocTestSetup, :(using Macchiato); recursive=true)
+            doctest(Macchiato)'

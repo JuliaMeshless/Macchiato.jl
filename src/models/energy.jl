@@ -1,3 +1,24 @@
+"""
+    SolidEnergy(; k, ρ, cₚ, source=nothing)
+
+Solid-body energy (heat) transport model.
+
+Solves the heat equation in a solid medium:
+- **Steady-state**: `k ∇²T = -f` (Poisson equation)
+- **Transient**: `ρ cₚ ∂T/∂t = k ∇²T + f`
+
+# Fields
+- `k`: Thermal conductivity
+- `ρ`: Density
+- `cₚ`: Specific heat capacity
+- `source`: Optional volumetric source term `f(x, t) -> value` (default: `nothing`)
+
+# Example
+```julia
+model = SolidEnergy(k=50.0, ρ=7800.0, cₚ=500.0)
+model = SolidEnergy(k=1.0, ρ=1.0, cₚ=1.0, source=(x, t) -> -4.0)
+```
+"""
 @kwdef struct SolidEnergy{K, P, C, S} <: AbstractModel
     k::K
     ρ::P
@@ -6,9 +27,6 @@
 end
 
 _num_vars(::SolidEnergy, _) = 1
-
-# Physics domain trait - imported from boundary_conditions/physics_domains.jl
-physics_domain(::Type{<:SolidEnergy}) = EnergyPhysics()
 
 function make_f(model::SolidEnergy, domain; neighbors = 40, kwargs...)
     (; k, ρ, cₚ, source) = model
@@ -19,7 +37,6 @@ function make_f(model::SolidEnergy, domain; neighbors = 40, kwargs...)
     adjl = search.(points(domain.cloud.volume), Ref(method))
 
     ∇² = laplacian(_ustrip(all_points), _ustrip(vol); k = neighbors, adjl = adjl)
-    update_weights!(∇²)
     α = k / (cₚ * ρ)
     w = α * ∇².weights
 
@@ -50,7 +67,6 @@ function make_system(model::SolidEnergy, domain; kwargs...)
     (; k, ρ, cₚ, source) = model
     coords = _coords(domain.cloud)
     ∇² = laplacian(_ustrip(coords); k = 40, kwargs...)
-    update_weights!(∇²)
     α = k / (cₚ * ρ)
     A = α * ∇².weights
 

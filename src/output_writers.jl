@@ -134,6 +134,11 @@ function _model_fields(model::SolidEnergy, sim)
     return [(:T => T)]
 end
 
+function _model_fields(model::LinearElasticity, sim)
+    ux, uy = displacement(sim)
+    return [(:ux => ux), (:uy => uy)]
+end
+
 function _model_fields(model::IncompressibleNavierStokes, sim)
     result = Pair{Symbol, Vector{Float64}}[]
     u, v = velocity(sim)
@@ -155,6 +160,12 @@ function _get_single_field(sim, field::Symbol)
         return v
     elseif field === :p || field === :pressure
         return pressure(sim)
+    elseif field === :ux
+        ux, _ = displacement(sim)
+        return ux
+    elseif field === :uy
+        _, uy = displacement(sim)
+        return uy
     end
     return nothing
 end

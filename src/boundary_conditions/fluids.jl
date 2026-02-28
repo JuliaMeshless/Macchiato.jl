@@ -7,11 +7,8 @@
 
 Prescribed velocity at inlet. Value can be a Number or Function `(x, t) -> velocity`.
 """
-VelocityInlet(velocity::Number) = PrescribedValue{FluidPhysics}(velocity)
-VelocityInlet(f::Function) = PrescribedValue{FluidPhysics}(f)
-
-# Note: show method removed - can't distinguish VelocityInlet from PressureOutlet
-# since both are PrescribedValue{FluidPhysics}
+VelocityInlet(v::Number) = PrescribedValue((x, t) -> v, :VelocityInlet)
+VelocityInlet(f::Function) = PrescribedValue{typeof(f)}(f, :VelocityInlet)
 
 # ============================================================================
 # PressureOutlet (Dirichlet)
@@ -22,11 +19,8 @@ VelocityInlet(f::Function) = PrescribedValue{FluidPhysics}(f)
 
 Prescribed pressure at outlet. Value can be a Number or Function `(x, t) -> pressure`.
 """
-PressureOutlet(pressure::Number) = PrescribedValue{FluidPhysics}(pressure)
-PressureOutlet(f::Function) = PrescribedValue{FluidPhysics}(f)
-
-# Note: show method removed - can't distinguish VelocityInlet from PressureOutlet
-# since both are PrescribedValue{FluidPhysics}
+PressureOutlet(v::Number) = PrescribedValue((x, t) -> v, :PressureOutlet)
+PressureOutlet(f::Function) = PrescribedValue{typeof(f)}(f, :PressureOutlet)
 
 # ============================================================================
 # VelocityOutlet (Neumann with zero gradient)
@@ -37,6 +31,4 @@ PressureOutlet(f::Function) = PrescribedValue{FluidPhysics}(f)
 
 Zero-gradient velocity outlet: ∂v/∂n = 0. Used for fully developed outflow.
 """
-const VelocityOutlet = ZeroFlux{FluidPhysics}
-
-Base.show(io::IO, ::ZeroFlux{FluidPhysics}) = print(io, "VelocityOutlet")
+VelocityOutlet() = ZeroFlux(:VelocityOutlet)

@@ -7,10 +7,8 @@
 
 Prescribed temperature BC. Value can be a Number or Function `(x, t) -> value`.
 """
-Temperature(value::Number) = PrescribedValue{EnergyPhysics}(value)
-Temperature(f::Function) = PrescribedValue{EnergyPhysics}(f)
-
-Base.show(io::IO, bc::PrescribedValue{EnergyPhysics}) = print(io, "Temperature")
+Temperature(v::Number) = PrescribedValue((x, t) -> v, :Temperature)
+Temperature(f::Function) = PrescribedValue{typeof(f)}(f, :Temperature)
 
 # ============================================================================
 # HeatFlux (Neumann)
@@ -21,10 +19,8 @@ Base.show(io::IO, bc::PrescribedValue{EnergyPhysics}) = print(io, "Temperature")
 
 Prescribed heat flux BC: ∂T/∂n = q. Flux can be a Number or Function `(x, t) -> flux`.
 """
-HeatFlux(flux::Number) = PrescribedFlux{EnergyPhysics}(flux)
-HeatFlux(f::Function) = PrescribedFlux{EnergyPhysics}(f)
-
-Base.show(io::IO, bc::PrescribedFlux{EnergyPhysics}) = print(io, "HeatFlux")
+HeatFlux(v::Number) = PrescribedFlux((x, t) -> v, :HeatFlux)
+HeatFlux(f::Function) = PrescribedFlux{typeof(f)}(f, :HeatFlux)
 
 # ============================================================================
 # Convection (Robin)
@@ -50,8 +46,6 @@ end
 
 Convection(h, k, T∞::Number) = Convection(h, k, (x, t) -> T∞)
 
-physics_domain(::Type{<:Convection}) = EnergyPhysics()
-
 α(bc::Convection) = bc.h
 β(bc::Convection) = bc.k
 (bc::Convection)(x, t) = bc.h * bc.T∞(x, t)
@@ -70,6 +64,4 @@ end
 
 Thermally insulated boundary: ∂T/∂n = 0.
 """
-const Adiabatic = ZeroFlux{EnergyPhysics}
-
-Base.show(io::IO, ::ZeroFlux{EnergyPhysics}) = print(io, "Adiabatic")
+Adiabatic() = ZeroFlux(:Adiabatic)

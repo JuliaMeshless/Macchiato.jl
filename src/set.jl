@@ -113,6 +113,17 @@ function _field_index_in_model(model::SolidEnergy, field::Symbol, dim)
     return nothing
 end
 
+function _field_index_in_model(model::LinearElasticity, field::Symbol, dim)
+    if field === :ux
+        return 1
+    elseif field === :uy
+        return 2
+    elseif field === :uz && dim == 3
+        return 3
+    end
+    return nothing
+end
+
 function _field_index_in_model(model::IncompressibleNavierStokes, field::Symbol, dim)
     if field === :u
         return 1
@@ -164,6 +175,24 @@ function pressure(sim)
     _has_field(sim, :p) || throw(ArgumentError("Simulation does not have pressure field"))
     indices = _field_indices(sim, :p)
     return _get_solution_vector(sim)[indices]
+end
+
+"""
+    displacement(sim) -> Tuple{Vector{Float64}, ...}
+
+Extract displacement components from simulation.
+Returns (ux, uy) for 2D or (ux, uy, uz) for 3D.
+"""
+function displacement(sim)
+    _has_field(sim, :ux) || throw(ArgumentError("Simulation does not have displacement field"))
+    dim = _get_dimension(sim.domain)
+    ux = _get_solution_vector(sim)[_field_indices(sim, :ux)]
+    uy = _get_solution_vector(sim)[_field_indices(sim, :uy)]
+    if dim == 3
+        uz = _get_solution_vector(sim)[_field_indices(sim, :uz)]
+        return (ux, uy, uz)
+    end
+    return (ux, uy)
 end
 
 function _has_field(sim, field::Symbol)

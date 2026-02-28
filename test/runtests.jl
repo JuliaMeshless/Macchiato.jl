@@ -1,4 +1,4 @@
-using MeshlessMultiphysics
+using Macchiato
 using TestItemRunner
 using Test
 
@@ -8,10 +8,11 @@ testfiles = [
     "simulation/test_callbacks.jl",
     "simulation/test_set.jl",
     "simulation/test_output_writers.jl",
-    "simulation/test_simulation.jl"
+    "simulation/test_simulation.jl",
+    "models/test_linear_elasticity.jl"
 ]
 
-@testset "MeshlessMultiphysics.jl" begin
+@testset "Macchiato.jl" begin
     for testfile in testfiles
         println("testing $testfile...")
         include(testfile)

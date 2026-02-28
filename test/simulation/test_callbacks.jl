@@ -1,5 +1,5 @@
 using Test
-using MeshlessMultiphysics
+using Macchiato
 
 @testset "Callbacks" begin
     @testset "Schedule constructors" begin
@@ -41,47 +41,47 @@ using MeshlessMultiphysics
     @testset "should_execute" begin
         @testset "IterationInterval" begin
             schedule = IterationInterval(5)
-            state = MeshlessMultiphysics.ScheduleState()
+            state = Macchiato.ScheduleState()
 
-            @test !MeshlessMultiphysics.should_execute(schedule, state, 1, 0.0)
-            @test !MeshlessMultiphysics.should_execute(schedule, state, 4, 0.0)
-            @test MeshlessMultiphysics.should_execute(schedule, state, 5, 0.0)
+            @test !Macchiato.should_execute(schedule, state, 1, 0.0)
+            @test !Macchiato.should_execute(schedule, state, 4, 0.0)
+            @test Macchiato.should_execute(schedule, state, 5, 0.0)
             @test state.last_iteration == 5
 
-            @test !MeshlessMultiphysics.should_execute(schedule, state, 6, 0.0)
-            @test !MeshlessMultiphysics.should_execute(schedule, state, 9, 0.0)
-            @test MeshlessMultiphysics.should_execute(schedule, state, 10, 0.0)
+            @test !Macchiato.should_execute(schedule, state, 6, 0.0)
+            @test !Macchiato.should_execute(schedule, state, 9, 0.0)
+            @test Macchiato.should_execute(schedule, state, 10, 0.0)
             @test state.last_iteration == 10
         end
 
         @testset "TimeInterval" begin
             schedule = TimeInterval(0.1)
-            state = MeshlessMultiphysics.ScheduleState()
+            state = Macchiato.ScheduleState()
 
-            @test !MeshlessMultiphysics.should_execute(schedule, state, 1, 0.05)
-            @test MeshlessMultiphysics.should_execute(schedule, state, 2, 0.1)
+            @test !Macchiato.should_execute(schedule, state, 1, 0.05)
+            @test Macchiato.should_execute(schedule, state, 2, 0.1)
             @test state.last_time == 0.1
 
-            @test !MeshlessMultiphysics.should_execute(schedule, state, 3, 0.15)
-            @test MeshlessMultiphysics.should_execute(schedule, state, 4, 0.2)
+            @test !Macchiato.should_execute(schedule, state, 3, 0.15)
+            @test Macchiato.should_execute(schedule, state, 4, 0.2)
             @test state.last_time == 0.2
         end
 
         @testset "SpecifiedTimes" begin
             schedule = SpecifiedTimes([0.0, 0.5, 1.0])
-            state = MeshlessMultiphysics.ScheduleState()
+            state = Macchiato.ScheduleState()
 
-            @test MeshlessMultiphysics.should_execute(schedule, state, 0, 0.0)
+            @test Macchiato.should_execute(schedule, state, 0, 0.0)
             @test state.next_specified_idx == 2
 
-            @test !MeshlessMultiphysics.should_execute(schedule, state, 1, 0.3)
-            @test MeshlessMultiphysics.should_execute(schedule, state, 2, 0.5)
+            @test !Macchiato.should_execute(schedule, state, 1, 0.3)
+            @test Macchiato.should_execute(schedule, state, 2, 0.5)
             @test state.next_specified_idx == 3
 
-            @test MeshlessMultiphysics.should_execute(schedule, state, 3, 1.0)
+            @test Macchiato.should_execute(schedule, state, 3, 1.0)
             @test state.next_specified_idx == 4
 
-            @test !MeshlessMultiphysics.should_execute(schedule, state, 4, 1.5)
+            @test !Macchiato.should_execute(schedule, state, 4, 1.5)
         end
     end
 
@@ -99,7 +99,7 @@ using MeshlessMultiphysics
         cb_with_params = Callback(test_func, IterationInterval(2); parameters=(a=1, b=2))
         @test cb_with_params.parameters == (a=1, b=2)
 
-        MeshlessMultiphysics.reset!(cb)
+        Macchiato.reset!(cb)
         @test cb._state.last_iteration == 0
         @test cb._state.last_time == 0.0
         @test cb._state.next_specified_idx == 1
