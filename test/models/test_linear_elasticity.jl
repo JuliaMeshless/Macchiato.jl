@@ -16,16 +16,16 @@ include(joinpath(@__DIR__, "..", "end_2_end", "2d_square.jl"))
 @testset "LinearElasticity unit tests" begin
     @testset "Lamé parameter computation" begin
         # Steel-like: E=200e3, ν=0.3
-        model = LinearElasticity(E = 200e3, ν = 0.3)
+        model = LinearElasticity(E = 200.0e3, ν = 0.3)
         μ, λstar = lame_parameters(model)
 
-        E, ν = 200e3, 0.3
+        E, ν = 200.0e3, 0.3
         μ_expected = E / (2 * (1 + ν))
         λ_full = E * ν / ((1 + ν) * (1 - 2ν))
         λstar_expected = 2μ_expected * λ_full / (λ_full + 2μ_expected)
 
-        @test μ ≈ μ_expected rtol = 1e-14
-        @test λstar ≈ λstar_expected rtol = 1e-14
+        @test μ ≈ μ_expected rtol = 1.0e-14
+        @test λstar ≈ λstar_expected rtol = 1.0e-14
 
         println("  μ = $μ (expected $μ_expected)")
         println("  λ* = $λstar (expected $λstar_expected)")
@@ -42,13 +42,13 @@ include(joinpath(@__DIR__, "..", "end_2_end", "2d_square.jl"))
     end
 
     @testset "_num_vars" begin
-        model = LinearElasticity(E = 200e3, ν = 0.3)
+        model = LinearElasticity(E = 200.0e3, ν = 0.3)
         @test MM._num_vars(model, 2) == 2
         @test MM._num_vars(model, 3) == 3
     end
 
     @testset "show method" begin
-        model = LinearElasticity(E = 200e3, ν = 0.3)
+        model = LinearElasticity(E = 200.0e3, ν = 0.3)
         str = string(model)
         @test occursin("LinearElasticity", str)
         @test occursin("200000", str)
@@ -102,7 +102,7 @@ end
         :surface3 => Displacement(0.0, 0.0),
         :surface4 => Displacement(0.0, 0.0),
     )
-    model = LinearElasticity(E = 200e3, ν = 0.3)
+    model = LinearElasticity(E = 200.0e3, ν = 0.3)
     domain = MM.Domain(cloud, bcs, model)
     sim = Simulation(domain)
 
@@ -161,8 +161,8 @@ end
     # Linear displacement: u = a + bx + cy, v = d + ex + fy
     # Constant strain everywhere => body force = 0
     # Must be reproduced to near machine precision
-    u_exact(x, y) = 1e-3 + 2e-3 * x + 3e-3 * y
-    v_exact(x, y) = 4e-3 + 5e-3 * x + 6e-3 * y
+    u_exact(x, y) = 1.0e-3 + 2.0e-3 * x + 3.0e-3 * y
+    v_exact(x, y) = 4.0e-3 + 5.0e-3 * x + 6.0e-3 * y
 
     bc_func(x, t) = (u_exact(x[1], x[2]), v_exact(x[1], x[2]))
 
@@ -189,8 +189,8 @@ end
     u_ana = [u_exact(ustrip(pt.x), ustrip(pt.y)) for pt in coords]
     v_ana = [v_exact(ustrip(pt.x), ustrip(pt.y)) for pt in coords]
 
-    @test norm(u_num .- u_ana, Inf) < 1e-10
-    @test norm(v_num .- v_ana, Inf) < 1e-10
+    @test norm(u_num .- u_ana, Inf) < 1.0e-10
+    @test norm(v_num .- v_ana, Inf) < 1.0e-10
 end
 
 # ============================================================================
@@ -243,12 +243,14 @@ end
 
     # Compute convergence rates between successive refinements
     h = Float64.(resolutions)
-    rates = [log(L2_errors[i] / L2_errors[i + 1]) / log(h[i] / h[i + 1])
-             for i in 1:(length(h) - 1)]
+    rates = [
+        log(L2_errors[i] / L2_errors[i + 1]) / log(h[i] / h[i + 1])
+            for i in 1:(length(h) - 1)
+    ]
 
     println("\nMMS Convergence:")
     for (i, res) in enumerate(resolutions)
-        println("  h=$(round(res, digits=4)): L2=$(L2_errors[i])")
+        println("  h=$(round(res, digits = 4)): L2=$(L2_errors[i])")
     end
     println("  Rates: ", rates)
 
@@ -274,7 +276,7 @@ end
         :surface3 => Displacement(0.0, 0.0),
         :surface4 => Displacement(0.0, 0.0),
     )
-    model = LinearElasticity(E = 200e3, ν = 0.3)
+    model = LinearElasticity(E = 200.0e3, ν = 0.3)
     domain = MM.Domain(cloud, bcs, model)
 
     sim = Simulation(domain)
@@ -293,8 +295,8 @@ end
     @test length(uy) == N
 
     # All-zero Dirichlet with no body force → zero displacement
-    @test norm(ux) < 1e-10
-    @test norm(uy) < 1e-10
+    @test norm(ux) < 1.0e-10
+    @test norm(uy) < 1.0e-10
 
     println("  Simulation API integration test passed")
 end

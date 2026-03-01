@@ -151,7 +151,7 @@ function __init__()
         @info "Macchiato will use $threads threads"
     end
 
-    if CUDA.has_cuda()
+    return if CUDA.has_cuda()
         @info "CUDA-enabled GPU(s) detected:"
         for dev in CUDA.devices()
             @info "$dev: $(CUDA.name(dev))"

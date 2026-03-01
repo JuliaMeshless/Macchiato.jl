@@ -10,7 +10,7 @@ include(joinpath(@__DIR__, "..", "end_2_end", "2d_square.jl"))
 function create_test_domain()
     dx = 1 / 17 * m
     part = create_2d_square_domain(dx)
-    cloud = WTP.discretize(part, ConstantSpacing(dx), alg=VanDerSandeFornberg())
+    cloud = WTP.discretize(part, ConstantSpacing(dx), alg = VanDerSandeFornberg())
 
     k, ρ, cₚ = 1.0, 1.0, 1.0
     bcs = Dict(
@@ -19,7 +19,7 @@ function create_test_domain()
         :surface3 => MM.Temperature(100.0),
         :surface4 => MM.Temperature(0.0)
     )
-    model = MM.SolidEnergy(k=k, ρ=ρ, cₚ=cₚ)
+    model = MM.SolidEnergy(k = k, ρ = ρ, cₚ = cₚ)
     return MM.Domain(cloud, bcs, model)
 end
 
@@ -32,13 +32,13 @@ end
         @test sim_steady.Δt === nothing
         @test sim_steady.stop_time === nothing
 
-        sim_transient = Simulation(domain; Δt=0.001, stop_time=1.0)
+        sim_transient = Simulation(domain; Δt = 0.001, stop_time = 1.0)
         @test sim_transient.mode == MM.Transient
         @test sim_transient.Δt == 0.001
         @test sim_transient.stop_time == 1.0
         @test sim_transient.solver == :Tsit5
 
-        sim_iter = Simulation(domain; Δt=0.001, stop_iteration=100)
+        sim_iter = Simulation(domain; Δt = 0.001, stop_iteration = 100)
         @test sim_iter.mode == MM.Transient
         @test sim_iter.stop_iteration == 100
     end
@@ -46,8 +46,8 @@ end
     @testset "Constructor validation" begin
         domain = create_test_domain()
 
-        @test_throws ArgumentError Simulation(domain; stop_time=1.0)
-        @test_throws ArgumentError Simulation(domain; Δt=0.001)
+        @test_throws ArgumentError Simulation(domain; stop_time = 1.0)
+        @test_throws ArgumentError Simulation(domain; Δt = 0.001)
     end
 
     @testset "Solver selection" begin
@@ -60,7 +60,7 @@ end
 
     @testset "Callbacks dictionary" begin
         domain = create_test_domain()
-        sim = Simulation(domain; Δt=0.001, stop_time=0.01)
+        sim = Simulation(domain; Δt = 0.001, stop_time = 0.01)
 
         call_count = Ref(0)
         sim.callbacks[:counter] = Callback(s -> call_count[] += 1, IterationInterval(1))
@@ -75,7 +75,7 @@ end
 
         sim.output_writers[:vtk] = VTKOutputWriter(
             mktempdir() * "/test",
-            schedule=TimeInterval(0.1)
+            schedule = TimeInterval(0.1)
         )
 
         @test haskey(sim.output_writers, :vtk)
@@ -89,7 +89,7 @@ end
         str_steady = string(sim_steady)
         @test occursin("steady-state", str_steady)
 
-        sim_transient = Simulation(domain; Δt=0.001, stop_time=1.0)
+        sim_transient = Simulation(domain; Δt = 0.001, stop_time = 1.0)
         str_transient = string(sim_transient)
         @test occursin("transient", str_transient)
         @test occursin("Δt=0.001", str_transient)
@@ -98,7 +98,7 @@ end
     @testset "Steady-state run!" begin
         domain = create_test_domain()
         sim = Simulation(domain)
-        set!(sim, T=0.0)
+        set!(sim, T = 0.0)
 
         run!(sim)
 
@@ -124,7 +124,7 @@ end
     @testset "run! returns simulation" begin
         domain = create_test_domain()
         sim = Simulation(domain)
-        set!(sim, T=0.0)
+        set!(sim, T = 0.0)
 
         result = run!(sim)
         @test result === sim

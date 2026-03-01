@@ -23,7 +23,7 @@ end
 (μ::NewtonianViscosity)(_) = μ.μ
 
 function Base.show(io::IO, e::NewtonianViscosity)
-    print(io, "Newtonian Viscosity: $(e.μ)")
+    return print(io, "Newtonian Viscosity: $(e.μ)")
 end
 
 """
@@ -57,12 +57,14 @@ visc = CarreauYasudaViscosity(μ_inf=0.0035, μ_0=0.056, n=0.333, λ=0.31)
 end
 function (μ::CarreauYasudaViscosity)(γ::T) where {T}
     (; μ_inf, μ_0, n, λ, a) = μ
-    μ_inf + (μ_0 - μ_inf) * (one(T) + (λ * γ)^a)^((n - one(T)) / a)
+    return μ_inf + (μ_0 - μ_inf) * (one(T) + (λ * γ)^a)^((n - one(T)) / a)
 end
 
 function Base.show(io::IO, e::CarreauYasudaViscosity)
-    print(io,
-        "Carreau-Yasuda Viscosity: (μ_inf = $(e.μ_inf), μ_0 = $(e.μ_0), n = $(e.n), λ = $(e.λ))")
+    return print(
+        io,
+        "Carreau-Yasuda Viscosity: (μ_inf = $(e.μ_inf), μ_0 = $(e.μ_0), n = $(e.n), λ = $(e.λ))"
+    )
 end
 
 """
@@ -94,13 +96,14 @@ model = IncompressibleNavierStokes(μ=CarreauYasudaViscosity(μ_inf=0.0035, μ_0
 end
 
 function IncompressibleNavierStokes(μ::M, ρ) where {M <: Real}
-    IncompressibleNavierStokes(NewtonianViscosity(μ), ρ)
+    return IncompressibleNavierStokes(NewtonianViscosity(μ), ρ)
 end
 
 _num_vars(::IncompressibleNavierStokes, dim::Int) = dim + 1
 
 function make_f(
-        model::IncompressibleNavierStokes, domain::Domain{Dim}; kwargs...) where {Dim}
+        model::IncompressibleNavierStokes, domain::Domain{Dim}; kwargs...
+    ) where {Dim}
     (; μ, ρ) = model
     vol = _coords(domain.cloud.volume)
     all_points = _coords(domain.cloud)
@@ -123,5 +126,5 @@ function make_f(
 end
 
 function Base.show(io::IO, e::IncompressibleNavierStokes)
-    print(io, "Incompressible Navier Stokes: (μ = $(e.μ), ρ = $(e.ρ))")
+    return print(io, "Incompressible Navier Stokes: (μ = $(e.μ), ρ = $(e.ρ))")
 end

@@ -77,9 +77,11 @@ TractionFree() = Traction(0.0, 0.0)
 Apply displacement (Dirichlet) BC to the 2N×2N mechanics system.
 Dispatches to the generalized `write_bc_dirichlet!` with `n_vars=2`.
 """
-function make_bc!(A::AbstractMatrix, b::AbstractVector,
-        bc::Displacement, surf, domain, ids; kwargs...)
-    write_bc_dirichlet!(A, b, ids, bc, surf, 2)
+function make_bc!(
+        A::AbstractMatrix, b::AbstractVector,
+        bc::Displacement, surf, domain, ids; kwargs...
+    )
+    return write_bc_dirichlet!(A, b, ids, bc, surf, 2)
 end
 
 """
@@ -99,11 +101,13 @@ So the traction rows become:
   Row i:   nx[(λ*+2μ)∂/∂x]u + ny[μ∂/∂y]u + nx[λ*∂/∂y]v + ny[μ∂/∂x]v = tx
   Row i+N: nx[μ∂/∂y]u + ny[λ*∂/∂x]u + nx[μ∂/∂x]v + ny[(λ*+2μ)∂/∂y]v = ty
 """
-function make_bc!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
+function make_bc!(
+        A::AbstractMatrix{TA}, b::AbstractVector{TB},
         bc::Traction, surf, domain, ids;
         λstar::Real, μ_lame::Real,
-        scheme=nothing,
-        kwargs...) where {TA, TB}
+        scheme = nothing,
+        kwargs...
+    ) where {TA, TB}
     N = div(size(A, 1), 2)
     normals = normal(surf)
     coords_all = _ustrip(_coords(domain.cloud))
@@ -114,8 +118,8 @@ function make_bc!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
     adjl = find_neighbors(coords_all, eval_pts, k)
 
     # Build operators (KernelAbstractions parallelizes internally)
-    ∂x_op = partial(coords_all, eval_pts, 1, 1; k=k, adjl=adjl, kwargs...)
-    ∂y_op = partial(coords_all, eval_pts, 1, 2; k=k, adjl=adjl, kwargs...)
+    ∂x_op = partial(coords_all, eval_pts, 1, 1; k = k, adjl = adjl, kwargs...)
+    ∂y_op = partial(coords_all, eval_pts, 1, 2; k = k, adjl = adjl, kwargs...)
 
     # Zero all traction BC rows in a single O(nnz) pass
     row_set = Set{Int}()
@@ -175,4 +179,5 @@ function make_bc!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
         end
         b[global_i + N] = convert(TB, ty)
     end
+    return
 end

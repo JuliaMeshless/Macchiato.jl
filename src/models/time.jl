@@ -4,7 +4,7 @@
 Abstract type for time-mode models that indicate whether a simulation is steady-state
 or transient. See [`Steady`](@ref) and [`Unsteady`](@ref).
 """
-abstract type Time <:AbstractModel end
+abstract type Time <: AbstractModel end
 
 """
     Steady(max_time)

@@ -80,8 +80,9 @@ add!(domain::Domain, model::AbstractModel) = push!(domain.models, model)
 Attach a boundary condition to the named surface on the domain.
 """
 function add!(
-        domain::Domain, boundary::AbstractBoundaryCondition, name::Symbol)
-    domain.boundaries[name] = boundary
+        domain::Domain, boundary::AbstractBoundaryCondition, name::Symbol
+    )
+    return domain.boundaries[name] = boundary
 end
 
 """
@@ -90,11 +91,11 @@ end
 Remove a physics model from the domain.
 """
 function delete!(domain::Domain, model::AbstractModel)
-    deleteat!(domain.models, findall(x -> x == model, domain.models))
+    return deleteat!(domain.models, findall(x -> x == model, domain.models))
 end
 
 function Base.show(io::IO, domain::Domain)
     print(io, "$(domain.name): Domain")
     println()
-    show(io, domain.models)
+    return show(io, domain.models)
 end

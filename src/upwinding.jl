@@ -25,7 +25,7 @@ function upwind(
         basis::B = PHS(3; poly_deg = 2);
         Δ = nothing,
         k::T = autoselect_k(data, basis)
-) where {T <: Int, B <: AbstractRadialBasis}
+    ) where {T <: Int, B <: AbstractRadialBasis}
     Δ === nothing && (Δ = _find_smallest_dist(data, k))
     backward = ∂virtual(data, eval_points, dim, basis; Δ = Δ, backward = true, k = k)
     forward = ∂virtual(data, eval_points, dim, basis; Δ = Δ, backward = false, k = k)
@@ -48,6 +48,6 @@ function upwind(
         basis::B = PHS(3; poly_deg = 2);
         Δ = nothing,
         k::T = autoselect_k(data, basis)
-) where {T <: Int, B <: AbstractRadialBasis}
+    ) where {T <: Int, B <: AbstractRadialBasis}
     return upwind(data, data, dim, basis; Δ = Δ, k = k)
 end

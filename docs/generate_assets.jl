@@ -46,8 +46,8 @@ function generate_heat_2d()
     part = PointBoundary(pts, nrms, areas)
     split_surface!(part, 75°)
 
-    cloud = WTP.discretize(part, ConstantSpacing(dx), alg=VanDerSandeFornberg())
-    cloud, _ = repel(cloud, ConstantSpacing(dx); α=dx / 20, max_iters=500)
+    cloud = WTP.discretize(part, ConstantSpacing(dx), alg = VanDerSandeFornberg())
+    cloud, _ = repel(cloud, ConstantSpacing(dx); α = dx / 20, max_iters = 500)
 
     bcs = Dict(
         :surface1 => MM.Temperature(0.0),
@@ -56,7 +56,7 @@ function generate_heat_2d()
         :surface4 => MM.Temperature(0.0),
     )
 
-    domain = MM.Domain(cloud, bcs, SolidEnergy(k=1.0, ρ=1.0, cₚ=1.0))
+    domain = MM.Domain(cloud, bcs, SolidEnergy(k = 1.0, ρ = 1.0, cₚ = 1.0))
     sim = Simulation(domain)
     run!(sim)
     T = temperature(sim)
@@ -65,18 +65,19 @@ function generate_heat_2d()
     x = [ustrip(pt.x) for pt in coords]
     y = [ustrip(pt.y) for pt in coords]
 
-    fig = Figure(; size=(800, 700), backgroundcolor=:white)
-    ax = Axis(fig[1, 1];
-        title="Steady-State Temperature",
-        xlabel="x [m]",
-        ylabel="y [m]",
-        aspect=DataAspect(),
+    fig = Figure(; size = (800, 700), backgroundcolor = :white)
+    ax = Axis(
+        fig[1, 1];
+        title = "Steady-State Temperature",
+        xlabel = "x [m]",
+        ylabel = "y [m]",
+        aspect = DataAspect(),
     )
-    sc = scatter!(ax, x, y; color=T, colormap=:inferno, markersize=12)
-    Colorbar(fig[1, 2], sc; label="T")
+    sc = scatter!(ax, x, y; color = T, colormap = :inferno, markersize = 12)
+    Colorbar(fig[1, 2], sc; label = "T")
 
-    save(joinpath(ASSETS_DIR, "heat_2d.png"), fig; px_per_unit=2)
-    println("Saved heat_2d.png")
+    save(joinpath(ASSETS_DIR, "heat_2d.png"), fig; px_per_unit = 2)
+    return println("Saved heat_2d.png")
 end
 
 # ============================================================================
@@ -87,7 +88,7 @@ function generate_cantilever_beam_2d()
     L = 8.0
     D = 1.0
     P = 1000.0
-    E_val = 1e7
+    E_val = 1.0e7
     ν_val = 0.3
     I = 2D^3 / 3
 
@@ -114,8 +115,8 @@ function generate_cantilever_beam_2d()
     part = PointBoundary(pts, nrms, areas)
     split_surface!(part, 75°)
 
-    cloud = WTP.discretize(part, ConstantSpacing(dx), alg=VanDerSandeFornberg())
-    cloud, _ = repel(cloud, ConstantSpacing(dx); α=dx / 50, max_iters=2000)
+    cloud = WTP.discretize(part, ConstantSpacing(dx), alg = VanDerSandeFornberg())
+    cloud, _ = repel(cloud, ConstantSpacing(dx); α = dx / 50, max_iters = 2000)
 
     bc_left(x, t) = (u_exact(x[1], x[2]), v_exact(x[1], x[2]))
     bc_right(x, t) = (0.0, P * (D^2 - x[2]^2) / (2I))
@@ -127,13 +128,13 @@ function generate_cantilever_beam_2d()
         :surface4 => Displacement(bc_left),
     )
 
-    model = LinearElasticity(E=E_val, ν=ν_val)
+    model = LinearElasticity(E = E_val, ν = ν_val)
     domain = MM.Domain(cloud, bcs, model)
 
     sim = Simulation(domain)
-    set!(sim, ux=0.0, uy=0.0)
+    set!(sim, ux = 0.0, uy = 0.0)
 
-    basis_kw = (; basis=PHS(3; poly_deg=3))
+    basis_kw = (; basis = PHS(3; poly_deg = 3))
     prob = LinearSolve.LinearProblem(sim.domain; basis_kw...)
     sol = LinearSolve.solve(prob)
 
@@ -147,18 +148,19 @@ function generate_cantilever_beam_2d()
     x = [ustrip(pt.x) for pt in coords]
     y = [ustrip(pt.y) for pt in coords]
 
-    fig = Figure(; size=(1000, 500), backgroundcolor=:white)
-    ax = Axis(fig[1, 1];
-        title="Displacement Magnitude ‖u‖",
-        xlabel="x",
-        ylabel="y",
-        aspect=DataAspect(),
+    fig = Figure(; size = (1000, 500), backgroundcolor = :white)
+    ax = Axis(
+        fig[1, 1];
+        title = "Displacement Magnitude ‖u‖",
+        xlabel = "x",
+        ylabel = "y",
+        aspect = DataAspect(),
     )
-    sc = scatter!(ax, x, y; color=displacement_mag, colormap=:viridis, markersize=8)
-    Colorbar(fig[1, 2], sc; label="‖u‖")
+    sc = scatter!(ax, x, y; color = displacement_mag, colormap = :viridis, markersize = 8)
+    Colorbar(fig[1, 2], sc; label = "‖u‖")
 
-    save(joinpath(ASSETS_DIR, "cantilever_beam_2d.png"), fig; px_per_unit=2)
-    println("Saved cantilever_beam_2d.png")
+    save(joinpath(ASSETS_DIR, "cantilever_beam_2d.png"), fig; px_per_unit = 2)
+    return println("Saved cantilever_beam_2d.png")
 end
 
 # ============================================================================

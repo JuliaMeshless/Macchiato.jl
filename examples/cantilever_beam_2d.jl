@@ -37,7 +37,7 @@ using CairoMakie
 L = 8.0    # Beam length
 D = 1.0    # Half-height (beam goes from y=-D to y=D)
 P = 1000.0 # Applied load (total shear force)
-E_val = 1e7
+E_val = 1.0e7
 ν_val = 0.3
 I = 2D^3 / 3  # Second moment of area
 
@@ -187,9 +187,9 @@ println("Method:        Meshless (PHS RBF)")
 println("Points:        $N")
 println("DOFs:          $(2N)")
 println("System nnz:    $(nnz(prob.A))")
-println("Assembly time: $(round(t_assembly; digits=4)) s")
-println("Solve time:    $(round(t_solve; digits=4)) s")
-println("Total time:    $(round(t_assembly + t_solve; digits=4)) s")
+println("Assembly time: $(round(t_assembly; digits = 4)) s")
+println("Solve time:    $(round(t_solve; digits = 4)) s")
+println("Total time:    $(round(t_assembly + t_solve; digits = 4)) s")
 println()
 println("========================================")
 println("Cantilever Beam Results")
@@ -198,8 +198,8 @@ println("Beam: L=$L, D=$D, P=$P, E=$E_val, ν=$ν_val")
 println("Points: $N")
 println()
 println("Absolute Error (vs Timoshenko):")
-println("  ux: mean = $(round(mean_abs_ux; digits=8)), max = $(round(max_abs_ux; digits=8))")
-println("  uy: mean = $(round(mean_abs_uy; digits=8)), max = $(round(max_abs_uy; digits=8))")
+println("  ux: mean = $(round(mean_abs_ux; digits = 8)), max = $(round(max_abs_ux; digits = 8))")
+println("  uy: mean = $(round(mean_abs_uy; digits = 8)), max = $(round(max_abs_uy; digits = 8))")
 println()
 
 # Max tip deflection (analytical at x=L, y=0):
@@ -208,13 +208,15 @@ println("Tip deflection (analytical): $v_tip_exact")
 
 # Find rightmost point for comparison
 max_x = maximum(ustrip(pt.x) for pt in coords)
-tip_indices = findall(i -> abs(ustrip(coords[i].x) - max_x) < 0.01 &&
-                           abs(ustrip(coords[i].y)) < 0.01 + ustrip(dx), 1:N)
+tip_indices = findall(
+    i -> abs(ustrip(coords[i].x) - max_x) < 0.01 &&
+        abs(ustrip(coords[i].y)) < 0.01 + ustrip(dx), 1:N
+)
 if !isempty(tip_indices)
     v_tip_num = mean(uy_sim[tip_indices])
     tip_abs_err = abs(v_tip_num - v_tip_exact)
     println("Tip deflection (numerical): $v_tip_num")
-    println("Tip deflection error: $(round(tip_abs_err; digits=8))")
+    println("Tip deflection error: $(round(tip_abs_err; digits = 8))")
 end
 
 # ============================================================================

@@ -32,12 +32,12 @@ HeatFlux(f::Function) = PrescribedFlux{typeof(f)}(f, :HeatFlux)
 Convective heat transfer: h·T + k·∂T/∂n = h·T∞(x,t).
 T∞ can be a Number or Function `(x, t) -> ambient_temp`.
 """
-struct Convection{H, K, F<:Function} <: Robin
+struct Convection{H, K, F <: Function} <: Robin
     h::H
     k::K
     T∞::F
 
-    function Convection(h::H, k::K, T∞::F) where {H, K, F<:Function}
+    function Convection(h::H, k::K, T∞::F) where {H, K, F <: Function}
         h < 0 && throw(ArgumentError("Heat transfer coefficient must be non-negative"))
         k <= 0 && throw(ArgumentError("Thermal conductivity must be positive"))
         return new{H, K, F}(h, k, T∞)
@@ -52,7 +52,7 @@ Convection(h, k, T∞::Number) = Convection(h, k, (x, t) -> T∞)
 
 function Base.show(io::IO, bc::Convection)
     T∞_val = bc.T∞(zeros(3), 0.0)
-    print(io, "Convection: h=$(bc.h), k=$(bc.k), T∞≈$T∞_val")
+    return print(io, "Convection: h=$(bc.h), k=$(bc.k), T∞≈$T∞_val")
 end
 
 # ============================================================================

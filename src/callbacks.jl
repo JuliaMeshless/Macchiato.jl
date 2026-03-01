@@ -19,7 +19,7 @@ struct IterationInterval <: AbstractSchedule
     N::Int
     function IterationInterval(N::Int)
         N > 0 || throw(ArgumentError("IterationInterval must be positive, got $N"))
-        new(N)
+        return new(N)
     end
 end
 
@@ -37,7 +37,7 @@ struct TimeInterval <: AbstractSchedule
     Δt::Float64
     function TimeInterval(Δt::Float64)
         Δt > 0 || throw(ArgumentError("TimeInterval must be positive, got $Δt"))
-        new(Δt)
+        return new(Δt)
     end
 end
 TimeInterval(Δt::Real) = TimeInterval(Float64(Δt))
@@ -56,7 +56,7 @@ struct WallTimeInterval <: AbstractSchedule
     seconds::Float64
     function WallTimeInterval(seconds::Float64)
         seconds > 0 || throw(ArgumentError("WallTimeInterval must be positive, got $seconds"))
-        new(seconds)
+        return new(seconds)
     end
 end
 WallTimeInterval(seconds::Real) = WallTimeInterval(Float64(seconds))
@@ -76,7 +76,7 @@ struct SpecifiedTimes <: AbstractSchedule
     function SpecifiedTimes(times::Vector{Float64})
         isempty(times) && throw(ArgumentError("SpecifiedTimes cannot be empty"))
         issorted(times) || throw(ArgumentError("SpecifiedTimes must be sorted"))
-        new(times)
+        return new(times)
     end
 end
 SpecifiedTimes(times::AbstractVector{<:Real}) = SpecifiedTimes(Float64.(collect(times)))
@@ -155,19 +155,19 @@ end
 callback = Callback(print_progress, IterationInterval(100))
 ```
 """
-struct Callback{F, S<:AbstractSchedule, P}
+struct Callback{F, S <: AbstractSchedule, P}
     func::F
     schedule::S
     parameters::P
     _state::ScheduleState
 end
 
-function Callback(func::F, schedule::S; parameters::P=nothing) where {F, S<:AbstractSchedule, P}
-    Callback{F, S, P}(func, schedule, parameters, ScheduleState())
+function Callback(func::F, schedule::S; parameters::P = nothing) where {F, S <: AbstractSchedule, P}
+    return Callback{F, S, P}(func, schedule, parameters, ScheduleState())
 end
 
-function Callback(func::F, schedule::S, parameters::P) where {F, S<:AbstractSchedule, P}
-    Callback{F, S, P}(func, schedule, parameters, ScheduleState())
+function Callback(func::F, schedule::S, parameters::P) where {F, S <: AbstractSchedule, P}
+    return Callback{F, S, P}(func, schedule, parameters, ScheduleState())
 end
 
 """
@@ -202,20 +202,20 @@ function reset!(callback::Callback)
 end
 
 function Base.show(io::IO, s::IterationInterval)
-    print(io, "IterationInterval($(s.N))")
+    return print(io, "IterationInterval($(s.N))")
 end
 
 function Base.show(io::IO, s::TimeInterval)
-    print(io, "TimeInterval($(s.Δt))")
+    return print(io, "TimeInterval($(s.Δt))")
 end
 
 function Base.show(io::IO, s::WallTimeInterval)
-    print(io, "WallTimeInterval($(s.seconds)s)")
+    return print(io, "WallTimeInterval($(s.seconds)s)")
 end
 
 function Base.show(io::IO, s::SpecifiedTimes)
     n = length(s.times)
-    if n <= 4
+    return if n <= 4
         print(io, "SpecifiedTimes($(s.times))")
     else
         print(io, "SpecifiedTimes([$(s.times[1]), ..., $(s.times[end])] ($n times))")
@@ -223,5 +223,5 @@ function Base.show(io::IO, s::SpecifiedTimes)
 end
 
 function Base.show(io::IO, c::Callback)
-    print(io, "Callback($(c.schedule))")
+    return print(io, "Callback($(c.schedule))")
 end

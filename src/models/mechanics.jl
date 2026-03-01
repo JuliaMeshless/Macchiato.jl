@@ -122,9 +122,9 @@ function make_system(model::LinearElasticity, domain; kwargs...)
     adjl = find_neighbors(coords, k)
 
     # Build RBF operators (KernelAbstractions parallelizes internally)
-    ∂²x = partial(coords, 2, 1; k=k, adjl=adjl, kwargs...)
-    ∂²y = partial(coords, 2, 2; k=k, adjl=adjl, kwargs...)
-    ∂²xy = custom(coords, _ℒ_mixed_partial; k=k, adjl=adjl, kwargs...)
+    ∂²x = partial(coords, 2, 1; k = k, adjl = adjl, kwargs...)
+    ∂²y = partial(coords, 2, 2; k = k, adjl = adjl, kwargs...)
+    ∂²xy = custom(coords, _ℒ_mixed_partial; k = k, adjl = adjl, kwargs...)
 
     # Assemble 2N×2N system from blocks
     W_∂²x = ∂²x.weights
@@ -141,8 +141,10 @@ function make_system(model::LinearElasticity, domain; kwargs...)
     A₂₂ = μ * W_∂²x + (λstar + 2μ) * W_∂²y
 
     # Combine into 2N×2N sparse matrix
-    A = [A₁₁ A₁₂;
-         A₁₂ A₂₂]
+    A = [
+        A₁₁ A₁₂;
+        A₁₂ A₂₂
+    ]
 
     # Build RHS from body force
     # PDE: L[u] + f = 0  =>  A*u = -f
@@ -161,5 +163,5 @@ end
 function Base.show(io::IO, m::LinearElasticity)
     bf_str = m.body_force === nothing ? "" : ", body_force"
     ρ_str = m.ρ === nothing ? "" : ", ρ = $(m.ρ)"
-    print(io, "LinearElasticity: (E = $(m.E), ν = $(m.ν)$(ρ_str)$(bf_str))")
+    return print(io, "LinearElasticity: (E = $(m.E), ν = $(m.ν)$(ρ_str)$(bf_str))")
 end

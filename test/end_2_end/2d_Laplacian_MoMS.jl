@@ -139,12 +139,12 @@ println("  Boundary L∞:   ", boundary_error)
 
 @testset "2D Poisson MoMS" begin
     # Boundary conditions should be exact
-    @test boundary_error < 1e-10
+    @test boundary_error < 1.0e-10
 
     # Interior solution accuracy depends on discretization
     # For 33x33 grid with polynomial solution, expect good accuracy
-    @test L2_error < 5e-2  # Reasonable for meshless method
-    @test Linf_error < 1e-1
+    @test L2_error < 5.0e-2  # Reasonable for meshless method
+    @test Linf_error < 1.0e-1
     @test relative_L2 < 0.1  # Less than 10% relative error
 
     println("\n✓ Poisson equation solver validated with MoMS")

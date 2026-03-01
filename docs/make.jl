@@ -23,7 +23,7 @@ makedocs(;
         "Custom PDEs" => "custom_pdes.md",
         "Examples" => "examples.md",
         "Package Design" => "design.md",
-        "API Reference" => "api.md"
+        "API Reference" => "api.md",
     ]
 )
 

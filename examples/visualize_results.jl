@@ -6,7 +6,7 @@ function viz_2d(
         colormap = :Spectral,
         levels = 32,
         kwargs...
-)
+    )
     fig = Figure(; size = size)
     ax = Axis(fig[1, 1]; aspect = DataAspect())
 
@@ -65,7 +65,7 @@ function viz_3d(
         colormap = :Spectral,
         levels = 32,
         kwargs...
-)
+    )
     fig = Figure(; size = size)
     ax = Axis3(fig[1, 1]; azimuth = azimuth, elevation = elevation)
     ax.aspect = :data
