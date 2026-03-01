@@ -12,7 +12,6 @@ Steady-state heat conduction on a 1m × 1m square with fixed temperatures on eac
 using WhatsThePoint
 import WhatsThePoint as WTP
 using Macchiato
-import Macchiato as MM
 using Unitful: m, °, ustrip
 using CairoMakie
 
@@ -38,9 +37,9 @@ run!(sim)
 T = temperature(sim)
 
 # Visualize
-coords = MM._coords(cloud)
-x = [ustrip(pt.x) for pt in coords]
-y = [ustrip(pt.y) for pt in coords]
+pts = points(cloud)
+x = [ustrip(pt.x) for pt in pts]
+y = [ustrip(pt.y) for pt in pts]
 
 fig = Figure(; size=(800, 700))
 ax = Axis(fig[1, 1]; title="Temperature", xlabel="x [m]", ylabel="y [m]", aspect=DataAspect())
@@ -97,11 +96,9 @@ where I = 2D³/3 is the second moment of area.
 using WhatsThePoint
 import WhatsThePoint as WTP
 using Macchiato
-import Macchiato as MM
 using RadialBasisFunctions: PHS
 using Unitful: m, °, ustrip
 using LinearAlgebra
-using LinearSolve
 using Statistics: mean
 using CairoMakie
 
@@ -154,31 +151,26 @@ bcs = Dict(
 
 # Model and solve
 model = LinearElasticity(E=E_val, ν=ν_val)
-domain = MM.Domain(cloud, bcs, model)
+domain = Domain(cloud, bcs, model)
 
 sim = Simulation(domain)
-set!(sim, ux=0.0, uy=0.0)
-
-prob = LinearSolve.LinearProblem(sim.domain; basis=PHS(3; poly_deg=3))
-sol = LinearSolve.solve(prob)
-sim._solution = sol.u
-sim.iteration = 1
+run!(sim; basis=PHS(3; poly_deg=3))
 
 # Extract results
 ux_sim, uy_sim = displacement(sim)
 N = length(cloud)
 
 # Compare with analytical solution
-coords = MM._coords(cloud)
-ux_ana = [u_exact(ustrip(pt.x), ustrip(pt.y)) for pt in coords]
-uy_ana = [v_exact(ustrip(pt.x), ustrip(pt.y)) for pt in coords]
+pts = points(cloud)
+ux_ana = [u_exact(ustrip(pt.x), ustrip(pt.y)) for pt in pts]
+uy_ana = [v_exact(ustrip(pt.x), ustrip(pt.y)) for pt in pts]
 
 println("Mean absolute error uₓ: ", mean(abs.(ux_sim .- ux_ana)))
 println("Mean absolute error uᵧ: ", mean(abs.(uy_sim .- uy_ana)))
 
 # Visualize displacement magnitude
-x = [ustrip(pt.x) for pt in coords]
-y = [ustrip(pt.y) for pt in coords]
+x = [ustrip(pt.x) for pt in pts]
+y = [ustrip(pt.y) for pt in pts]
 displacement_mag = sqrt.(ux_sim .^ 2 .+ uy_sim .^ 2)
 
 fig = Figure(; size=(1000, 500))

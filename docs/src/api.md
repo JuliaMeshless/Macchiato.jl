@@ -44,6 +44,17 @@ Steady
 Unsteady
 ```
 
+## Model Interface
+
+These are the functions to implement when defining a [custom PDE](@ref "Custom PDEs").
+
+```@docs
+AbstractModel
+_num_vars
+make_system
+make_f
+```
+
 ## Boundary Conditions
 
 ### Core Types
@@ -56,19 +67,6 @@ Robin
 DerivativeBoundaryCondition
 ```
 
-### Equation Set Traits
-
-```@docs
-EquationSet
-EnergyEquations
-FluidEquations
-UniversalEquations
-MechanicsEquations
-GenericEquations
-equation_set
-is_compatible
-```
-
 ### Generic BC Types
 
 ```@docs
@@ -78,7 +76,7 @@ ZeroFlux
 ```
 
 !!! note
-    These generic types work with **any** equation set — not just the built-in ones. For custom PDEs, use the unparameterized constructors directly: `PrescribedValue(0.0)`, `PrescribedFlux(1.0)`, `ZeroFlux()`. See [Custom PDEs](@ref) for a complete example.
+    These generic types work with **any** physics model. For custom PDEs, use them directly: `PrescribedValue(0.0)`, `PrescribedFlux(1.0)`, `ZeroFlux()`. See [Custom PDEs](@ref) for a complete example.
 
 ### Energy BCs
 
@@ -164,6 +162,5 @@ savevtk!
 ## Operators
 
 ```@docs
-Upwind
 upwind
 ```

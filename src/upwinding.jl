@@ -1,15 +1,4 @@
 """
-    Upwind{L, T} <: AbstractOperator
-
-Upwind-biased derivative operator for advection-dominated problems. Stores a callable
-operator `ℒ` and the spatial dimension `dim` it differentiates along.
-"""
-struct Upwind{L <: Function, T <: Int} <: AbstractOperator
-    ℒ::L
-    dim::T
-end
-
-"""
     upwind(data, eval_points, dim[, basis]; Δ=nothing, k=autoselect_k(data, basis))
     upwind(data, dim[, basis]; Δ=nothing, k=autoselect_k(data, basis))
 

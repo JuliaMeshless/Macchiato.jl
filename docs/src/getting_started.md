@@ -92,7 +92,7 @@ Convection(10.0, 1.0, 25.0)
 See the [API Reference](@ref) for the complete list of boundary condition types.
 
 !!! tip "Named BCs are aliases for generic types"
-    `Temperature`, `HeatFlux`, and `Adiabatic` are convenience aliases for `PrescribedValue{EnergyEquations}`, `PrescribedFlux{EnergyEquations}`, and `ZeroFlux{EnergyEquations}`. When defining a [custom PDE](@ref "Custom PDEs"), you can use the generic constructors directly — `PrescribedValue(0.0)`, `PrescribedFlux(1.0)`, `ZeroFlux()` — with no trait boilerplate required.
+    `Temperature`, `HeatFlux`, and `Adiabatic` are constructor functions that create [`PrescribedValue`](@ref), [`PrescribedFlux`](@ref), and [`ZeroFlux`](@ref) instances with a physics-meaningful display name. When defining a [custom PDE](@ref "Custom PDEs"), you can use the generic constructors directly — `PrescribedValue(0.0)`, `PrescribedFlux(1.0)`, `ZeroFlux()` — with no trait boilerplate required.
 
 ## Step 4: Create the Domain
 
@@ -102,7 +102,7 @@ The [`Domain`](@ref) ties geometry, boundary conditions, and model together:
 domain = Domain(cloud, bcs, model)
 ```
 
-The `Domain` validates that every BC key matches a surface in the point cloud and that each BC is compatible with the chosen physics model.
+The `Domain` validates that every BC key matches a surface in the point cloud.
 
 ## Step 5: Create and Run the Simulation
 

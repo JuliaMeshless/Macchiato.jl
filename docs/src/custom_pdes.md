@@ -94,9 +94,10 @@ sim = Simulation(domain)
 run!(sim)
 
 # Verify against exact solution
-u_numerical = sim.solution
-coords = Macchiato._coords(domain.cloud)
-u_exact_vals = [u_exact(ustrip.(pt)) for pt in coords]
+# For custom models, access the raw solution vector directly
+u_numerical = sim._solution
+pts = points(cloud)
+u_exact_vals = [u_exact([ustrip(pt.x), ustrip(pt.y)]) for pt in pts]
 error = maximum(abs.(u_numerical .- u_exact_vals))
 println("Max error: $error")
 ```
@@ -119,7 +120,7 @@ These are purely syntactic sugar — they construct the same generic types ([`Pr
 
 1. **Any PDE works.** Define an `AbstractModel` subtype and implement `_num_vars` and `make_system`. That's all Macchiato needs.
 
-2. **No boilerplate traits required.** Custom PDEs automatically get a `GenericEquations` equation set that is compatible with all boundary conditions. You never need to define a trait type or implement `equation_set`.
+2. **No boilerplate traits required.** Generic BC types (`PrescribedValue`, `PrescribedFlux`, `ZeroFlux`) dispatch on the mathematical hierarchy (`Dirichlet`/`Neumann`/`Robin`), so they work with any model — no equation-type trait needed.
 
 3. **Operators come from RadialBasisFunctions.jl.** Use `laplacian`, `partial`, `gradient`, or build custom differential operators — they all return sparse weight matrices ready for assembly.
 

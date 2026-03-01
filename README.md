@@ -3,7 +3,7 @@
 [![Build Status](https://github.com/JuliaMeshless/Macchiato.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/JuliaMeshless/Macchiato.jl/actions/workflows/CI.yml?query=branch%3Amain)
 [![Stable](https://img.shields.io/badge/docs-stable-blue.svg)](https://JuliaMeshless.github.io/Macchiato.jl/stable)
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://JuliaMeshless.github.io/Macchiato.jl/dev)
-[![License File](https://img.shields.io/badge/license-MIT-blue)](https://github.com/JuliaMeshless/Macchiato.jl/blob/master/LICENSE)
+[![License File](https://img.shields.io/badge/license-MIT-blue)](https://github.com/JuliaMeshless/Macchiato.jl/blob/main/LICENSE)
 
 A Julia framework for solving partial differential equations using radial basis function (RBF) meshless methods. Instead of generating and managing a mesh, Macchiato.jl operates directly on scattered point clouds — simplifying geometry handling, avoiding mesh quality issues, and enabling straightforward refinement by simply adding points.
 
@@ -24,7 +24,7 @@ WhatsThePoint.jl creates the geometry, RadialBasisFunctions.jl provides the nume
 Steady-state heat conduction on a unit square with prescribed temperatures:
 
 ```julia
-using WhatsThePoint, Macchiato, LinearSolve, Unitful: m
+using WhatsThePoint, Macchiato, Unitful: m, °
 
 # Geometry: unit square point cloud
 part = PointBoundary(rectangle(1m, 1m)...)
@@ -59,7 +59,7 @@ BCs are organized by mathematical type and physics domain:
 
 | Math Type | Generic Type | Energy | Mechanics | Fluids |
 |-----------|-------------|--------|-----------|--------|
-| Dirichlet | `PrescribedValue` | `Temperature` | `Displacement` | `VelocityInlet` |
+| Dirichlet | `PrescribedValue` | `Temperature` | `Displacement` | `VelocityInlet` / `PressureOutlet` |
 | Neumann | `PrescribedFlux` / `ZeroFlux` | `HeatFlux` / `Adiabatic` | `Traction` / `TractionFree` | `VelocityOutlet` |
 | Robin | — | `Convection` | — | — |
 
@@ -84,4 +84,4 @@ Full documentation is available at [juliameshless.github.io/Macchiato.jl](https:
 
 ## Contributing
 
-Contributions are welcome! The package uses a trait-based design that makes it straightforward to add new physics domains. See the [Package Design](https://JuliaMeshless.github.io/Macchiato.jl/dev/design/) section of the docs for the architecture overview and extension guide.
+Contributions are welcome! The package uses a dispatch-based design that makes it straightforward to add new physics domains. See the [Package Design](https://JuliaMeshless.github.io/Macchiato.jl/dev/design/) section of the docs for the architecture overview and extension guide.

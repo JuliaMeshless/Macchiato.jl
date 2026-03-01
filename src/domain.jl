@@ -19,6 +19,7 @@ Domain(cloud, model)                # cloud + model(s), no BCs
 
 At construction, the `Domain` validates that:
 1. Every boundary condition key matches a surface name in the point cloud
+2. Every surface in the point cloud has a corresponding boundary condition entry
 """
 struct Domain{M <: Manifold, C <: CRS}
     cloud::PointCloud{M, C}
