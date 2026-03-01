@@ -9,3 +9,6 @@ WhatsThePoint = "5faae8f1-f507-432f-bd56-cf2f1161ab6f"
 
 [sources]
 WhatsThePoint = {rev = "main", url = "https://github.com/JuliaMeshless/WhatsThePoint.jl"}
+
+[compat]
+WhatsThePoint = "0.2"
