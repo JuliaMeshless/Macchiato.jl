@@ -62,13 +62,14 @@ mutable struct Simulation{M, C}
     _solution::Union{Nothing, Vector{Float64}}
 end
 
-function Simulation(domain::Domain{M, C};
-    Δt::Union{Nothing, Real}=nothing,
-    stop_time::Union{Nothing, Real}=nothing,
-    stop_iteration::Int=0,
-    solver::Symbol=:Tsit5,
-    solver_options::NamedTuple=NamedTuple()
-) where {M, C}
+function Simulation(
+        domain::Domain{M, C};
+        Δt::Union{Nothing, Real} = nothing,
+        stop_time::Union{Nothing, Real} = nothing,
+        stop_iteration::Int = 0,
+        solver::Symbol = :Tsit5,
+        solver_options::NamedTuple = NamedTuple()
+    ) where {M, C}
 
     mode = (Δt === nothing && stop_time === nothing) ? SteadyState : Transient
 
@@ -81,7 +82,7 @@ function Simulation(domain::Domain{M, C};
         end
     end
 
-    Simulation{M, C}(
+    return Simulation{M, C}(
         domain,
         mode,
         Δt === nothing ? nothing : Float64(Δt),
@@ -136,10 +137,10 @@ function _run_transient!(sim::Simulation)
 
     ode_solver = _get_ode_solver(sim.solver)
 
-    save_opts = (; save_everystep=false, save_end=true)
+    save_opts = (; save_everystep = false, save_end = true)
     merged_opts = merge(save_opts, sim.solver_options)
 
-    sim._integrator = OrdinaryDiffEq.init(prob, ode_solver; dt=sim.Δt, merged_opts...)
+    sim._integrator = OrdinaryDiffEq.init(prob, ode_solver; dt = sim.Δt, merged_opts...)
 
     _execute_callbacks!(sim)
     _write_outputs!(sim)
@@ -174,7 +175,7 @@ end
 function _create_ode_problem(domain::Domain, u0::AbstractVector, tspan)
     boundary_funcs = [
         make_bc(bc, domain.cloud[surf_name], domain, ids)
-        for (surf_name, (ids, bc)) in domain.boundaries
+            for (surf_name, (ids, bc)) in domain.boundaries
     ]
 
     model_funcs = [make_f(m, domain) for m in domain.models]
@@ -268,7 +269,7 @@ function Base.show(io::IO, sim::Simulation)
         end
         print(io, ", solver=$(sim.solver)")
     end
-    print(io, ")")
+    return print(io, ")")
 end
 
 function Base.show(io::IO, ::MIME"text/plain", sim::Simulation)
@@ -290,5 +291,5 @@ function Base.show(io::IO, ::MIME"text/plain", sim::Simulation)
     for (name, ow) in sim.output_writers
         println(io, "│   └── ", name, ": ", ow)
     end
-    print(io, "└── Running: ", sim.running)
+    return print(io, "└── Running: ", sim.running)
 end

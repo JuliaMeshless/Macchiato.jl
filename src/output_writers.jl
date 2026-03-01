@@ -51,7 +51,7 @@ writer = VTKOutputWriter("results/sim", schedule=TimeInterval(0.1))
 writer = VTKOutputWriter("results/sim", schedule=IterationInterval(100), fields=[:T])
 ```
 """
-mutable struct VTKOutputWriter{S<:AbstractSchedule} <: AbstractOutputWriter
+mutable struct VTKOutputWriter{S <: AbstractSchedule} <: AbstractOutputWriter
     prefix::String
     schedule::S
     fields::Vector{Symbol}
@@ -60,16 +60,16 @@ mutable struct VTKOutputWriter{S<:AbstractSchedule} <: AbstractOutputWriter
     _output_count::Int
 end
 
-function VTKOutputWriter(prefix::String; schedule::S=TimeInterval(1.0), fields::Vector{Symbol}=Symbol[]) where {S<:AbstractSchedule}
+function VTKOutputWriter(prefix::String; schedule::S = TimeInterval(1.0), fields::Vector{Symbol} = Symbol[]) where {S <: AbstractSchedule}
     dir = dirname(prefix)
     if !isempty(dir) && !isdir(dir)
         mkpath(dir)
     end
-    VTKOutputWriter{S}(prefix, schedule, fields, ScheduleState(), nothing, 0)
+    return VTKOutputWriter{S}(prefix, schedule, fields, ScheduleState(), nothing, 0)
 end
 
 function initialize!(writer::VTKOutputWriter, sim)
-    writer._pvd = createpvd(writer.prefix; append=false)
+    writer._pvd = createpvd(writer.prefix; append = false)
     writer._output_count = 0
     writer._state.last_iteration = 0
     writer._state.last_time = 0.0
@@ -172,7 +172,7 @@ end
 
 function Base.show(io::IO, w::VTKOutputWriter)
     fields_str = isempty(w.fields) ? "all" : join(w.fields, ", ")
-    print(io, "VTKOutputWriter(\"$(w.prefix)\", $(w.schedule), fields=[$fields_str])")
+    return print(io, "VTKOutputWriter(\"$(w.prefix)\", $(w.schedule), fields=[$fields_str])")
 end
 
 """
@@ -191,19 +191,19 @@ Writes simulation checkpoints to JLD2 format for restart capability.
 writer = JLD2OutputWriter("checkpoints/sim", schedule=WallTimeInterval(300.0))
 ```
 """
-mutable struct JLD2OutputWriter{S<:AbstractSchedule} <: AbstractOutputWriter
+mutable struct JLD2OutputWriter{S <: AbstractSchedule} <: AbstractOutputWriter
     prefix::String
     schedule::S
     _state::ScheduleState
     _output_count::Int
 end
 
-function JLD2OutputWriter(prefix::String; schedule::S=TimeInterval(1.0)) where {S<:AbstractSchedule}
+function JLD2OutputWriter(prefix::String; schedule::S = TimeInterval(1.0)) where {S <: AbstractSchedule}
     dir = dirname(prefix)
     if !isempty(dir) && !isdir(dir)
         mkpath(dir)
     end
-    JLD2OutputWriter{S}(prefix, schedule, ScheduleState(), 0)
+    return JLD2OutputWriter{S}(prefix, schedule, ScheduleState(), 0)
 end
 
 function initialize!(writer::JLD2OutputWriter, sim)
@@ -222,12 +222,13 @@ function write_output!(writer::JLD2OutputWriter, sim)
 
     filename = "$(writer.prefix)_$(lpad(writer._output_count, 6, '0')).jld2"
 
-    JLD2.jldsave(filename;
-        u=_get_solution_vector(sim),
-        iteration=sim.iteration,
-        time=sim.time,
-        Δt=sim.Δt,
-        stop_time=sim.stop_time
+    JLD2.jldsave(
+        filename;
+        u = _get_solution_vector(sim),
+        iteration = sim.iteration,
+        time = sim.time,
+        Δt = sim.Δt,
+        stop_time = sim.stop_time
     )
 
     writer._output_count += 1
@@ -239,5 +240,5 @@ function finalize!(writer::JLD2OutputWriter, sim)
 end
 
 function Base.show(io::IO, w::JLD2OutputWriter)
-    print(io, "JLD2OutputWriter(\"$(w.prefix)\", $(w.schedule))")
+    return print(io, "JLD2OutputWriter(\"$(w.prefix)\", $(w.schedule))")
 end

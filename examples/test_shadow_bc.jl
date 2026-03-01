@@ -114,7 +114,8 @@ println("   Scheme: ShadowPoints(dx, 1)")
 
 domain_shadow1 = MM.Domain(cloud, bcs_shadow1, MM.SolidEnergy(k = k, ρ = ρ, cₚ = cₚ))
 prob_shadow1 = MM.LinearProblem(
-    domain_shadow1; scheme = WTP.ShadowPoints(WTP.ConstantSpacing(dx), 1))
+    domain_shadow1; scheme = WTP.ShadowPoints(WTP.ConstantSpacing(dx), 1)
+)
 println("   System size: ", size(prob_shadow1.A))
 println("   Solving...")
 sol_shadow1 = solve(prob_shadow1)
@@ -141,7 +142,8 @@ println("   Scheme: ShadowPoints(dx, 2)")
 
 domain_shadow2 = MM.Domain(cloud, bcs_shadow2, MM.SolidEnergy(k = k, ρ = ρ, cₚ = cₚ))
 prob_shadow2 = MM.LinearProblem(
-    domain_shadow2; scheme = WTP.ShadowPoints(WTP.ConstantSpacing(dx), 2))
+    domain_shadow2; scheme = WTP.ShadowPoints(WTP.ConstantSpacing(dx), 2)
+)
 println("   System size: ", size(prob_shadow2.A))
 println("   Solving...")
 sol_shadow2 = solve(prob_shadow2)
@@ -170,7 +172,8 @@ end
 
 domain_robin = MM.Domain(cloud, bcs_robin, MM.SolidEnergy(k = k, ρ = ρ, cₚ = cₚ))
 prob_robin = MM.LinearProblem(
-    domain_robin; scheme = WTP.ShadowPoints(WTP.ConstantSpacing(dx), 1))
+    domain_robin; scheme = WTP.ShadowPoints(WTP.ConstantSpacing(dx), 1)
+)
 println("   System size: ", size(prob_robin.A))
 println("   Solving...")
 sol_robin = solve(prob_robin)

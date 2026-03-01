@@ -68,8 +68,11 @@ end
 
 function _set_field!(sim, field::Symbol, value::AbstractVector)
     indices = _field_indices(sim, field)
-    length(value) == length(indices) || throw(DimensionMismatch(
-        "Vector length $(length(value)) does not match field size $(length(indices))"))
+    length(value) == length(indices) || throw(
+        DimensionMismatch(
+            "Vector length $(length(value)) does not match field size $(length(indices))"
+        )
+    )
     sim.u0[indices] .= value
     return nothing
 end

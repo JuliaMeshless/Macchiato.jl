@@ -59,17 +59,41 @@ function _ℒ_mixed_partial(basis::RadialBasisFunctions.AbstractRadialBasis)
 end
 
 """
-    _ℒ_mixed_partial(basis::MonomialBasis)
+    _ℒ_mixed_partial(basis::MonomialBasis{2, Deg})
 
-Mixed partial derivative ∂²/∂x∂y for monomial basis.
-Computes by differentiating first w.r.t. x (dim=1) then w.r.t. y (dim=2).
+Mixed partial derivative ∂²/∂x∂y for 2D monomial basis.
+
+Hand-coded to match the MonomialBasis evaluation ordering. The generic
+`∂exponents`/`monomial_recursive_list`/`build_monomial_basis` pipeline
+produces results in `multiexponents` ordering which differs from the
+`MonomialBasis` evaluator ordering used in the RBF-FD collocation matrix.
 """
-function _ℒ_mixed_partial(basis::RadialBasisFunctions.MonomialBasis{Dim, Deg}) where {Dim, Deg}
-    me = RadialBasisFunctions.∂exponents(basis, 1, 1)
-    RadialBasisFunctions.∂exponents!(me.exponents, me.coeffs, 1, 2)
-    ids = RadialBasisFunctions.monomial_recursive_list(basis, me)
-    basis_func = RadialBasisFunctions.build_monomial_basis(ids, me.coeffs)
-    return RadialBasisFunctions.ℒMonomialBasis(Dim, Deg, basis_func)
+function _ℒ_mixed_partial(::RadialBasisFunctions.MonomialBasis{2, 0})
+    function basis!(b, x)
+        b .= zero(eltype(x))
+        return nothing
+    end
+    return RadialBasisFunctions.ℒMonomialBasis(2, 0, basis!)
+end
+
+function _ℒ_mixed_partial(::RadialBasisFunctions.MonomialBasis{2, 1})
+    function basis!(b, x)
+        b .= zero(eltype(x))
+        return nothing
+    end
+    return RadialBasisFunctions.ℒMonomialBasis(2, 1, basis!)
+end
+
+function _ℒ_mixed_partial(::RadialBasisFunctions.MonomialBasis{2, 2})
+    # Monomial ordering: [1, x, y, xy, x², y²]
+    # ∂²/∂x∂y:          [0, 0, 0,  1,  0,  0]
+    function basis!(b, x)
+        T = eltype(x)
+        b .= zero(T)
+        b[4] = one(T)
+        return nothing
+    end
+    return RadialBasisFunctions.ℒMonomialBasis(2, 2, basis!)
 end
 
 """
@@ -98,9 +122,9 @@ function make_system(model::LinearElasticity, domain; kwargs...)
     adjl = find_neighbors(coords, k)
 
     # Build RBF operators (KernelAbstractions parallelizes internally)
-    ∂²x = partial(coords, 2, 1; k=k, adjl=adjl, kwargs...)
-    ∂²y = partial(coords, 2, 2; k=k, adjl=adjl, kwargs...)
-    ∂²xy = custom(coords, _ℒ_mixed_partial; k=k, adjl=adjl, kwargs...)
+    ∂²x = partial(coords, 2, 1; k = k, adjl = adjl, kwargs...)
+    ∂²y = partial(coords, 2, 2; k = k, adjl = adjl, kwargs...)
+    ∂²xy = custom(coords, _ℒ_mixed_partial; k = k, adjl = adjl, kwargs...)
 
     # Assemble 2N×2N system from blocks
     W_∂²x = ∂²x.weights
@@ -117,16 +141,19 @@ function make_system(model::LinearElasticity, domain; kwargs...)
     A₂₂ = μ * W_∂²x + (λstar + 2μ) * W_∂²y
 
     # Combine into 2N×2N sparse matrix
-    A = [A₁₁ A₁₂;
-         A₁₂ A₂₂]
+    A = [
+        A₁₁ A₁₂;
+        A₁₂ A₂₂
+    ]
 
     # Build RHS from body force
+    # PDE: L[u] + f = 0  =>  A*u = -f
     b = zeros(eltype(A), 2N)
     if model.body_force !== nothing
         for (i, pt) in enumerate(coords)
             fx, fy = model.body_force(pt)
-            b[i] = fx
-            b[i + N] = fy
+            b[i] = -fx
+            b[i + N] = -fy
         end
     end
 
@@ -136,5 +163,5 @@ end
 function Base.show(io::IO, m::LinearElasticity)
     bf_str = m.body_force === nothing ? "" : ", body_force"
     ρ_str = m.ρ === nothing ? "" : ", ρ = $(m.ρ)"
-    print(io, "LinearElasticity: (E = $(m.E), ν = $(m.ν)$(ρ_str)$(bf_str))")
+    return print(io, "LinearElasticity: (E = $(m.E), ν = $(m.ν)$(ρ_str)$(bf_str))")
 end

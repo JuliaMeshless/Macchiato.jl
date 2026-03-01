@@ -60,15 +60,16 @@ visualize(cloud; markersize = markersize, size = figsize)
 ##
 
 # physics models and boundary conditions
-h = 250 / 1e6 # W / (mm^2 K)
+h = 250 / 1.0e6 # W / (mm^2 K)
 T∞ = 25 + 273.15 # K
-k = 40 / 1e3 # W / (mm K)
-ρ = 7833 / 1e9  # kg/mm^3
-cₚ = 0.465 * 1e3 # J / (kg K)]
+k = 40 / 1.0e3 # W / (mm K)
+ρ = 7833 / 1.0e9  # kg/mm^3
+cₚ = 0.465 * 1.0e3 # J / (kg K)]
 α = k / (cₚ * ρ) # mm^2 / s
 
 bcs = Dict(
-    :surface1 => MM.Temperature(10), :surface2 => MM.Temperature(0), :surface3 => MM.Temperature(5))
+    :surface1 => MM.Temperature(10), :surface2 => MM.Temperature(0), :surface3 => MM.Temperature(5)
+)
 
 domain = MM.Domain(cloud, bcs, SolidEnergy(k = k, ρ = ρ, cₚ = cₚ))
 

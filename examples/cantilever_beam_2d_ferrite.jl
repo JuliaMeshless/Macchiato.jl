@@ -33,7 +33,7 @@ using CairoMakie
 L = 8.0    # Beam length
 D = 1.0    # Half-height (beam goes from y=-D to y=D)
 P = 1000.0 # Applied load (total shear force)
-E_val = 1e7
+E_val = 1.0e7
 ν_val = 0.3
 I_val = 2D^3 / 3  # Second moment of area
 
@@ -47,7 +47,7 @@ end
 
 function v_exact(x, y)
     return P / (6E_val * I_val) *
-           (3ν_val * y^2 * (L - x) + (4 + 5ν_val) * D^2 * x + (3L - x) * x^2)
+        (3ν_val * y^2 * (L - x) + (4 + 5ν_val) * D^2 * x + (3L - x) * x^2)
 end
 
 # ============================================================================
@@ -82,8 +82,12 @@ close!(dh)
 
 # Left (clamped): exact displacement from Timoshenko solution
 ch = ConstraintHandler(dh)
-add!(ch, Dirichlet(:u, getfacetset(grid, "left"),
-    (x, t) -> [u_exact(x[1], x[2]), v_exact(x[1], x[2])], [1, 2]))
+add!(
+    ch, Dirichlet(
+        :u, getfacetset(grid, "left"),
+        (x, t) -> [u_exact(x[1], x[2]), v_exact(x[1], x[2])], [1, 2]
+    )
+)
 close!(ch)
 Ferrite.update!(ch, 0.0)
 
@@ -97,9 +101,11 @@ Ferrite.update!(ch, 0.0)
 #   [σ₁₂]            [0    0  (1-ν)  ] [ε₁₂]
 
 C_factor = E_val / (1 - ν_val^2)
-C_voigt = C_factor * [1.0     ν_val   0.0
-                      ν_val   1.0     0.0
-                      0.0     0.0     (1.0 - ν_val)]
+C_voigt = C_factor * [
+    1.0     ν_val   0.0
+    ν_val   1.0     0.0
+    0.0     0.0     (1.0 - ν_val)
+]
 C = fromvoigt(SymmetricTensor{4, 2}, C_voigt)
 
 # ============================================================================
@@ -214,9 +220,9 @@ println("Nodes:         $N")
 println("Elements:      $(getncells(grid))")
 println("DOFs:          $(ndofs(dh))")
 println("System nnz:    $(nnz(K))")
-println("Assembly time: $(round(t_assembly; digits=4)) s")
-println("Solve time:    $(round(t_solve; digits=4)) s")
-println("Total time:    $(round(t_assembly + t_solve; digits=4)) s")
+println("Assembly time: $(round(t_assembly; digits = 4)) s")
+println("Solve time:    $(round(t_solve; digits = 4)) s")
+println("Total time:    $(round(t_assembly + t_solve; digits = 4)) s")
 println()
 println("========================================")
 println("Cantilever Beam Results (Ferrite FEM)")
@@ -225,8 +231,8 @@ println("Beam: L=$L, D=$D, P=$P, E=$E_val, ν=$ν_val")
 println("Nodes: $N, Elements: $(getncells(grid))")
 println()
 println("Absolute Error (vs Timoshenko):")
-println("  ux: mean = $(round(mean_abs_ux; digits=8)), max = $(round(max_abs_ux; digits=8))")
-println("  uy: mean = $(round(mean_abs_uy; digits=8)), max = $(round(max_abs_uy; digits=8))")
+println("  ux: mean = $(round(mean_abs_ux; digits = 8)), max = $(round(max_abs_ux; digits = 8))")
+println("  uy: mean = $(round(mean_abs_uy; digits = 8)), max = $(round(max_abs_uy; digits = 8))")
 println()
 
 # Max tip deflection (analytical at x=L, y=0):
@@ -239,7 +245,7 @@ if !isempty(tip_indices)
     v_tip_num = mean(uy_fem[tip_indices])
     tip_abs_err = abs(v_tip_num - v_tip_exact)
     println("Tip deflection (numerical): $v_tip_num")
-    println("Tip deflection error: $(round(tip_abs_err; digits=8))")
+    println("Tip deflection error: $(round(tip_abs_err; digits = 8))")
 end
 
 # ============================================================================
@@ -253,46 +259,62 @@ error_mag = sqrt.(err_ux .^ 2 .+ err_uy .^ 2)
 fig = Figure(; size = (1400, 1800));
 
 # Row 1: analytical displacement components
-ax1 = Axis(fig[1, 1]; title = "uₓ (analytical)", xlabel = "x", ylabel = "y",
-    aspect = DataAspect())
+ax1 = Axis(
+    fig[1, 1]; title = "uₓ (analytical)", xlabel = "x", ylabel = "y",
+    aspect = DataAspect()
+)
 sc1 = scatter!(ax1, x, y; color = ux_ana, colormap = :RdBu, markersize = 4)
 Colorbar(fig[1, 2], sc1)
 
-ax2 = Axis(fig[1, 3]; title = "uᵧ (analytical)", xlabel = "x", ylabel = "y",
-    aspect = DataAspect())
+ax2 = Axis(
+    fig[1, 3]; title = "uᵧ (analytical)", xlabel = "x", ylabel = "y",
+    aspect = DataAspect()
+)
 sc2 = scatter!(ax2, x, y; color = uy_ana, colormap = :RdBu, markersize = 4)
 Colorbar(fig[1, 4], sc2)
 
 # Row 2: FEM displacement components
-ax3 = Axis(fig[2, 1]; title = "uₓ (FEM)", xlabel = "x", ylabel = "y",
-    aspect = DataAspect())
+ax3 = Axis(
+    fig[2, 1]; title = "uₓ (FEM)", xlabel = "x", ylabel = "y",
+    aspect = DataAspect()
+)
 sc3 = scatter!(ax3, x, y; color = ux_fem, colormap = :RdBu, markersize = 4)
 Colorbar(fig[2, 2], sc3)
 
-ax4 = Axis(fig[2, 3]; title = "uᵧ (FEM)", xlabel = "x", ylabel = "y",
-    aspect = DataAspect())
+ax4 = Axis(
+    fig[2, 3]; title = "uᵧ (FEM)", xlabel = "x", ylabel = "y",
+    aspect = DataAspect()
+)
 sc4 = scatter!(ax4, x, y; color = uy_fem, colormap = :RdBu, markersize = 4)
 Colorbar(fig[2, 4], sc4)
 
 # Row 3: displacement magnitude (analytical vs FEM)
-ax5 = Axis(fig[3, 1]; title = "‖u‖ (analytical)", xlabel = "x", ylabel = "y",
-    aspect = DataAspect())
+ax5 = Axis(
+    fig[3, 1]; title = "‖u‖ (analytical)", xlabel = "x", ylabel = "y",
+    aspect = DataAspect()
+)
 sc5 = scatter!(ax5, x, y; color = ana_mag, colormap = :viridis, markersize = 4)
 Colorbar(fig[3, 2], sc5)
 
-ax6 = Axis(fig[3, 3]; title = "‖u‖ (FEM)", xlabel = "x", ylabel = "y",
-    aspect = DataAspect())
+ax6 = Axis(
+    fig[3, 3]; title = "‖u‖ (FEM)", xlabel = "x", ylabel = "y",
+    aspect = DataAspect()
+)
 sc6 = scatter!(ax6, x, y; color = displacement_mag, colormap = :viridis, markersize = 4)
 Colorbar(fig[3, 4], sc6)
 
 # Row 4: absolute error
-ax7 = Axis(fig[4, 1]; title = "abs error uₓ", xlabel = "x", ylabel = "y",
-    aspect = DataAspect())
+ax7 = Axis(
+    fig[4, 1]; title = "abs error uₓ", xlabel = "x", ylabel = "y",
+    aspect = DataAspect()
+)
 sc7 = scatter!(ax7, x, y; color = abs_err_ux, colormap = :inferno, markersize = 4)
 Colorbar(fig[4, 2], sc7)
 
-ax8 = Axis(fig[4, 3]; title = "abs error uᵧ", xlabel = "x", ylabel = "y",
-    aspect = DataAspect())
+ax8 = Axis(
+    fig[4, 3]; title = "abs error uᵧ", xlabel = "x", ylabel = "y",
+    aspect = DataAspect()
+)
 sc8 = scatter!(ax8, x, y; color = abs_err_uy, colormap = :inferno, markersize = 4)
 Colorbar(fig[4, 4], sc8)
 

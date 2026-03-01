@@ -91,8 +91,10 @@ Export point-based simulation results to a VTK file.
 exportvtk("results/temperature", points(cloud), [T_values], ["T"])
 ```
 """
-function exportvtk(filename::String, points::AbstractVector,
-        data::AbstractVector{<:AbstractVector}, names::AbstractVector)
+function exportvtk(
+        filename::String, points::AbstractVector,
+        data::AbstractVector{<:AbstractVector}, names::AbstractVector
+    )
     p = reduce(hcat, _ustrip(_coords(points)))
     cells = createvtkcells(p)
     vtkfile = createvtkfile(filename, p, cells)

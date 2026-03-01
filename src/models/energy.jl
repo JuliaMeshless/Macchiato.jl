@@ -87,5 +87,5 @@ end
 
 function Base.show(io::IO, e::SolidEnergy)
     source_str = e.source === nothing ? "" : ", source"
-    print(io, "Energy: (k = $(e.k), ρ = $(e.ρ), cₚ = $(e.cₚ)$(source_str))")
+    return print(io, "Energy: (k = $(e.k), ρ = $(e.ρ), cₚ = $(e.cₚ)$(source_str))")
 end

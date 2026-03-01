@@ -52,19 +52,24 @@ function make_bc!(::Type{Dirichlet}, A, b, boundary, surf, domain, ids; kwargs..
     return write_bc_dirichlet!(A, b, ids, boundary, surf)
 end
 
-function make_bc!(::Type{DerivativeBoundaryCondition}, A, b, boundary, surf, domain, ids;
-        scheme = nothing, kwargs...)
+function make_bc!(
+        ::Type{DerivativeBoundaryCondition}, A, b, boundary, surf, domain, ids;
+        scheme = nothing, kwargs...
+    )
     return write_bc_derivative!(
-        bc_type(typeof(boundary)), A, b, ids, boundary, surf, domain, scheme; kwargs...)
+        bc_type(typeof(boundary)), A, b, ids, boundary, surf, domain, scheme; kwargs...
+    )
 end
 
 function write_bc_derivative!(
-        ::Type{Neumann}, A, b, ids, boundary, surf, domain, scheme; kwargs...)
+        ::Type{Neumann}, A, b, ids, boundary, surf, domain, scheme; kwargs...
+    )
     return write_bc_neumann!(A, b, ids, boundary, surf, domain, scheme; kwargs...)
 end
 
 function write_bc_derivative!(
-        ::Type{Robin}, A, b, ids, boundary, surf, domain, scheme; kwargs...)
+        ::Type{Robin}, A, b, ids, boundary, surf, domain, scheme; kwargs...
+    )
     return write_bc_robin!(A, b, ids, boundary, surf, domain, scheme; kwargs...)
 end
 
@@ -72,8 +77,10 @@ end
 # BC Implementation Functions
 # ============================================================================
 
-function write_bc_dirichlet!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        ids, bc, surf, n_vars::Int = 1, t = 0.0) where {TA, TB}
+function write_bc_dirichlet!(
+        A::AbstractMatrix{TA}, b::AbstractVector{TB},
+        ids, bc, surf, n_vars::Int = 1, t = 0.0
+    ) where {TA, TB}
     N = div(size(A, 1), n_vars)
 
     # Batch zero all BC rows in a single O(nnz) pass
@@ -100,25 +107,32 @@ function write_bc_dirichlet!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
             end
         end
     end
+    return
 end
 
-function write_bc_neumann!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        ids, boundary, surf, domain, scheme, t = 0.0; kwargs...) where {TA, TB}
+function write_bc_neumann!(
+        A::AbstractMatrix{TA}, b::AbstractVector{TB},
+        ids, boundary, surf, domain, scheme, t = 0.0; kwargs...
+    ) where {TA, TB}
     normals = normal(surf)
 
     for (local_i, global_i) in enumerate(ids)
         x = get_node_coords(surf, local_i)
         nbs, weights = compute_local_derivative_weights(
-            surf, domain, scheme, A, global_i, local_i, normals; kwargs...)
+            surf, domain, scheme, A, global_i, local_i, normals; kwargs...
+        )
 
         sv = SparseVector(size(A, 2), nbs, weights)
         A[global_i, :] = sv
         b[global_i] = convert(TB, boundary(x, t))
     end
+    return
 end
 
-function write_bc_robin!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        ids, boundary, surf, domain, scheme, t = 0.0; kwargs...) where {TA, TB}
+function write_bc_robin!(
+        A::AbstractMatrix{TA}, b::AbstractVector{TB},
+        ids, boundary, surf, domain, scheme, t = 0.0; kwargs...
+    ) where {TA, TB}
     α_val = convert(TA, α(boundary))
     β_val = convert(TA, β(boundary))
     normals = normal(surf)
@@ -126,7 +140,8 @@ function write_bc_robin!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
     for (local_i, global_i) in enumerate(ids)
         x = get_node_coords(surf, local_i)
         nbs, weights = compute_local_derivative_weights(
-            surf, domain, scheme, A, global_i, local_i, normals; kwargs...)
+            surf, domain, scheme, A, global_i, local_i, normals; kwargs...
+        )
 
         robin_weights = convert(TA, β_val) .* weights
         diag_idx = searchsortedfirst(nbs, global_i)
@@ -136,4 +151,5 @@ function write_bc_robin!(A::AbstractMatrix{TA}, b::AbstractVector{TB},
         A[global_i, :] = sv
         b[global_i] = convert(TB, boundary(x, t))
     end
+    return
 end

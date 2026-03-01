@@ -10,14 +10,16 @@ Assembles all model physics functions and boundary condition functions from the 
 then composes them into a single ODE right-hand side `f(du, u, p, t)`.
 """
 function MultiphysicsProblem(
-        domain::Domain{Dim}, u0, tspan; kwargs...) where {Dim}
+        domain::Domain{Dim}, u0, tspan; kwargs...
+    ) where {Dim}
     boundary_funcs = mapreduce(vcat, domain.boundaries) do b
         ids, bc = b.second
         surf = domain.cloud[b.first]
         make_bc(bc, surf, domain, ids; kwargs...)
     end
     model_funcs = mapreduce(
-        m -> make_f(m, domain; kwargs...), vcat, domain.models)
+        m -> make_f(m, domain; kwargs...), vcat, domain.models
+    )
 
     model_funcs = model_funcs isa Vector ? model_funcs : [model_funcs]
 
@@ -45,9 +47,11 @@ Assembles the system matrix `A` and right-hand side `b` from the physics model,
 then applies boundary conditions by modifying the appropriate rows of `A` and `b`.
 The resulting system `Ax = b` is solved with `LinearSolve.solve`.
 """
-function LinearSolve.LinearProblem(domain::Domain;
+function LinearSolve.LinearProblem(
+        domain::Domain;
         scheme = nothing,
-        kwargs...)
+        kwargs...
+    )
     # create initial system matrix and rhs based on physics model
     # current setup only works when you have one physics model
     println("Creating linear problem")
@@ -74,5 +78,5 @@ function _bc_kwargs(model::LinearElasticity)
 end
 
 function _num_vars(models::AbstractVector{<:AbstractModel}, Dim)
-    sum(m -> _num_vars(m, Dim), models)
+    return sum(m -> _num_vars(m, Dim), models)
 end

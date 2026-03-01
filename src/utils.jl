@@ -22,14 +22,14 @@ function findmin_turbo(x, ids)
 end
 
 function _coords(cloud::Union{PointCloud{𝔼{2}}, PointSurface{𝔼{2}}})
-    map(points(cloud)) do p
+    return map(points(cloud)) do p
         c = coords(p)
         SVector(c.x, c.y)
     end
 end
 
 function _coords(points::AbstractVector{<:Point{𝔼{2}}})
-    map(points) do p
+    return map(points) do p
         c = coords(p)
         SVector(c.x, c.y)
     end
@@ -37,14 +37,14 @@ end
 
 function _coords(cloud::Union{PointCloud{𝔼{3}}, PointSurface{𝔼{3}}})
     pts = points(cloud)
-    map(pts) do p
+    return map(pts) do p
         c = coords(p)
         SVector(c.x, c.y, c.z)
     end
 end
 
 function _coords(points::AbstractVector{<:Point{𝔼{3}}})
-    map(points) do p
+    return map(points) do p
         c = coords(p)
         SVector(c.x, c.y, c.z)
     end
@@ -73,7 +73,7 @@ Zero all entries in `row_set` rows with a single pass over the sparse matrix.
 O(nnz) total instead of O(|row_set| * nnz) from repeated `A[row, :] .= 0`.
 """
 function zero_rows!(A::SparseMatrixCSC{T}, row_set::Set{Int}) where {T}
-    @inbounds for col in 1:size(A, 2)
+    return @inbounds for col in 1:size(A, 2)
         for idx in nzrange(A, col)
             if A.rowval[idx] in row_set
                 A.nzval[idx] = zero(T)

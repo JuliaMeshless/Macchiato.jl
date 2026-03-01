@@ -30,6 +30,7 @@ docs/site/
 
 # ignore media files
 *.png
+!docs/src/assets/*.png
 *.mp4
 *.gif
 

@@ -3,7 +3,7 @@ Compute interpolation weights at a point, returning dense vector.
 """
 @inline function interpolation_weights(nbs_coords, pt; kwargs...)
     op = regrid(nbs_coords, [pt]; kwargs...)
-    return collect(op.weights[1, :])
+    return op.weights isa AbstractVector ? collect(op.weights) : collect(op.weights[1, :])
 end
 
 """
@@ -12,7 +12,8 @@ No shadow points - uses direct finite difference.
 Returns (neighbor_indices, weights).
 """
 function compute_local_derivative_weights(
-        surf, domain, shadow_op::Nothing, A, global_i, local_i, normals; kwargs...)
+        surf, domain, shadow_op::Nothing, A, global_i, local_i, normals; kwargs...
+    )
 
     # Get neighbors from A (assuming structural symmetry)
     nbs = A.rowval[A.colptr[global_i]:(A.colptr[global_i + 1] - 1)]
@@ -26,7 +27,7 @@ function compute_local_derivative_weights(
     d = directional(nbs_coords, [surf_pt], n)
 
     # Collect to dense to preserve precision
-    w = collect(d.weights[1, :])
+    w = d.weights isa AbstractVector ? collect(d.weights) : collect(d.weights[1, :])
     return nbs, w
 end
 
@@ -37,7 +38,8 @@ Returns (neighbor_indices, weights).
 """
 function compute_local_derivative_weights(
         surf, domain, shadow_op::WhatsThePoint.ShadowPoints{1},
-        A, global_i, local_i, normals; kwargs...)
+        A, global_i, local_i, normals; kwargs...
+    )
     nbs = A.rowval[A.colptr[global_i]:(A.colptr[global_i + 1] - 1)]
 
     surf_pt = get_node_coords(surf, local_i)
@@ -61,7 +63,8 @@ Returns (neighbor_indices, weights).
 """
 function compute_local_derivative_weights(
         surf, domain, shadow_op::WhatsThePoint.ShadowPoints{2},
-        A, global_i, local_i, normals; kwargs...)
+        A, global_i, local_i, normals; kwargs...
+    )
     nbs = A.rowval[A.colptr[global_i]:(A.colptr[global_i + 1] - 1)]
 
     surf_pt = get_node_coords(surf, local_i)

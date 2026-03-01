@@ -96,8 +96,8 @@ using Macchiato
         @test cb.schedule isa IterationInterval
         @test cb.parameters === nothing
 
-        cb_with_params = Callback(test_func, IterationInterval(2); parameters=(a=1, b=2))
-        @test cb_with_params.parameters == (a=1, b=2)
+        cb_with_params = Callback(test_func, IterationInterval(2); parameters = (a = 1, b = 2))
+        @test cb_with_params.parameters == (a = 1, b = 2)
 
         Macchiato.reset!(cb)
         @test cb._state.last_iteration == 0
