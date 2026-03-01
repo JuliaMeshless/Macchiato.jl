@@ -6,3 +6,6 @@ Macchiato = "cd40ceae-7681-4e2e-9056-ba6e356aca3e"
 RadialBasisFunctions = "79ee0514-adf7-4479-8807-6f72ea8967e8"
 Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 WhatsThePoint = "5faae8f1-f507-432f-bd56-cf2f1161ab6f"
+
+[sources]
+WhatsThePoint = {rev = "main", url = "https://github.com/JuliaMeshless/WhatsThePoint.jl"}
