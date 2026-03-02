@@ -64,9 +64,9 @@ Macchiato.jl is part of the [JuliaMeshless](https://github.com/JuliaMeshless) or
 │   WhatsThePoint.jl  │     │ RadialBasisFunctions.jl  │     │  Macchiato.jl               │
 │                     │     │                          │     │                             │
 │  Boundary creation  │────▶│  RBF interpolation       │────▶│  PDE model interface        │
-│  Surface splitting  │     │  Differential operators   │     │  Boundary conditions        │
+│  Surface splitting  │     │  Differential operators  │     │  Boundary conditions        │
 │  Interior fill      │     │  (∇², ∂/∂x, custom)      │     │  Simulation & time stepping │
-│  Point repulsion    │     │  KNN stencil selection    │     │  Field extraction & VTK I/O │
+│  Point repulsion    │     │  KNN stencil selection   │     │  Field extraction & VTK I/O │
 └─────────────────────┘     └──────────────────────────┘     └─────────────────────────────┘
         Geometry                   Numerics                      PDE Framework
 ```
