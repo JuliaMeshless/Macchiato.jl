@@ -14,7 +14,7 @@ Geometry → Model → BCs → Domain → Simulation → Results
 2. **Model** — Choose a physics model (`SolidEnergy`, `LinearElasticity`, etc.)
 3. **Boundary Conditions** — Assign BCs to each named surface
 4. **Domain** — `Domain(cloud, bcs, model)` validates and binds everything together
-5. **Simulation** — `Simulation(domain)` auto-detects steady/transient mode; `run!` executes
+5. **Simulation** — `Simulation(domain)` defaults to `Steady()`; pass `Transient(...)` for time-dependent problems; `run!` executes
 6. **Results** — Extract fields with `temperature`, `displacement`, etc.; export with `exportvtk`
 
 ## Type Hierarchy

@@ -26,8 +26,6 @@ markersize = 0.015
 Δ = 0.04m
 #cloud = load(joinpath(@__DIR__, "rectangle-0.04.jld2"), "cloud")
 cloud = WhatsThePoint.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
-cloud, conv = repel(cloud, ConstantSpacing(Δ); α = Δ / 100, max_iters = 1.0e2)
-display(lineplot(conv))
 visualize(cloud; markersize = 0.7markersize, size = figsize)
 #save(joinpath(@__DIR__, "rectangle-0.04.jld2"), Dict("cloud"=>cloud))
 
@@ -131,7 +129,7 @@ end
 
 # iterative solve using Simulation API
 dt = 0.001 * (ustrip(Δ))^2 / α
-sim = Simulation(domain; Δt = dt, stop_time = 3.0e-4, solver = :Euler)
+sim = Simulation(domain, Transient(Δt=dt, stop_time=3.0e-4))
 set!(sim, T = 0.0)
 @time run!(sim)
 T = temperature(sim)
