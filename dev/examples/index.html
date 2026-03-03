@@ -35,11 +35,11 @@ fig = Figure(; size=(800, 700))
 ax = Axis(fig[1, 1]; title=&quot;Temperature&quot;, xlabel=&quot;x [m]&quot;, ylabel=&quot;y [m]&quot;, aspect=DataAspect())
 sc = scatter!(ax, x, y; color=T, colormap=:inferno, markersize=8)
 Colorbar(fig[1, 2], sc; label=&quot;T&quot;)
-fig</code></pre><img src="c7501bde.png" alt="Example block output"/><h3 id="Transient"><a class="docs-heading-anchor" href="#Transient">Transient</a><a id="Transient-1"></a><a class="docs-heading-anchor-permalink" href="#Transient" title="Permalink"></a></h3><p>The same geometry and BCs can be run as a transient simulation by providing a time step and stop time:</p><pre><code class="language-julia hljs">sim = Simulation(domain, Transient(Δt=0.001, stop_time=0.01))
+fig</code></pre><img src="2f70579f.png" alt="Example block output"/><h3 id="Transient"><a class="docs-heading-anchor" href="#Transient">Transient</a><a id="Transient-1"></a><a class="docs-heading-anchor-permalink" href="#Transient" title="Permalink"></a></h3><p>The same geometry and BCs can be run as a transient simulation by providing a time step and stop time:</p><pre><code class="language-julia hljs">sim = Simulation(domain, Transient(Δt=0.001, stop_time=0.01))
 set!(sim, T=0.0)
 run!(sim)
 
-T_final = temperature(sim)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">1550-element Vector{Float64}:
+T_final = temperature(sim)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">1553-element Vector{Float64}:
  0.0
  0.0
  0.0
@@ -51,15 +51,15 @@ T_final = temperature(sim)</code></pre><pre class="documenter-example-output"><c
  0.0
  0.0
  ⋮
- 0.929607724653282
- 0.8958150749508116
- 0.9487958391901461
- 0.949338011483386
- 0.9515624737614333
- 0.9795368863450928
- 0.9800784676190918
- 0.9878437223705921
- 0.9881952309873167</code></pre><h2 id="2D-Cantilever-Beam-(Linear-Elasticity)"><a class="docs-heading-anchor" href="#2D-Cantilever-Beam-(Linear-Elasticity)">2D Cantilever Beam (Linear Elasticity)</a><a id="2D-Cantilever-Beam-(Linear-Elasticity)-1"></a><a class="docs-heading-anchor-permalink" href="#2D-Cantilever-Beam-(Linear-Elasticity)" title="Permalink"></a></h2><p>A cantilever beam under end shear, validated against the Timoshenko analytical solution.</p><h3 id="Problem-Setup"><a class="docs-heading-anchor" href="#Problem-Setup">Problem Setup</a><a id="Problem-Setup-1"></a><a class="docs-heading-anchor-permalink" href="#Problem-Setup" title="Permalink"></a></h3><p>Geometry: L × 2D beam, x ∈ [0, L], y ∈ [-D, D]. The left end is clamped (prescribed displacement from the exact solution), the right end has a parabolic shear traction, and the top/bottom surfaces are traction-free.</p><p>Timoshenko beam solution (plane stress):</p><pre><code class="nohighlight hljs">u(x,y) = -P/(6EI) [y((6L-3x)x + (2+ν)(y²-D²))]
+ 0.8261687018431805
+ 0.820275265588907
+ 0.794974502999211
+ 0.839522188110635
+ 0.8653191346752706
+ 0.8677480674974923
+ 0.8721402458151154
+ 0.8642705903757355
+ 0.8744713105462805</code></pre><h2 id="2D-Cantilever-Beam-(Linear-Elasticity)"><a class="docs-heading-anchor" href="#2D-Cantilever-Beam-(Linear-Elasticity)">2D Cantilever Beam (Linear Elasticity)</a><a id="2D-Cantilever-Beam-(Linear-Elasticity)-1"></a><a class="docs-heading-anchor-permalink" href="#2D-Cantilever-Beam-(Linear-Elasticity)" title="Permalink"></a></h2><p>A cantilever beam under end shear, validated against the Timoshenko analytical solution.</p><h3 id="Problem-Setup"><a class="docs-heading-anchor" href="#Problem-Setup">Problem Setup</a><a id="Problem-Setup-1"></a><a class="docs-heading-anchor-permalink" href="#Problem-Setup" title="Permalink"></a></h3><p>Geometry: L × 2D beam, x ∈ [0, L], y ∈ [-D, D]. The left end is clamped (prescribed displacement from the exact solution), the right end has a parabolic shear traction, and the top/bottom surfaces are traction-free.</p><p>Timoshenko beam solution (plane stress):</p><pre><code class="nohighlight hljs">u(x,y) = -P/(6EI) [y((6L-3x)x + (2+ν)(y²-D²))]
 v(x,y) =  P/(6EI) [3νy²(L-x) + (4+5ν)D²x + (3L-x)x²]</code></pre><p>where I = 2D³/3 is the second moment of area.</p><h3 id="Full-Example"><a class="docs-heading-anchor" href="#Full-Example">Full Example</a><a id="Full-Example-1"></a><a class="docs-heading-anchor-permalink" href="#Full-Example" title="Permalink"></a></h3><pre><code class="language-julia hljs">using WhatsThePoint
 using WhatsThePoint: coords
 import WhatsThePoint as WTP
@@ -144,4 +144,4 @@ fig = Figure(; size=(1000, 500))
 ax = Axis(fig[1, 1]; title=&quot;Displacement Magnitude ‖u‖&quot;, xlabel=&quot;x&quot;, ylabel=&quot;y&quot;, aspect=DataAspect())
 sc = scatter!(ax, x, y; color=displacement_mag, colormap=:viridis, markersize=6)
 Colorbar(fig[1, 2], sc; label=&quot;‖u‖&quot;)
-fig</code></pre><img src="fd882356.png" alt="Example block output"/></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../custom_pdes/">« Custom PDEs</a><a class="docs-footer-nextpage" href="../design/">Package Design »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 3 March 2026 18:05">Tuesday 3 March 2026</span>. Using Julia version 1.12.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+fig</code></pre><img src="9675f15b.png" alt="Example block output"/></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../custom_pdes/">« Custom PDEs</a><a class="docs-footer-nextpage" href="../design/">Package Design »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 3 March 2026 21:21">Tuesday 3 March 2026</span>. Using Julia version 1.12.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
