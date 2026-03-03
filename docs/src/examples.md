@@ -4,12 +4,34 @@
 
 Steady-state heat conduction on a 1m × 1m square with fixed temperatures on each edge.
 
-![2D temperature field](assets/heat_2d.png)
-
 ### Steady-State
 
-```julia
+```@setup heat
+import WhatsThePoint as WTP
+using Unitful: m
+function rectangle(Lx, Ly; n=100)
+    dx, dy = Lx / n, Ly / n
+    rx, ry = (dx:dx:Lx-dx), (dy:dy:Ly-dy)
+    pts = vcat(
+        [WTP.Point(x, zero(Ly)) for x in rx],
+        [WTP.Point(Lx, y) for y in ry],
+        [WTP.Point(x, Ly) for x in reverse(rx)],
+        [WTP.Point(zero(Lx), y) for y in reverse(ry)]
+    )
+    nrms = vcat(
+        fill(WTP.Vec(0.0, -1.0), length(rx)),
+        fill(WTP.Vec(1.0, 0.0), length(ry)),
+        fill(WTP.Vec(0.0, 1.0), length(rx)),
+        fill(WTP.Vec(-1.0, 0.0), length(ry))
+    )
+    areas = fill(dx, length(pts))
+    return pts, nrms, areas
+end
+```
+
+```@example heat
 using WhatsThePoint
+using WhatsThePoint: coords
 import WhatsThePoint as WTP
 using Macchiato
 using Unitful: m, °, ustrip
@@ -20,7 +42,6 @@ dx = 1/33 * m
 part = PointBoundary(rectangle(1m, 1m)...)
 split_surface!(part, 75°)
 cloud = discretize(part, ConstantSpacing(dx), alg=VanDerSandeFornberg())
-cloud, _ = repel(cloud, ConstantSpacing(dx); α=dx/20, max_iters=500)
 
 # Boundary conditions & model
 bcs = Dict(
@@ -38,8 +59,8 @@ T = temperature(sim)
 
 # Visualize
 pts = points(cloud)
-x = [ustrip(pt.x) for pt in pts]
-y = [ustrip(pt.y) for pt in pts]
+x = [ustrip(coords(pt).x) for pt in pts]
+y = [ustrip(coords(pt).y) for pt in pts]
 
 fig = Figure(; size=(800, 700))
 ax = Axis(fig[1, 1]; title="Temperature", xlabel="x [m]", ylabel="y [m]", aspect=DataAspect())
@@ -52,30 +73,17 @@ fig
 
 The same geometry and BCs can be run as a transient simulation by providing a time step and stop time:
 
-```julia
-sim = Simulation(domain; Δt=0.001, stop_time=1.0)
+```@example heat
+sim = Simulation(domain, Transient(Δt=0.001, stop_time=0.01))
 set!(sim, T=0.0)
 run!(sim)
 
 T_final = temperature(sim)
 ```
 
-Callbacks and output writers let you monitor progress and save intermediate results:
-
-```julia
-sim.callbacks[:progress] = Callback(
-    s -> println("t = $(s.time), iter = $(s.iteration)"),
-    IterationInterval(100)
-)
-sim.output_writers[:vtk] = VTKOutputWriter("results/heat", schedule=TimeInterval(0.1))
-run!(sim)
-```
-
 ## 2D Cantilever Beam (Linear Elasticity)
 
 A cantilever beam under end shear, validated against the Timoshenko analytical solution.
-
-![2D beam displacement](assets/cantilever_beam_2d.png)
 
 ### Problem Setup
 
@@ -92,8 +100,9 @@ where I = 2D³/3 is the second moment of area.
 
 ### Full Example
 
-```julia
+```@example cantilever
 using WhatsThePoint
+using WhatsThePoint: coords
 import WhatsThePoint as WTP
 using Macchiato
 using RadialBasisFunctions: PHS
@@ -136,7 +145,6 @@ part = PointBoundary(pts, nrms, areas)
 split_surface!(part, 75°)
 
 cloud = WTP.discretize(part, ConstantSpacing(dx), alg=VanDerSandeFornberg())
-cloud, _ = repel(cloud, ConstantSpacing(dx); α=dx / 50, max_iters=5000)
 
 # Boundary conditions
 bc_left(x, t) = (u_exact(x[1], x[2]), v_exact(x[1], x[2]))
@@ -162,15 +170,15 @@ N = length(cloud)
 
 # Compare with analytical solution
 pts = points(cloud)
-ux_ana = [u_exact(ustrip(pt.x), ustrip(pt.y)) for pt in pts]
-uy_ana = [v_exact(ustrip(pt.x), ustrip(pt.y)) for pt in pts]
+ux_ana = [u_exact(ustrip(coords(pt).x), ustrip(coords(pt).y)) for pt in pts]
+uy_ana = [v_exact(ustrip(coords(pt).x), ustrip(coords(pt).y)) for pt in pts]
 
 println("Mean absolute error uₓ: ", mean(abs.(ux_sim .- ux_ana)))
 println("Mean absolute error uᵧ: ", mean(abs.(uy_sim .- uy_ana)))
 
 # Visualize displacement magnitude
-x = [ustrip(pt.x) for pt in pts]
-y = [ustrip(pt.y) for pt in pts]
+x = [ustrip(coords(pt).x) for pt in pts]
+y = [ustrip(coords(pt).y) for pt in pts]
 displacement_mag = sqrt.(ux_sim .^ 2 .+ uy_sim .^ 2)
 
 fig = Figure(; size=(1000, 500))

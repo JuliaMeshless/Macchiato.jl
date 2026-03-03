@@ -15,7 +15,30 @@ Pkg.add(url="https://github.com/JuliaMeshless/Macchiato.jl")
 
 Every simulation starts with a point cloud — a set of scattered points that discretize the domain boundary and interior. WhatsThePoint.jl handles this.
 
-```julia
+```@setup getting_started
+import WhatsThePoint as WTP
+using Unitful: m
+function rectangle(Lx, Ly; n=100)
+    dx, dy = Lx / n, Ly / n
+    rx, ry = (dx:dx:Lx-dx), (dy:dy:Ly-dy)
+    pts = vcat(
+        [WTP.Point(x, zero(Ly)) for x in rx],
+        [WTP.Point(Lx, y) for y in ry],
+        [WTP.Point(x, Ly) for x in reverse(rx)],
+        [WTP.Point(zero(Lx), y) for y in reverse(ry)]
+    )
+    nrms = vcat(
+        fill(WTP.Vec(0.0, -1.0), length(rx)),
+        fill(WTP.Vec(1.0, 0.0), length(ry)),
+        fill(WTP.Vec(0.0, 1.0), length(rx)),
+        fill(WTP.Vec(-1.0, 0.0), length(ry))
+    )
+    areas = fill(dx, length(pts))
+    return pts, nrms, areas
+end
+```
+
+```@example getting_started
 using WhatsThePoint
 using Unitful: m, °
 
@@ -29,13 +52,10 @@ split_surface!(part, 75°)
 
 Splitting at corners creates named surfaces so you can assign different boundary conditions to each edge. Now fill the interior:
 
-```julia
+```@example getting_started
 # Discretize: place interior points at ~1/33 m spacing
 dx = 1/33 * m
 cloud = discretize(part, ConstantSpacing(dx), alg=VanDerSandeFornberg())
-
-# Optional: repel points toward uniform spacing
-cloud, _ = repel(cloud, ConstantSpacing(dx); α=dx/20, max_iters=500)
 ```
 
 The resulting `PointCloud` contains both boundary points (organized by surface) and interior (volume) points.
@@ -44,7 +64,7 @@ The resulting `PointCloud` contains both boundary points (organized by surface) 
 
 Physics models define the PDE being solved. For heat conduction, use [`SolidEnergy`](@ref):
 
-```julia
+```@example getting_started
 using Macchiato
 
 model = SolidEnergy(k=1.0, ρ=1.0, cₚ=1.0)
@@ -59,7 +79,7 @@ This defines the heat equation with thermal conductivity `k`, density `ρ`, and 
 
 Boundary conditions are specified as a `Dict` mapping surface names to BC objects:
 
-```julia
+```@example getting_started
 bcs = Dict(
     :surface1 => Temperature(0.0),    # bottom: T = 0
     :surface2 => Temperature(0.0),    # right:  T = 0
@@ -98,7 +118,7 @@ See the [API Reference](@ref) for the complete list of boundary condition types.
 
 The [`Domain`](@ref) ties geometry, boundary conditions, and model together:
 
-```julia
+```@example getting_started
 domain = Domain(cloud, bcs, model)
 ```
 
@@ -106,14 +126,14 @@ The `Domain` validates that every BC key matches a surface in the point cloud.
 
 ## Step 5: Create and Run the Simulation
 
-```julia
+```@example getting_started
 sim = Simulation(domain)
 run!(sim)
 ```
 
-[`Simulation`](@ref) automatically detects the simulation mode:
-- **No `Δt` provided** → steady-state: assembles `Ax = b` and solves with LinearSolve.jl
-- **`Δt` provided** → transient: builds an ODE right-hand side and integrates with OrdinaryDiffEq.jl
+[`Simulation`](@ref) defaults to steady-state when no mode is given:
+- **`Steady()` (default)** — assembles `Ax = b` and solves with LinearSolve.jl
+- **`Transient(Δt=..., stop_time=...)`** — builds an ODE right-hand side and integrates with OrdinaryDiffEq.jl
 
 For steady-state, `run!` calls `LinearSolve.LinearProblem(domain)` internally, which:
 1. Asks the model to build its system matrix and RHS via `make_system`
@@ -122,13 +142,24 @@ For steady-state, `run!` calls `LinearSolve.LinearProblem(domain)` internally, w
 
 ## Step 6: Extract and Visualize Results
 
-```julia
+```@example getting_started
+using WhatsThePoint: coords
+using Unitful: ustrip
+using CairoMakie
+
 # Extract the temperature field
 T = temperature(sim)
 
-# Export to VTK for ParaView visualization
-using WhatsThePoint: points
-exportvtk("heat_solution", points(cloud), [T], ["T"])
+# Visualize the temperature field
+pts = points(cloud)
+x = [ustrip(coords(pt).x) for pt in pts]
+y = [ustrip(coords(pt).y) for pt in pts]
+
+fig = Figure(; size=(800, 700))
+ax = Axis(fig[1, 1]; title="Temperature", xlabel="x [m]", ylabel="y [m]", aspect=DataAspect())
+sc = scatter!(ax, x, y; color=T, colormap=:inferno, markersize=8)
+Colorbar(fig[1, 2], sc; label="T")
+fig
 ```
 
 Each physics model has dedicated field extraction functions:
@@ -140,9 +171,9 @@ Each physics model has dedicated field extraction functions:
 
 Converting the same problem to a transient simulation requires minimal changes — add a time step and stop time, and set initial conditions:
 
-```julia
+```@example getting_started
 # Same domain as before
-sim = Simulation(domain; Δt=0.001, stop_time=1.0)
+sim = Simulation(domain, Transient(Δt=0.001, stop_time=1.0))
 
 # Set initial temperature to 0 everywhere
 set!(sim, T=0.0)
@@ -155,20 +186,3 @@ run!(sim)
 
 T_final = temperature(sim)
 ```
-
-You can also attach callbacks and output writers for monitoring and saving intermediate results:
-
-```julia
-# Print progress every 100 iterations
-sim.callbacks[:progress] = Callback(
-    s -> println("t = $(s.time), iter = $(s.iteration)"),
-    IterationInterval(100)
-)
-
-# Save VTK files every 0.1 time units
-sim.output_writers[:vtk] = VTKOutputWriter("results/heat", schedule=TimeInterval(0.1))
-
-run!(sim)
-```
-
-See [`Callback`](@ref), [`VTKOutputWriter`](@ref), and [`JLD2OutputWriter`](@ref) in the API reference for details.

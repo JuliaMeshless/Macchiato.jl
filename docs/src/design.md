@@ -26,11 +26,12 @@ AbstractModel
 ├── SolidEnergy              # Heat equation
 ├── Solid
 │   └── LinearElasticity     # Navier-Cauchy equations
-├── Fluid
-│   └── IncompressibleNavierStokes
-└── Time
-    ├── Steady
-    └── Unsteady
+└── Fluid
+    └── IncompressibleNavierStokes
+
+AbstractSimulationMode
+├── Steady
+└── Transient
 ```
 
 `AbstractModel` represents **any PDE** — the built-in subtypes (`SolidEnergy`, `LinearElasticity`, etc.) are convenience models that ship with the package. You can define your own model for any equation; see [Custom PDEs](@ref) for a complete walkthrough.
@@ -121,11 +122,11 @@ Mechanics BCs (`Displacement`, `Traction`) are standalone structs rather than al
 
 ## Steady-State vs Transient
 
-The [`Simulation`](@ref) constructor auto-detects mode from keyword arguments:
+The [`Simulation`](@ref) constructor takes an explicit mode argument:
 
 ```julia
-Simulation(domain)                              # → SteadyState
-Simulation(domain; Δt=0.001, stop_time=1.0)     # → Transient
+Simulation(domain)                                          # → Steady (default)
+Simulation(domain, Transient(Δt=0.001, stop_time=1.0))     # → Transient
 ```
 
 ### Steady-State Path

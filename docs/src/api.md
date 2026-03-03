@@ -36,12 +36,12 @@ NewtonianViscosity
 CarreauYasudaViscosity
 ```
 
-### Time
+### Simulation Modes
 
 ```@docs
-Time
+AbstractSimulationMode
 Steady
-Unsteady
+Transient
 ```
 
 ## Model Interface
@@ -126,29 +126,9 @@ pressure
 displacement
 ```
 
-## Callbacks and Schedules
-
-```@docs
-Callback
-AbstractSchedule
-IterationInterval
-TimeInterval
-WallTimeInterval
-SpecifiedTimes
-```
-
-## Output Writers
-
-```@docs
-AbstractOutputWriter
-VTKOutputWriter
-JLD2OutputWriter
-```
-
 ## Solvers
 
 ```@docs
-MultiphysicsProblem
 LinearSolve.LinearProblem
 ```
 

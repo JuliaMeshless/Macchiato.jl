@@ -10,7 +10,30 @@ Macchiato.jl is a **general-purpose meshless PDE framework**. Define any PDE by 
 
 ## Quick Start
 
-```julia
+```@setup quickstart
+import WhatsThePoint as WTP
+using Unitful: m
+function rectangle(Lx, Ly; n=100)
+    dx, dy = Lx / n, Ly / n
+    rx, ry = (dx:dx:Lx-dx), (dy:dy:Ly-dy)
+    pts = vcat(
+        [WTP.Point(x, zero(Ly)) for x in rx],
+        [WTP.Point(Lx, y) for y in ry],
+        [WTP.Point(x, Ly) for x in reverse(rx)],
+        [WTP.Point(zero(Lx), y) for y in reverse(ry)]
+    )
+    nrms = vcat(
+        fill(WTP.Vec(0.0, -1.0), length(rx)),
+        fill(WTP.Vec(1.0, 0.0), length(ry)),
+        fill(WTP.Vec(0.0, 1.0), length(rx)),
+        fill(WTP.Vec(-1.0, 0.0), length(ry))
+    )
+    areas = fill(dx, length(pts))
+    return pts, nrms, areas
+end
+```
+
+```@example quickstart
 using WhatsThePoint, Macchiato
 using Unitful: m, °
 

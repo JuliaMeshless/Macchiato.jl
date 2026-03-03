@@ -27,7 +27,30 @@ Since ``\sin(\pi x) \sin(\pi y) = 0`` on all edges of the unit square, the Diric
 
 Create a model struct that subtypes `AbstractModel` and implement two required methods:
 
-```julia
+```@setup poisson
+import WhatsThePoint as WTP
+using Unitful: m
+function rectangle(Lx, Ly; n=100)
+    dx, dy = Lx / n, Ly / n
+    rx, ry = (dx:dx:Lx-dx), (dy:dy:Ly-dy)
+    pts = vcat(
+        [WTP.Point(x, zero(Ly)) for x in rx],
+        [WTP.Point(Lx, y) for y in ry],
+        [WTP.Point(x, Ly) for x in reverse(rx)],
+        [WTP.Point(zero(Lx), y) for y in reverse(ry)]
+    )
+    nrms = vcat(
+        fill(WTP.Vec(0.0, -1.0), length(rx)),
+        fill(WTP.Vec(1.0, 0.0), length(ry)),
+        fill(WTP.Vec(0.0, 1.0), length(rx)),
+        fill(WTP.Vec(-1.0, 0.0), length(ry))
+    )
+    areas = fill(dx, length(pts))
+    return pts, nrms, areas
+end
+```
+
+```@example poisson
 using Macchiato
 
 struct PoissonModel{F} <: AbstractModel
@@ -62,8 +85,9 @@ The `laplacian` function comes from [RadialBasisFunctions.jl](https://github.com
 
 Boundary conditions use the generic constructors directly — no aliases or trait definitions needed:
 
-```julia
+```@example poisson
 using WhatsThePoint
+using WhatsThePoint: coords
 using RadialBasisFunctions
 using Unitful: m, °, ustrip
 
@@ -97,7 +121,7 @@ run!(sim)
 # For custom models, access the raw solution vector directly
 u_numerical = sim._solution
 pts = points(cloud)
-u_exact_vals = [u_exact([ustrip(pt.x), ustrip(pt.y)]) for pt in pts]
+u_exact_vals = [u_exact(ustrip.([coords(pt).x, coords(pt).y])) for pt in pts]
 error = maximum(abs.(u_numerical .- u_exact_vals))
 println("Max error: $error")
 ```
@@ -108,7 +132,7 @@ With 33 points per side you should see a max error on the order of ``10^{-4}`` o
 
 For readability, you can define named aliases that wrap the generic constructors:
 
-```julia
+```@example poisson
 PoissonValue(value) = PrescribedValue(value)
 PoissonFlux(flux) = PrescribedFlux(flux)
 PoissonZeroFlux() = ZeroFlux()
