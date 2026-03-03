@@ -217,7 +217,6 @@ end
         dx = res * m
         part = create_2d_square_domain(dx)
         cloud = WTP.discretize(part, ConstantSpacing(dx), alg = VanDerSandeFornberg())
-        cloud, _ = repel(cloud, ConstantSpacing(dx); α = dx / 20, max_iters = 500)
 
         bcs = Dict(
             :surface1 => Displacement(bc_func),
@@ -282,7 +281,7 @@ end
     sim = Simulation(domain)
     set!(sim, ux = 0.0, uy = 0.0)
 
-    @test sim.mode == MM.SteadyState
+    @test sim.mode isa Steady
 
     run!(sim)
 

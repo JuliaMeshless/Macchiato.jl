@@ -89,7 +89,6 @@ split_surface!(part, 75°)
 
 Δ = dx
 cloud = WTP.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
-cloud, _ = repel(cloud, ConstantSpacing(Δ); α = Δ / 50, max_iters = 5000)
 
 # ============================================================================
 # Visualize Point Cloud

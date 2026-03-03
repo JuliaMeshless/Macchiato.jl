@@ -39,7 +39,6 @@ part = create_2d_square_domain(dx)
 
 Δ = dx
 cloud = WTP.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
-cloud, conv = repel(cloud, ConstantSpacing(Δ); α = Δ / 20, max_iters = 500)
 
 # ============================================================================
 # Step 3: Set up boundary conditions from analytical solution

@@ -47,7 +47,6 @@ function generate_heat_2d()
     split_surface!(part, 75°)
 
     cloud = WTP.discretize(part, ConstantSpacing(dx), alg = VanDerSandeFornberg())
-    cloud, _ = repel(cloud, ConstantSpacing(dx); α = dx / 20, max_iters = 500)
 
     bcs = Dict(
         :surface1 => MM.Temperature(0.0),
@@ -116,7 +115,6 @@ function generate_cantilever_beam_2d()
     split_surface!(part, 75°)
 
     cloud = WTP.discretize(part, ConstantSpacing(dx), alg = VanDerSandeFornberg())
-    cloud, _ = repel(cloud, ConstantSpacing(dx); α = dx / 50, max_iters = 2000)
 
     bc_left(x, t) = (u_exact(x[1], x[2]), v_exact(x[1], x[2]))
     bc_right(x, t) = (0.0, P * (D^2 - x[2]^2) / (2I))
