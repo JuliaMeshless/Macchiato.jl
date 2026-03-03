@@ -127,8 +127,6 @@ include("io.jl")
 export exportvtk, savevtk!
 
 #################### Simulation API ####################
-include("callbacks.jl")
-include("output_writers.jl")
 include("set.jl")
 include("simulation.jl")
 

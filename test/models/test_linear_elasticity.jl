@@ -286,7 +286,6 @@ end
     run!(sim)
 
     @test sim._solution !== nothing
-    @test sim.iteration == 1
 
     ux, uy = displacement(sim)
     N = length(domain.cloud)
