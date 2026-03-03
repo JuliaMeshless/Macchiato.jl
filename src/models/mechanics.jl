@@ -96,6 +96,32 @@ function _ℒ_mixed_partial(::RadialBasisFunctions.MonomialBasis{2, 2})
     return RadialBasisFunctions.ℒMonomialBasis(2, 2, basis!)
 end
 
+function _ℒ_mixed_partial(mon::RadialBasisFunctions.MonomialBasis{2, Deg}) where {Deg}
+    n = binomial(2 + Deg, 2)
+
+    # Probe the monomial evaluator to determine exponents in its native ordering
+    b_x = zeros(n)
+    b_y = zeros(n)
+    mon.f(b_x, [2.0, 1.0])  # b_x[i] = 2^(x_exponent_i)
+    mon.f(b_y, [1.0, 2.0])  # b_y[i] = 2^(y_exponent_i)
+
+    ax = round.(Int, log2.(b_x))
+    ay = round.(Int, log2.(b_y))
+
+    # Precompute active indices: ∂²/∂x∂y is non-zero only when both exponents ≥ 1
+    active = [(i, ax[i], ay[i]) for i in 1:n if ax[i] >= 1 && ay[i] >= 1]
+
+    function basis!(b, x)
+        T = eltype(x)
+        b .= zero(T)
+        for (i, a, c) in active
+            b[i] = T(a * c) * x[1]^(a - 1) * x[2]^(c - 1)
+        end
+        return nothing
+    end
+    return RadialBasisFunctions.ℒMonomialBasis(2, Deg, basis!)
+end
+
 """
     make_system(model::LinearElasticity, domain; kwargs...)
 

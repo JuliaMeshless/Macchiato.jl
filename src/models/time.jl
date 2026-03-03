@@ -1,25 +1,39 @@
 """
-    Time <: AbstractModel
+    AbstractSimulationMode
 
-Abstract type for time-mode models that indicate whether a simulation is steady-state
-or transient. See [`Steady`](@ref) and [`Unsteady`](@ref).
+Abstract supertype for simulation modes. See [`Steady`](@ref) and [`Transient`](@ref).
 """
-abstract type Time <: AbstractModel end
+abstract type AbstractSimulationMode end
 
 """
-    Steady(max_time)
+    Steady()
 
-Marker for steady-state simulations. `max_time` may be used as a convergence limit.
+Mode for steady-state simulations solved via `LinearSolve`.
 """
-struct Steady{T} <: Time
-    max_time::T
+struct Steady <: AbstractSimulationMode end
+
+"""
+    Transient(; Δt, stop_time, solver=Tsit5())
+
+Mode for transient (time-dependent) simulations solved via `OrdinaryDiffEq.solve`.
+
+# Arguments
+- `Δt`: Time step size
+- `stop_time`: End time for the simulation
+- `solver`: ODE solver (default: `Tsit5()`)
+
+# Examples
+```julia
+Transient(Δt=0.001, stop_time=1.0)
+Transient(Δt=0.001, stop_time=1.0, solver=RK4())
+```
+"""
+struct Transient{S} <: AbstractSimulationMode
+    Δt::Float64
+    stop_time::Float64
+    solver::S
 end
 
-"""
-    Unsteady(max_time)
-
-Marker for transient (time-dependent) simulations. `max_time` sets the end time.
-"""
-struct Unsteady{T} <: Time
-    max_time::T
+function Transient(; Δt, stop_time, solver=Tsit5())
+    return Transient(Float64(Δt), Float64(stop_time), solver)
 end

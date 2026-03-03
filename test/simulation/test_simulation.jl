@@ -24,62 +24,39 @@ function create_test_domain()
 end
 
 @testset "Simulation" begin
-    @testset "Constructor mode detection" begin
+    @testset "Constructor - default is Steady" begin
         domain = create_test_domain()
 
-        sim_steady = Simulation(domain)
-        @test sim_steady.mode == MM.SteadyState
-        @test sim_steady.Δt === nothing
-        @test sim_steady.stop_time === nothing
-
-        sim_transient = Simulation(domain; Δt = 0.001, stop_time = 1.0)
-        @test sim_transient.mode == MM.Transient
-        @test sim_transient.Δt == 0.001
-        @test sim_transient.stop_time == 1.0
-        @test sim_transient.solver == :Tsit5
-
-        sim_iter = Simulation(domain; Δt = 0.001, stop_iteration = 100)
-        @test sim_iter.mode == MM.Transient
-        @test sim_iter.stop_iteration == 100
-    end
-
-    @testset "Constructor validation" begin
-        domain = create_test_domain()
-
-        @test_throws ArgumentError Simulation(domain; stop_time = 1.0)
-        @test_throws ArgumentError Simulation(domain; Δt = 0.001)
-    end
-
-    @testset "Solver selection" begin
-        @test MM._get_ode_solver(:Euler) isa MM.OrdinaryDiffEq.Euler
-        @test MM._get_ode_solver(:RK4) isa MM.OrdinaryDiffEq.RK4
-        @test MM._get_ode_solver(:Tsit5) isa MM.OrdinaryDiffEq.Tsit5
-        @test MM._get_ode_solver(:DP5) isa MM.OrdinaryDiffEq.DP5
-        @test_throws ArgumentError MM._get_ode_solver(:InvalidSolver)
-    end
-
-    @testset "Callbacks dictionary" begin
-        domain = create_test_domain()
-        sim = Simulation(domain; Δt = 0.001, stop_time = 0.01)
-
-        call_count = Ref(0)
-        sim.callbacks[:counter] = Callback(s -> call_count[] += 1, IterationInterval(1))
-
-        @test haskey(sim.callbacks, :counter)
-        @test sim.callbacks[:counter] isa Callback
-    end
-
-    @testset "Output writers dictionary" begin
-        domain = create_test_domain()
         sim = Simulation(domain)
+        @test sim.mode isa Steady
+        @test sim.u0 === nothing
+        @test sim.time == 0.0
+        @test sim.running == false
+        @test sim._solution === nothing
+    end
 
-        sim.output_writers[:vtk] = VTKOutputWriter(
-            mktempdir() * "/test",
-            schedule = TimeInterval(0.1)
-        )
+    @testset "Constructor - explicit Steady" begin
+        domain = create_test_domain()
 
-        @test haskey(sim.output_writers, :vtk)
-        @test sim.output_writers[:vtk] isa VTKOutputWriter
+        sim = Simulation(domain, Steady())
+        @test sim.mode isa Steady
+    end
+
+    @testset "Constructor - Transient" begin
+        domain = create_test_domain()
+
+        sim = Simulation(domain, Transient(Δt = 0.001, stop_time = 1.0))
+        @test sim.mode isa Transient
+        @test sim.mode.Δt == 0.001
+        @test sim.mode.stop_time == 1.0
+        @test sim.mode.solver isa MM.OrdinaryDiffEq.Tsit5
+    end
+
+    @testset "Constructor - Transient with custom solver" begin
+        domain = create_test_domain()
+
+        sim = Simulation(domain, Transient(Δt = 0.001, stop_time = 1.0, solver = MM.OrdinaryDiffEq.RK4()))
+        @test sim.mode.solver isa MM.OrdinaryDiffEq.RK4
     end
 
     @testset "show methods" begin
@@ -89,7 +66,7 @@ end
         str_steady = string(sim_steady)
         @test occursin("steady-state", str_steady)
 
-        sim_transient = Simulation(domain; Δt = 0.001, stop_time = 1.0)
+        sim_transient = Simulation(domain, Transient(Δt = 0.001, stop_time = 1.0))
         str_transient = string(sim_transient)
         @test occursin("transient", str_transient)
         @test occursin("Δt=0.001", str_transient)
@@ -102,7 +79,6 @@ end
 
         run!(sim)
 
-        @test sim.iteration == 1
         @test sim._solution !== nothing
         @test !sim.running
 
@@ -114,10 +90,6 @@ end
     # a bug in RadialBasisFunctions.classify_stencil with SubArray types.
     # This is a pre-existing issue unrelated to the Simulation API.
     @testset "Transient run!" begin
-        @test_skip "Skipped: make_f() has pre-existing RBF bug"
-    end
-
-    @testset "Transient with callbacks" begin
         @test_skip "Skipped: make_f() has pre-existing RBF bug"
     end
 

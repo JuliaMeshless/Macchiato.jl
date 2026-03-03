@@ -71,7 +71,7 @@ export AbstractModel, Fluid, Solid
 export AbstractViscosity, NewtonianViscosity, CarreauYasudaViscosity
 
 include("models/time.jl")
-export Time, Steady, Unsteady
+export AbstractSimulationMode, Steady, Transient
 
 include("models/fluids.jl")
 export IncompressibleNavierStokes
@@ -114,7 +114,6 @@ export _num_vars
 
 #################### Solvers ####################
 include("solve.jl")
-export MultiphysicsProblem
 
 #################### Operators ####################
 abstract type AbstractOperator end
@@ -134,8 +133,6 @@ include("set.jl")
 include("simulation.jl")
 
 export Simulation, run!, set!
-export Callback, AbstractSchedule, IterationInterval, TimeInterval, WallTimeInterval, SpecifiedTimes
-export AbstractOutputWriter, VTKOutputWriter, JLD2OutputWriter
 export temperature, velocity, pressure, displacement
 
 # test funcs

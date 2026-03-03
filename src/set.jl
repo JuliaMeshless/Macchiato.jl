@@ -211,8 +211,6 @@ end
 function _get_solution_vector(sim)
     if sim._solution !== nothing
         return sim._solution
-    elseif sim._integrator !== nothing
-        return sim._integrator.u
     elseif sim.u0 !== nothing
         return sim.u0
     else
