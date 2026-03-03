@@ -20,13 +20,13 @@ split_surface!(part, 75°)
 </code></pre><p>Splitting at corners creates named surfaces so you can assign different boundary conditions to each edge. Now fill the interior:</p><pre><code class="language-julia hljs"># Discretize: place interior points at ~1/33 m spacing
 dx = 1/33 * m
 cloud = discretize(part, ConstantSpacing(dx), alg=VanDerSandeFornberg())</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">PointCloud{Meshes.𝔼{2}, CoordRefSystems.Cartesian2D{CoordRefSystems.NoDatum, Unitful.Quantity{Float64, 𝐋, Unitful.FreeUnits{(m,), 𝐋, nothing}}}}
-├─1556 points
+├─1542 points
 ├─Boundary: 396 points
 │ ├─surface1
 │ ├─surface2
 │ ├─surface3
 │ └─surface4
-├─Volume: 1160 points
+├─Volume: 1146 points
 └─Topology: NoTopology
 </code></pre><p>The resulting <code>PointCloud</code> contains both boundary points (organized by surface) and interior (volume) points.</p><h2 id="Step-2:-Define-the-Physics-Model"><a class="docs-heading-anchor" href="#Step-2:-Define-the-Physics-Model">Step 2: Define the Physics Model</a><a id="Step-2:-Define-the-Physics-Model-1"></a><a class="docs-heading-anchor-permalink" href="#Step-2:-Define-the-Physics-Model" title="Permalink"></a></h2><p>Physics models define the PDE being solved. For heat conduction, use <a href="../api/#Macchiato.SolidEnergy"><code>SolidEnergy</code></a>:</p><pre><code class="language-julia hljs">using Macchiato
 
@@ -35,7 +35,7 @@ model = SolidEnergy(k=1.0, ρ=1.0, cₚ=1.0)</code></pre><pre class="documenter-
     :surface2 =&gt; Temperature(0.0),    # right:  T = 0
     :surface3 =&gt; Temperature(100.0),  # top:    T = 100
     :surface4 =&gt; Temperature(0.0)     # left:   T = 0
-)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Dict{Symbol, PrescribedValue{Macchiato.var&quot;#47#48&quot;{Float64}}} with 4 entries:
+)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Dict{Symbol, PrescribedValue{Macchiato.var&quot;#Temperature##0#Temperature##1&quot;{Float64}}} with 4 entries:
   :surface4 =&gt; Temperature
   :surface3 =&gt; Temperature
   :surface2 =&gt; Temperature
@@ -66,7 +66,7 @@ fig = Figure(; size=(800, 700))
 ax = Axis(fig[1, 1]; title=&quot;Temperature&quot;, xlabel=&quot;x [m]&quot;, ylabel=&quot;y [m]&quot;, aspect=DataAspect())
 sc = scatter!(ax, x, y; color=T, colormap=:inferno, markersize=8)
 Colorbar(fig[1, 2], sc; label=&quot;T&quot;)
-fig</code></pre><img src="eb6ec293.png" alt="Example block output"/><p>Each physics model has dedicated field extraction functions:</p><ul><li><code>temperature(sim)</code> — for <code>SolidEnergy</code></li><li><code>displacement(sim)</code> — for <code>LinearElasticity</code>, returns <code>(ux, uy)</code> or <code>(ux, uy, uz)</code></li><li><code>velocity(sim)</code>, <code>pressure(sim)</code> — for <code>IncompressibleNavierStokes</code></li></ul><h2 id="Going-Transient"><a class="docs-heading-anchor" href="#Going-Transient">Going Transient</a><a id="Going-Transient-1"></a><a class="docs-heading-anchor-permalink" href="#Going-Transient" title="Permalink"></a></h2><p>Converting the same problem to a transient simulation requires minimal changes — add a time step and stop time, and set initial conditions:</p><pre><code class="language-julia hljs"># Same domain as before
+fig</code></pre><img src="5b05b931.png" alt="Example block output"/><p>Each physics model has dedicated field extraction functions:</p><ul><li><code>temperature(sim)</code> — for <code>SolidEnergy</code></li><li><code>displacement(sim)</code> — for <code>LinearElasticity</code>, returns <code>(ux, uy)</code> or <code>(ux, uy, uz)</code></li><li><code>velocity(sim)</code>, <code>pressure(sim)</code> — for <code>IncompressibleNavierStokes</code></li></ul><h2 id="Going-Transient"><a class="docs-heading-anchor" href="#Going-Transient">Going Transient</a><a id="Going-Transient-1"></a><a class="docs-heading-anchor-permalink" href="#Going-Transient" title="Permalink"></a></h2><p>Converting the same problem to a transient simulation requires minimal changes — add a time step and stop time, and set initial conditions:</p><pre><code class="language-julia hljs"># Same domain as before
 sim = Simulation(domain, Transient(Δt=0.001, stop_time=1.0))
 
 # Set initial temperature to 0 everywhere
@@ -78,24 +78,24 @@ set!(sim, T=x -&gt; 50.0 * exp(-10 * ((x[1]-0.5)^2 + (x[2]-0.5)^2)))
 # Run transient simulation (time-steps with Tsit5 by default)
 run!(sim)
 
-T_final = temperature(sim)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">1556-element Vector{Float64}:
-  0.3470641010256829
-  0.38241618002663663
-  0.42052733870973463
-  0.46151266286804854
-  0.5054805151736692
-  0.5525309732862773
-  0.6027542041994494
-  0.6562287891361817
-  0.7130200153694596
-  0.7731781533361893
+T_final = temperature(sim)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">1542-element Vector{Float64}:
+  0.23342692817464297
+  0.25720388229175006
+  0.28283652673492843
+  0.31040226542770555
+  0.33997398048493427
+  0.37161898172237334
+  0.4053979132812488
+  0.44136362699322934
+  0.479560033500623
+  0.5200209434846381
   ⋮
-  7.76714165645548
-  9.049229061409003
-  8.664046217484454
-  6.937783026705433
-  9.76804887411261
- 10.287210517958254
- 10.419821021556345
-  7.557444523038831
-  8.995726329074483</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../custom_pdes/">Custom PDEs »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 3 March 2026 21:23">Tuesday 3 March 2026</span>. Using Julia version 1.11.9.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+ 37.121596759392496
+ 38.66725592012795
+ 37.72643168341607
+ 38.7022449140853
+ 38.47222472326571
+ 34.65791740922731
+ 37.31338627668756
+ 37.299172330441294
+ 39.50752298930236</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../custom_pdes/">Custom PDEs »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 3 March 2026 22:26">Tuesday 3 March 2026</span>. Using Julia version 1.12.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
