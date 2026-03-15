@@ -129,7 +129,7 @@ end
 
 # iterative solve using Simulation API
 dt = 0.001 * (ustrip(Δ))^2 / α
-sim = Simulation(domain, Transient(Δt=dt, stop_time=3.0e-4))
+sim = Simulation(domain, Transient(Δt = dt, stop_time = 3.0e-4))
 set!(sim, T = 0.0)
 @time run!(sim)
 T = temperature(sim)

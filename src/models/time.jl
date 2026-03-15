@@ -34,6 +34,6 @@ struct Transient{S} <: AbstractSimulationMode
     solver::S
 end
 
-function Transient(; Δt, stop_time, solver=Tsit5())
+function Transient(; Δt, stop_time, solver = Tsit5())
     return Transient(Float64(Δt), Float64(stop_time), solver)
 end
