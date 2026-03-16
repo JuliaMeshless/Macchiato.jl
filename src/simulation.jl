@@ -33,7 +33,7 @@ mutable struct Simulation{M, C, Mode <: AbstractSimulationMode}
     _solution::Union{Nothing, Vector{Float64}}
 end
 
-function Simulation(domain::Domain{M, C}, mode::AbstractSimulationMode=Steady()) where {M, C}
+function Simulation(domain::Domain{M, C}, mode::AbstractSimulationMode = Steady()) where {M, C}
     return Simulation{M, C, typeof(mode)}(domain, mode, nothing, 0.0, false, nothing)
 end
 
@@ -61,7 +61,7 @@ function _run!(sim::Simulation, mode::Transient; kwargs...)
     prob = _create_ode_problem(sim.domain, sim.u0, tspan)
     sol = OrdinaryDiffEq.solve(
         prob, mode.solver;
-        dt=mode.Δt, save_everystep=false, save_end=true, kwargs...
+        dt = mode.Δt, save_everystep = false, save_end = true, kwargs...
     )
     sim._solution = copy(sol.u[end])
     sim.time = sol.t[end]
