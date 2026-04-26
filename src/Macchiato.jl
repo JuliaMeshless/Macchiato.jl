@@ -115,6 +115,11 @@ export _num_vars
 #################### Solvers ####################
 include("solve.jl")
 
+#################### Optimization / AD ####################
+include("optimization/solve_ift.jl")
+export PDESolveIFT, make_system_differentiable
+export make_active_dofs_elasticity, apply_dirichlet!, compute_von_mises
+
 #################### Operators ####################
 abstract type AbstractOperator end
 export AbstractOperator
