@@ -27,8 +27,9 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 WhatsThePoint = "5faae8f1-f507-432f-bd56-cf2f1161ab6f"
 WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 
-[sources]
-WhatsThePoint = {rev = "main", url = "https://github.com/JuliaMeshless/WhatsThePoint.jl"}
+[sources.WhatsThePoint]
+rev = "main"
+url = "https://github.com/JuliaMeshless/WhatsThePoint.jl"
 
 [compat]
 Accessors = "0.1"
@@ -42,7 +43,7 @@ LoopVectorization = "0.12"
 Meshes = "0.56"
 NearestNeighbors = "0.4"
 OhMyThreads = "0.7, 0.8"
-OrdinaryDiffEq = "6"
+OrdinaryDiffEq = "6, 7"
 ProgressMeter = "1"
 RadialBasisFunctions = "0.3"
 StaticArrays = "1"
