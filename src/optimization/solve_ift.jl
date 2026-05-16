@@ -1,4 +1,4 @@
-import RadialBasisFunctions: _build_weights, Partial, MixedPartial
+import RadialBasisFunctions: _build_weights, Partial, MixedPartial, find_neighbors
 
 """
     make_system_differentiable(::LinearElasticity, pts_flat, N, adjl, basis, λstar, μ)
@@ -122,4 +122,128 @@ function compute_von_mises(
     σ_xy = μ .* (dux_dy .+ duy_dx)
 
     return sqrt.(σ_xx .^ 2 .- σ_xx .* σ_yy .+ σ_yy .^ 2 .+ 3 .* σ_xy .^ 2)
+end
+
+# ============================================================================
+# Phase 2: Domain-aware AD setup
+# ============================================================================
+
+"""
+    active_dofs(domain::Domain)
+
+Build the `active_dofs` BitVector from the domain's boundary conditions.
+
+A DOF is active (`true`) if its row in the assembled system contains a genuine
+PDE equation. Dirichlet BC rows (identity rows) are inactive (`false`).
+Neumann/Robin boundaries and interior points are active.
+
+This replaces the Phase 1 manual `make_active_dofs_elasticity(interior_idx, N)`.
+"""
+function active_dofs(domain::Domain)
+    model = only(domain.models)
+    dim = length(first(_coords(domain.cloud)))
+    n_vars = _num_vars(model, dim)
+    N = length(points(domain.cloud))
+    active = trues(n_vars * N)
+
+    for (_surf_name, (ids, bc)) in domain.boundaries
+        bc_family(typeof(bc)) == Dirichlet || continue
+        for v in 0:(n_vars - 1)
+            active[ids .+ v * N] .= false
+        end
+    end
+
+    return active
+end
+
+"""
+    build_dirichlet_info(domain::Domain, t=0.0)
+
+Extract Dirichlet DOF indices and prescribed values from a domain.
+
+Returns `(dirichlet_dofs::Vector{Int}, dirichlet_vals::Vector{Float64})` where
+`dirichlet_dofs[k]` is the global row index and `dirichlet_vals[k]` is the
+prescribed value. For vector-valued models (e.g. elasticity with n_vars=2),
+each boundary point contributes `n_vars` DOFs.
+"""
+function build_dirichlet_info(domain::Domain, t::Real = 0.0)
+    model = only(domain.models)
+    dim = length(first(_coords(domain.cloud)))
+    n_vars = _num_vars(model, dim)
+    N = length(points(domain.cloud))
+
+    dirichlet_dofs = Int[]
+    dirichlet_vals = Float64[]
+
+    for (surf_name, (ids, bc)) in domain.boundaries
+        bc_family(typeof(bc)) == Dirichlet || continue
+        surf = domain.cloud[surf_name]
+        for (local_i, global_i) in enumerate(ids)
+            x = get_node_coords(surf, local_i)
+            vals = bc(x, t)
+            if n_vars == 1
+                push!(dirichlet_dofs, global_i)
+                push!(dirichlet_vals, vals)
+            else
+                for v in 0:(n_vars - 1)
+                    push!(dirichlet_dofs, global_i + v * N)
+                    push!(dirichlet_vals, vals[v + 1])
+                end
+            end
+        end
+    end
+
+    return dirichlet_dofs, dirichlet_vals
+end
+
+"""
+    make_system_differentiable(model::LinearElasticity, domain; k=35, basis=PHS(3; poly_deg=3))
+
+Domain-aware overload of `make_system_differentiable`. Extracts coordinates
+from the domain, strips units, builds the adjacency list, and delegates to
+the low-level `_build_weights`-based assembly.
+
+Returns `(A, b)` where both are traceable through Mooncake.
+"""
+function make_system_differentiable(
+    model::LinearElasticity,
+    domain::Domain;
+    k::Int = 35,
+    basis = PHS(3; poly_deg = 3),
+)
+    μ, λstar = lame_parameters(model)
+    coords = _ustrip(_coords(domain.cloud))
+    N = length(coords)
+    adjl = find_neighbors(coords, k)
+
+    pts_flat = vcat([collect(p) for p in coords]...)
+
+    A = make_system_differentiable(model, pts_flat, N, adjl, basis, λstar, μ)
+
+    b = zeros(2N)
+    if model.body_force !== nothing
+        for (i, pt) in enumerate(coords)
+            fx, fy = model.body_force(pt)
+            b[i] = -fx
+            b[i + N] = -fy
+        end
+    end
+
+    return A, b
+end
+
+"""
+    gradient(sim, loss_function; wrt=:pts, ...)
+
+Compute the gradient of `loss_function` with respect to point coordinates.
+
+Requires Mooncake.jl to be loaded (`using Mooncake`).
+The loss function signature is `loss(pts_flat, setup)` where `setup` is a
+named tuple containing `(; sim, adjl, active, dirichlet_dofs, dirichlet_vals,
+basis, solver)`.
+
+Returns `Vector{SVector{2, Float64}}` (one gradient vector per point).
+"""
+function gradient(args...; kwargs...)
+    return error("Mooncake.jl must be loaded to use `gradient`. Run `using Mooncake` first.")
 end

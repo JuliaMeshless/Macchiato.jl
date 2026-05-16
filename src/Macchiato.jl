@@ -119,6 +119,8 @@ include("solve.jl")
 include("optimization/solve_ift.jl")
 export PDESolveIFT, make_system_differentiable
 export make_active_dofs_elasticity, apply_dirichlet!, compute_von_mises
+export active_dofs, build_dirichlet_info
+export gradient
 
 #################### Operators ####################
 abstract type AbstractOperator end

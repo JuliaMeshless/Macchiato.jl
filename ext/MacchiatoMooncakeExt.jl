@@ -1,9 +1,15 @@
 module MacchiatoMooncakeExt
 
-using Macchiato: PDESolveIFT, apply_dirichlet!
+import Macchiato
+using Macchiato:
+    PDESolveIFT, apply_dirichlet!,
+    active_dofs, build_dirichlet_info,
+    Simulation
 using Mooncake
+using RadialBasisFunctions: PHS, find_neighbors
 using SparseArrays
 using LinearAlgebra
+using StaticArrays: SVector
 
 # apply_dirichlet! modifies A and b in-place with constant values that don't
 # depend on any traced inputs. Its backward zeroes out the gradient for BC rows
@@ -90,6 +96,49 @@ function Mooncake.rrule!!(
     end
 
     return u_cd, pde_solve_pb!!
+end
+
+# ============================================================================
+# Phase 2: gradient(sim, loss; wrt=:pts) user-facing API
+# ============================================================================
+
+function Macchiato.gradient(
+    sim::Simulation,
+    loss_function;
+    wrt::Symbol = :pts,
+    k::Int = 35,
+    basis = PHS(3; poly_deg = 3),
+)
+    @assert wrt == :pts "Only wrt=:pts is currently supported"
+
+    domain = sim.domain
+    coords = Macchiato._ustrip(Macchiato._coords(domain.cloud))
+    N = length(coords)
+    pts_flat = vcat([collect(p) for p in coords]...)
+
+    adjl = find_neighbors(coords, k)
+    active = active_dofs(domain)
+    dirichlet_dofs, dirichlet_vals = build_dirichlet_info(domain)
+    solver = PDESolveIFT(active)
+
+    setup = (;
+        sim,
+        adjl,
+        active,
+        dirichlet_dofs,
+        dirichlet_vals,
+        basis,
+        solver,
+    )
+
+    function wrapped_loss(pts_in)
+        return loss_function(pts_in, setup)
+    end
+
+    rule = Mooncake.build_rrule(wrapped_loss, pts_flat)
+    _, (_, grad_flat) = Mooncake.value_and_gradient!!(rule, wrapped_loss, pts_flat)
+
+    return [SVector{2,Float64}(grad_flat[2i - 1], grad_flat[2i]) for i in 1:N]
 end
 
 end # module
