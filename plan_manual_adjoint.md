@@ -1,0 +1,639 @@
+# Manual Adjoint for RBF-FD Shape Optimization
+
+## Motivation
+
+Mooncake's `build_rrule` on the full loss function (pts → weights → assembly →
+solve → loss) generates a monolithic trace whose IR is too large for LLVM to
+compile in reasonable time. Even with only 25 points, `build_rrule` times out
+after 3+ minutes of JIT compilation. Eliminating sparse-sparse matrix operations
+(direct CSC construction) fixes correctness but not compilation time — the
+element-wise vector ops and fill loops still generate too many trace nodes.
+
+**The fundamental issue**: Mooncake traces every scalar operation between
+primitives. The CSC assembly alone involves iterating over ~2000 nzvals, each
+generating multiple trace nodes. This does not scale.
+
+**The solution**: Decompose the gradient computation into independent pieces,
+each fast to compile, and combine them manually. Use Mooncake rrules **only**
+at the stencil level (where they are efficient and already compiled), and
+handle the global composition with manual linear algebra.
+
+---
+
+## Architecture Overview
+
+The full gradient `∂L/∂pts` is computed in five steps:
+
+```
+Step 1: Forward pass           assemble A, solve A u = b
+Step 2: Adjoint solve          solve Aᵀ η = ∂L/∂u   →  ΔA = -η uᵀ
+Step 3: Extract ΔW             ΔA → ΔW_k for each weight matrix (manual)
+Step 4: Local sensitivity      each ΔW_k → Δpts_k via _build_weights rrule
+Step 5: Accumulate             Δpts = Σ_k Δpts_k + direct ∂L/∂pts terms
+```
+
+Steps 1-3 and 5 are manual linear algebra (no AD). Step 4 uses Mooncake rrules
+on **individual** `_build_weights` calls — each call is a single primitive with
+a pre-compiled rrule, so `build_rrule` on it completes in seconds, not minutes.
+
+### Diagram
+
+```
+pts ─┬─ _build_weights(∂²/∂x²) → W_d2x ─┐
+     ├─ _build_weights(∂²/∂y²) → W_d2y ─┤
+     ├─ _build_weights(∂²/∂x∂y)→ W_d2xy ┤  assemble  → A ─ solve → u → L
+     ├─ _build_weights(∂/∂x)  → W_dx  ──┤              ↑            │
+     └─ _build_weights(∂/∂y)  → W_dy  ──┘              η            │
+        ↑   ↑   ↑   ↑   ↑                             │            │
+        │   │   │   │   │                             │     ∂L/∂u = 2u
+        │   │   │   │   │   (Step 4: local rrules)     │            │
+        │   │   │   │   │                             │            │
+        └───┴───┴───┴───┘                              │            │
+        ΔW_d2x, ΔW_d2y, ...   ←────────────────────────┘            │
+        (Step 3: extract from ΔA)       (Step 2: η = A⁻ᵀ ∂L/∂u)    │
+                                                                     │
+                              ΔA = -η uᵀ  ←──────────────────────────┘
+```
+
+The critical difference from the global-trace approach: Mooncake never sees the
+assembly step or the global solve. It only sees individual `_build_weights`
+calls, each of which is a single primitive with a known rrule.
+
+---
+
+## Step-by-Step Details
+
+### Step 1 — Forward Pass
+
+Unchanged from current code. Assemble A via `make_system_differentiable`
+(the direct-CSC version), apply BCs, solve for u.
+
+```julia
+A = make_system_differentiable(model, pts_flat, N, adjl, basis, λstar, μ)
+b = zeros(2N)
+apply_dirichlet!(A, b, dirichlet_dofs, dirichlet_vals)
+apply_neumann!(A, b, ...)  # if applicable
+u = A \ b
+L = loss(u, pts_flat)
+```
+
+### Step 2 — Adjoint Solve (IFT)
+
+Given `∂L/∂u` (computed analytically or via a tiny AD call on the scalar loss
+function), solve the adjoint system and form ΔA:
+
+```julia
+η = A' \ (∂L/∂u)             # single sparse linear solve
+ΔA = -η * u'                 # rank-1 update, but we only need entries at
+                             # positions matching the weight-matrix sparsity pattern
+```
+
+For `active_dofs` (Dirichlet rows excluded), zero out ΔA at inactive rows
+(same logic as `PDESolveIFT` rrule).
+
+**Cost**: one sparse LU factorization (already computed in forward pass — reuse
+the factors) plus one triangular solve. O(nnz).
+
+### Step 3 — Extract ΔW from ΔA
+
+The system matrix A is assembled from weight matrices W_k with known
+coefficient structure. For 2D elasticity:
+
+```
+A = [ A₁₁  A₁₂ ]    where  A₁₁ = c₁ W_d2x + c₂ W_d2y
+    [ A₂₁  A₂₂ ]          A₁₂ = c₃ W_d2xy
+                           A₂₁ = A₁₂
+                           A₂₂ = c₂ W_d2x + c₁ W_d2y
+    c₁ = λstar + 2μ,  c₂ = μ,  c₃ = λstar + μ
+```
+
+By the chain rule, for any weight-matrix entry `(i, j)`:
+
+```
+∂L/∂W_d2x[i,j] = c₁ · ΔA₁₁[i,j] + c₂ · ΔA₂₂[i,j]
+∂L/∂W_d2y[i,j] = c₂ · ΔA₁₁[i,j] + c₁ · ΔA₂₂[i,j]
+∂L/∂W_d2xy[i,j] = c₃ · ΔA₁₂[i,j] + c₃ · ΔA₂₁[i,j]
+```
+
+For first-order operators (Neumann BCs):
+
+```
+∂L/∂W_dx[i,j] = contribution from Neumann row assembly  (see Step 3b)
+∂L/∂W_dy[i,j] = contribution from Neumann row assembly
+```
+
+This step is **pure linear algebra** — no AD needed. It extracts entries from
+ΔA and scales by known coefficients. The sparsity pattern of each ΔW_k matches
+the corresponding weight matrix.
+
+**For Neumann rows** (overwritten by `batch_overwrite_sparse_rows!`):
+The row of A at a Neumann point is:
+
+```
+A[row, a_col[p]] = Σ_m coeffs[p,m] * W_m[weight_row, w_col[p]]
+```
+
+So the gradient contribution to W_m is:
+
+```
+ΔW_m[weight_row, w_col[p]] += coeffs[p,m] * ΔA[row, a_col[p]]
+```
+
+This is exactly what the `batch_overwrite_sparse_rows!` rrule's pullback
+computes. We can either:
+- (a) Call that rrule independently, or
+- (b) Implement the same coefficient-transpose logic manually (trivial)
+
+### Step 4 — Local Sensitivity via `_build_weights` rrule
+
+For each weight matrix W_k with nonzero ΔW_k, propagate to point coordinates.
+Each call is independent:
+
+```julia
+# Build a rule for each operator individually (fast — single primitive)
+rule_d2x  = Mooncake.build_rrule(
+    p -> _build_weights(Partial(2,1), pts_from_flat(p), pts_from_flat(p), adjl, basis),
+    pts_flat)
+rule_d2y  = Mooncake.build_rrule(
+    p -> _build_weights(Partial(2,2), pts_from_flat(p), pts_from_flat(p), adjl, basis),
+    pts_flat)
+# ... etc.
+
+# Forward + backward for each weight matrix
+Δpts_d2x  = pullback(rule_d2x, ΔW_d2x)
+Δpts_d2y  = pullback(rule_d2y, ΔW_d2y)
+# ... etc.
+```
+
+**Why this is fast**: each `build_rrule` traces through a single primitive call
+(plus the `pts_from_flat` conversion — 25 SVector constructions). The trace is
+shallow (~50 scalar ops + one primitive). LLVM compiles this in seconds.
+
+**Why this is correct**: the `_build_weights` rrule in RadialBasisFunctions.jl
+already implements the exact stencil-level adjoint from the differentiation
+document (solving local interpolation systems and propagating through kernel
+derivatives). It is already tested and validated.
+
+**Caching**: these rules can be built once and reused across gradient
+evaluations. The sysimage warmup already exercises all five operators, so
+the rules are pre-compiled after the first build.
+
+### Step 5 — Accumulate and Reshape
+
+```julia
+Δpts_flat = Δpts_d2x + Δpts_d2y + Δpts_d2xy + Δpts_dx + Δpts_dy
+# Reshape to Vector{SVector{2, Float64}} for the optimizer
+Δpts = [SVector{2}(Δpts_flat[2i-1], Δpts_flat[2i]) for i in 1:N]
+```
+
+If the loss depends directly on pts (e.g., perimeter regularization), add
+`∂L/∂pts` directly (computed analytically or via a tiny ForwardDiff call).
+
+---
+
+## Generalization to Other Physics
+
+The five-step structure is **PDE-agnostic**. Only Step 3 (coefficient extraction)
+changes with the physics. Here is how different model classes map to this
+framework:
+
+### Scalar PDE (heat equation, Poisson)
+
+- **Operator**: L = ∇² (Laplacian)
+- **Weight matrices**: 1 (W_d2 = ∂²/∂x² + ∂²/∂y², or separate W_d2x, W_d2y)
+- **Variables**: 1 (temperature T)
+- **Assembly**: A = W_d2x + W_d2y (N×N, single block)
+- **Step 3 extraction**: ΔW_d2x = ΔA, ΔW_d2y = ΔA (trivial)
+
+### Stokes Flow (velocity-pressure)
+
+- **Operator**: μ∇²u - ∇p = f, ∇·u = 0
+- **Weight matrices**: W_d2x, W_d2y (viscous), W_dx, W_dy (pressure gradient)
+- **Variables**: 3 in 2D (v_x, v_y, p)
+- **Assembly**: Block 3×3 system with different operators per block
+- **Step 3 extraction**: Each block of ΔA maps to its contributing W_k with
+  appropriate coefficients
+
+### Linear Elasticity (3D)
+
+- **Same structure as 2D** but with 3 displacement variables (u_x, u_y, u_z)
+- More weight matrices (∂²/∂x², ∂²/∂y², ∂²/∂z², ∂²/∂x∂y, ∂²/∂x∂z, ∂²/∂y∂z)
+- Block 3×3 system, same coefficient structure as 2D
+- **Step 3 extraction**: identical logic, just more blocks
+
+### Nonlinear PDEs (e.g., hyperelasticity, Navier-Stokes)
+
+- The system is nonlinear: F(u) = 0
+- Newton's method linearizes: J(u_k) Δu = -F(u_k)
+- The adjoint uses J^T (the Jacobian transpose)
+- **Key difference**: J depends on u, so ∂J/∂pts includes ∂J/∂u · ∂u/∂pts terms
+- The stencil-level logic is unchanged — only the coefficient extraction in
+  Step 3 needs to account for state-dependent coefficients
+
+### Time-Dependent PDEs
+
+- Discretize in time: u^{n+1} = G(u^n, pts)
+- Adjoint runs backward in time: λ^n = (∂G/∂u)^T λ^{n+1} + ∂L/∂u^n
+- Each time step's ∂G/∂u is assembled from weight matrices like the steady case
+- **Key difference**: need to store intermediate states (checkpointing) or
+  recompute them during the backward pass
+
+### What Stays the Same
+
+Across all these cases:
+
+| Component | Dependency | Changes with physics? |
+|-----------|-----------|----------------------|
+| Step 1 (forward solve) | PDE model | Yes — different operators, BCs |
+| Step 2 (adjoint solve) | System matrix A | No — always Aᵀ η = ∂L/∂u |
+| Step 3 (extract ΔW) | Assembly coefficients | **Yes — only this step** |
+| Step 4 (local rrule) | RBF kernel + operator | No — `_build_weights` handles this |
+| Step 5 (accumulate) | Nothing | No |
+
+**Only Step 3 is physics-dependent.** It can be implemented as a dispatchable
+function `extract_weight_sensitivities!(ΔW_list, ΔA, model, u, ...)` that each
+model type implements.
+
+---
+
+## Efficient Implementation of Step 3
+
+The naive approach — compute ΔA = -η uᵀ as a full sparse matrix — is wasteful:
+ΔA has the same sparsity pattern as A, which is 4× the size of a single weight
+matrix. Most entries are never used.
+
+Instead, compute ΔW_k **directly** from η and u without forming ΔA:
+
+```julia
+# For elasticity, ΔW_d2x[i,j] = c₁·ΔA₁₁[i,j] + c₂·ΔA₂₂[i,j]
+# where ΔA₁₁[i,j] = -η[i] * u[j]  (for active row i)
+# So ΔW_d2x[i,j] = -(c₁·η[i]·u[j] + c₂·η[i+N]·u[j+N])
+
+function extract_weight_sensitivities!(
+    ΔW_list::Vector{SparseMatrixCSC{Float64,Int}},
+    η::Vector{Float64},
+    u::Vector{Float64},
+    active::BitVector,
+    model::LinearElasticity,
+    λstar::Float64,
+    μ::Float64,
+)
+    N = length(u) ÷ 2
+    c1, c2, c3 = λstar + 2μ, μ, λstar + μ
+
+    ΔW = ΔW_list  # [ΔW_d2x, ΔW_d2y, ΔW_d2xy]
+
+    for j in 1:N, idx in nzrange(W_template, j)
+        i = W_template.rowval[idx]
+
+        # Only active rows contribute (Dirichlet rows are identity — zero gradient)
+        if active[i] && active[i + N]
+            ηi_x, ηi_y = η[i], η[i + N]
+            uj_x, uj_y = u[j], u[j + N]
+
+            ΔW[1].nzval[idx] = -(c1 * ηi_x * uj_x + c2 * ηi_y * uj_y)
+            ΔW[2].nzval[idx] = -(c2 * ηi_x * uj_x + c1 * ηi_y * uj_y)
+            ΔW[3].nzval[idx] = -(c3 * ηi_x * uj_y + c3 * ηi_y * uj_x)
+        end
+    end
+
+    return nothing
+end
+```
+
+This computes ΔW_k in **O(nnz)** time with a single pass over the sparsity
+pattern. No sparse-sparse operations, no temporary matrices.
+
+The `W_template` is any of W_d2x/W_d2y/W_d2xy (they all share the same pattern).
+We can store it from the forward pass.
+
+### Neumann Contribution
+
+For Neumann rows, the contribution to ΔW comes from the `batch_overwrite_sparse_rows!`
+coefficient structure. This can be computed with a second pass:
+
+```julia
+for k in 1:n_neumann_rows
+    i_global = neumann_rows[k]
+    wr = weight_rows[k]
+    for p in col_ptr[k]:(col_ptr[k+1] - 1)
+        a_col = a_cols[p]
+        w_col = w_cols[p]
+        Δa = -η[i_global] * u[a_col]   # ΔA[i_global, a_col]
+        for m in 1:M
+            c = coeffs[(p - 1) * M + m]
+            idx_w = _find_nzval(weights[m], wr, w_col)
+            if idx_w > 0
+                ΔW_list[pde_m + m].nzval[idx_w] += c * Δa
+            end
+        end
+    end
+end
+```
+
+---
+
+## Implementation Plan
+
+### Phase A: Dirichlet-only gradient (minimal, validates the architecture)
+
+1. **`adjoint_sensitivity(η, u, active, W_template, coeffs)`** — computes ΔW_k
+   from η and u as described above (Step 2+3 combined)
+2. **`build_weight_rrule(ℒ, pts_flat, adjl, basis)`** — builds and returns a
+   `(forward, pullback)` pair for a single operator (Step 4)
+3. **`shape_gradient(loss_fn, pts_flat, model, ...)`** — orchestrates Steps 1-5
+4. **Validation**: AD vs FD on 25-pt cantilever, Dirichlet-only. Should match
+   the Phase 1 result (rel_err ~ 1e-10) with compilation < 10s total.
+
+### Phase B: Add Neumann support
+
+5. Add Neumann ΔW extraction (the second loop above)
+6. Validate on mixed-BC cantilever (25 pts, k=20)
+
+### Phase C: Clean interface + sysimage
+
+7. Define `extract_weight_sensitivities(model, ...)` as a dispatchable function
+8. Add the full `shape_gradient` to the sysimage warmup
+9. Test on 100+ point problems
+
+### Phase D (future): Generalize
+
+10. Implement `extract_weight_sensitivities` for SolidEnergy (scalar PDE)
+11. Add support for body forces (∂b/∂pts term)
+12. Level 2: differentiable normals for Neumann BCs
+
+---
+
+## Neumann BCs in the Manual Approach
+
+Neumann BCs fit naturally into the manual adjoint framework. They are handled
+by the same `batch_overwrite_sparse_rows!` coefficient-transpose logic already
+designed, just executed manually instead of inside a Mooncake trace.
+
+### How Neumann rows contribute to the gradient
+
+A Neumann row `r` of the system matrix is a linear combination of weight-matrix
+entries:
+
+```
+A[r, a_col[p]] = Σ_m coeff[p, m] * W_m[weight_row, w_col[p]]
+```
+
+where `W_m` are first-derivative weight matrices (W_dx, W_dy), `coeff` encodes
+the PDE physics (e.g., for traction: σ·n expanded into ∂u/∂x, ∂u/∂y, ∂v/∂x,
+∂v/∂y with Lamé parameters and normal components), and `a_col`/`w_col` handle
+the variable offset for vector-valued problems.
+
+In the adjoint pass, the gradient flows backward through this assignment:
+
+```
+ΔW_m[weight_row, w_col[p]] += coeff[p, m] * ΔA[r, a_col[p]]
+```
+
+This is a **coefficient transpose** — the same coefficients that combine W_m
+into A now distribute ΔA back to ΔW_m. This is implemented as a simple loop
+over Neumann rows and their column entries (O(n_neumann × k) time, where k is
+the stencil size). No AD needed.
+
+### Level 1 vs Level 2
+
+- **Level 1 (frozen normals)**: The normal vectors `n` at boundary points are
+  computed once at the reference configuration and treated as constants. The
+  coefficients (which contain `n_x`, `n_y`) are fixed. Only `∂W/∂pts` matters.
+  This is what Phase B implements.
+
+- **Level 2 (differentiable normals)**: The normals depend on the boundary
+  geometry, which depends on `pts`. The coefficients contain `∂n/∂pts` terms
+  that must be included. This requires differentiating through WhatsThePoint's
+  normal computation — a separate concern from the PDE differentiation. It can
+  be added later without changing the architecture: add a `∂coeff/∂pts` term in
+  Step 3, computed via ForwardDiff on the normal computation.
+
+### Why Neumann doesn't break the framework
+
+Neumann BCs only affect **which rows of A get overwritten** and **which weight
+matrices contribute**. The fundamental structure — weight matrices are built
+locally, assembled globally with known coefficients — is unchanged. The only
+addition to Step 3 is a second loop over Neumann rows to accumulate their ΔW
+contributions, which is O(n_neumann × k) and uses the same coefficient-transpose
+pattern.
+
+---
+
+## Extension to Navier-Stokes
+
+### Problem statement
+
+Steady incompressible Navier-Stokes in 2D:
+
+```
+(u·∇)u = -∇p/ρ + ν∇²u + f_x
+(u·∇)v = -∇p/ρ + ν∇²v + f_y
+∇·u = 0
+```
+
+State variables: velocity (u, v) and pressure p. The system is nonlinear
+(convection term) and has a saddle-point structure (no pressure in the
+continuity equation).
+
+### Forward pass (Newton's method)
+
+The nonlinear residual F(u, v, p) = 0 is solved via Newton iteration:
+
+```
+J(u_k) · Δu = -F(u_k)
+u_{k+1} = u_k + Δu
+```
+
+where J is the Jacobian of F w.r.t. the state variables, evaluated at the
+current iterate. At convergence (k → ∞, u_k → u*):
+
+```
+J(u*) = ∂F/∂(u,v,p) evaluated at the converged solution
+```
+
+The Jacobian has block structure:
+
+```
+    [ J_uu   J_uv   G_x ]   [Δu]     [F_x]
+J = [ J_vu   J_vv   G_y ] · [Δv] = - [F_y]
+    [ D_x    D_y    0   ]   [Δp]     [F_p]
+```
+
+Where each block is assembled from weight matrices with solution-dependent
+coefficients. For example, the x-momentum diagonal block `J_uu` at row i,
+column k:
+
+```
+J_uu[i,k] = u_i · W_dx[i,k] + v_i · W_dy[i,k]           ← linearized convection
+          + δ_{ik} · (W_dx u + W_dy v)_i                 ← convection diagonal
+          - ν · (W_d2x + W_d2y)[i,k]                     ← viscous term
+```
+
+The pressure gradient block: `G_x = W_dx / ρ`, `G_y = W_dy / ρ`.
+The continuity block: `D_x = W_dx`, `D_y = W_dy`.
+
+**Key observation**: every block of J is a linear combination of the same five
+weight matrices (W_dx, W_dy, W_d2x, W_d2y, and W_d2xy if using mixed
+derivatives). The coefficients are **solution-dependent** — they involve u_i,
+v_i, and the reconstructed gradients (W_dx u)_i, etc. — but the weight matrices
+themselves are the same set used for linear elasticity.
+
+### Adjoint pass
+
+The adjoint equation for a nonlinear forward problem F(u*, pts) = 0 is:
+
+```
+J(u*)ᵀ · η = ∂L/∂u
+```
+
+where J is the Jacobian at the **converged** solution, and ∂L/∂u is the
+gradient of the loss w.r.t. the state (easy to compute — e.g., for L = ∫u²,
+∂L/∂u = 2u). This is a single linear solve, same structure as Step 2 in the
+linear case.
+
+The gradient of the loss w.r.t. point coordinates is:
+
+```
+dL/dpts = ∂L/∂pts - ηᵀ · (∂F/∂pts)
+```
+
+where ∂F/∂pts is evaluated **holding the state (u,v,p) fixed**. For the x-momentum
+residual at row i:
+
+```
+F_x,i = u_i (W_dx u)_i + v_i (W_dy u)_i - (1/ρ)(W_dx p)_i - ν(W_d2x u + W_d2y u)_i - f_x,i
+```
+
+Taking ∂/∂pts (state held fixed):
+
+```
+∂F_x,i/∂pts = u_i · Σ_j (∂W_dx[i,j]/∂pts) u_j      ← convection, x-velocity
+            + v_i · Σ_j (∂W_dy[i,j]/∂pts) u_j      ← convection, y-velocity
+            - (1/ρ) · Σ_j (∂W_dx[i,j]/∂pts) p_j    ← pressure gradient
+            - ν · Σ_j (∂W_d2x[i,j]/∂pts + ∂W_d2y[i,j]/∂pts) u_j   ← viscous
+```
+
+Every term has the form: **Σ_j (∂W[i,j]/∂pts) × (coefficient × state_j)**.
+This is structurally identical to the linear elasticity case — the only
+difference is that the coefficients now depend on the converged solution (u, v,
+p) rather than being material constants (λ, μ).
+
+### Implication for Step 3 (extract ΔW)
+
+The coefficient extraction for Navier-Stokes follows the same pattern as linear
+elasticity but with more terms. For each sparsity entry (i,j) shared by all
+weight matrices:
+
+```
+ΔW_dx[i,j]  = -(u_i η_x,i u_j + v_i η_y,i u_j - η_x,i p_j/ρ + η_p,i u_j)
+               + ... (from y-momentum and other blocks)
+
+ΔW_dy[i,j]  = -(u_i η_x,i v_j + ... )
+               + ...
+
+ΔW_d2x[i,j] = -(-ν η_x,i u_j - ν η_y,i v_j)
+               + ...
+
+ΔW_d2y[i,j] = -(-ν η_x,i u_j - ν η_y,i v_j)
+               + ...
+```
+
+Each ΔW_k entry is a **linear combination** of η-weighted state products. The
+coefficients are assembled from the PDE structure (convection velocities,
+viscosity, density). This is a straightforward extension of the elasticity
+extraction function — more terms, but the same principle.
+
+### What changes vs. linear elasticity
+
+| Aspect | Linear Elasticity | Navier-Stokes |
+|--------|-------------------|---------------|
+| Forward pass | Single linear solve | Newton iterations |
+| Adjoint matrix | A (forward operator) | J (Jacobian at convergence) |
+| Variables | 2 (u_x, u_y) | 3 (u, v, p) |
+| Block structure | 2×2 symmetric | 3×3 saddle-point |
+| Coefficients in Step 3 | Constants (λ, μ) | Depend on u, v, p |
+| Number of terms per ΔW_k | 2-4 | 6-12 |
+| Weight matrix set | Same (W_d2x, W_d2y, W_d2xy) | Same + W_dx, W_dy |
+| Step 3 implementation | ~20 lines | ~50 lines |
+
+### What stays the same
+
+| Aspect | Unchanged |
+|--------|-----------|
+| Step 2 (adjoint solve) | Same structure: Jᵀ η = ∂L/∂u |
+| Step 3 (coefficient extraction) | Same pattern: η-weighted state products, O(nnz) |
+| Step 4 (local rrule) | Identical — `_build_weights` rrules are operator-agnostic |
+| Step 5 (accumulation) | Identical |
+| Neumann BCs | Same coefficient-transpose logic |
+| Cost scaling | ~2 forward solves regardless of #parameters |
+
+### The saddle-point issue
+
+The zero pressure-pressure block in J (the (3,3) block) means J is indefinite,
+not positive-definite. This affects the linear solver choice (UMFPACK handles
+indefinite systems; iterative solvers need preconditioners like SIMPLE or
+augmented Lagrangian). But it does **not** affect the adjoint architecture —
+the adjoint equation Jᵀ η = ∂L/∂u is still a single linear solve with the same
+sparsity pattern.
+
+### Nonlinear iteration count
+
+The adjoint cost is one additional linear solve (on Jᵀ) regardless of how many
+Newton iterations the forward pass required. The Jacobian at convergence must
+be stored (or its factors reused). This is standard practice in PDE-constrained
+optimization — the "discrete adjoint" approach always uses the converged
+Jacobian.
+
+### Summary: Navier-Stokes is a straightforward extension
+
+The manual adjoint framework extends to Navier-Stokes with **no architectural
+changes**. The only new work is implementing
+`extract_weight_sensitivities(::IncompressibleNavierStokes, ...)` — a ~50-line
+function that encodes the PDE's coefficient structure. Steps 1, 2, 4, and 5 are
+unchanged. The cost remains ~2 forward-equivalent solves per gradient,
+independent of the number of design parameters.
+
+---
+
+## Why This Architecture Generalizes
+
+The key architectural insight:
+
+> **The local weight computation is the only part that needs AD.**
+> Everything else — assembly coefficients, global solve, loss function — is
+> explicit linear algebra.
+
+The RBF-FD method reduces any PDE to: (1) compute stencil weights locally,
+(2) assemble them into a global sparse matrix with PDE-specific coefficients.
+Step (1) involves solving small dense systems (RBF kernel evaluations) — this
+is where AD is valuable and efficient. Step (2) is just bookkeeping — linear
+combinations with coefficients that are either constants (linear PDEs) or
+functions of the converged solution (nonlinear PDEs).
+
+In the backward pass, the chain rule splits cleanly:
+
+```
+∂L/∂pts = ∂L/∂u · ∂u/∂pts                    (state sensitivity)
+        + Σ_k ∂L/∂W_k · ∂W_k/∂pts             (weight sensitivity)
+        + direct ∂L/∂pts terms                 (e.g., perimeter regularization)
+```
+
+- `∂L/∂u · ∂u/∂pts` = adjoint solve + coefficient extraction (Steps 2-3, manual)
+- `∂L/∂W_k · ∂W_k/∂pts` = local rrule (Step 4, Mooncake)
+- Direct terms (Step 5, manual or ForwardDiff)
+
+**Only the coefficient extraction in Step 3 is PDE-specific.** It maps the PDE
+operator's continuous form to the discrete combination of weight matrices.
+Everything else — adjoint solve, local rrules, accumulation — is generic
+infrastructure.
+
+This means adding a new PDE requires implementing **one function** (~20-50
+lines) that encodes how the PDE's differential operator combines RBF-FD weight
+matrices into the global system. The rest of the gradient computation is
+reused.
+
+For reference: the `Differentiation_of_Meshless_Solver.txt` document describes
+this same two-level structure (global adjoint + stencil-level accumulation) and
+arrives at the same conclusion — the cost is ~2 forward solves regardless of
+the number of parameters, and the stencil-level work is embarrassingly parallel.
