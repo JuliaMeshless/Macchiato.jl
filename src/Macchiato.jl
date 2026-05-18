@@ -117,11 +117,15 @@ include("solve.jl")
 
 #################### Optimization / AD ####################
 include("optimization/solve_ift.jl")
+include("optimization/manual_adjoint.jl")
 export PDESolveIFT, make_system_differentiable
 export make_active_dofs_elasticity, apply_dirichlet!, compute_von_mises
 export active_dofs, build_dirichlet_info
 export batch_overwrite_sparse_rows!
 export gradient
+export extract_weight_sensitivities_elasticity!, allocate_weight_gradients
+export assemble_elasticity_from_weights
+export build_weight_rule, apply_weight_rule, shape_gradient_dirichlet
 
 #################### Operators ####################
 abstract type AbstractOperator end

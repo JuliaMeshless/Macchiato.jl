@@ -5,9 +5,14 @@ using Macchiato:
     PDESolveIFT, apply_dirichlet!,
     batch_overwrite_sparse_rows!,
     active_dofs, build_dirichlet_info,
+    extract_weight_sensitivities_elasticity!,
+    allocate_weight_gradients,
+    assemble_elasticity_from_weights,
+    LinearElasticity, lame_parameters,
     Simulation
 using Mooncake
-using RadialBasisFunctions: PHS, find_neighbors
+using RadialBasisFunctions: PHS, find_neighbors, _build_weights,
+    Partial, MixedPartial
 using SparseArrays
 using LinearAlgebra
 using StaticArrays: SVector
@@ -242,6 +247,139 @@ function Macchiato.gradient(
     _, (_, grad_flat) = Mooncake.value_and_gradient!!(rule, wrapped_loss, pts_flat)
 
     return [SVector{2,Float64}(grad_flat[2i - 1], grad_flat[2i]) for i in 1:N]
+end
+
+# ============================================================================
+# Manual adjoint — Step 4 helpers and Phase-A orchestrator
+# ============================================================================
+# Closures bind `q = pts_from_flat(p)` ONCE so Mooncake's _build_weights rrule
+# sees a single SVector array (matches the rrule's tested code path; see
+# plan_manual_adjoint.md §Corrections §3).
+
+function _pts_from_flat(p::AbstractVector{<:Real})
+    N = length(p) ÷ 2
+    return [SVector{2}(p[2i - 1], p[2i]) for i in 1:N]
+end
+
+function _make_weight_closure(op, adjl, basis)
+    let op = op, adjl = adjl, basis = basis
+        function (p::Vector{Float64})
+            q = _pts_from_flat(p)
+            return _build_weights(op, q, q, adjl, basis)
+        end
+    end
+end
+
+"""
+    build_weight_rule(op, pts_flat, adjl, basis)
+
+Build a Mooncake rrule for a single-operator `_build_weights` call. Returns a
+`(closure, rule)` NamedTuple to be passed to `apply_weight_rule`. Rule build
+compiles the rrule for one primitive call — fast (~seconds) because the trace
+is shallow (one primitive + N SVector constructions).
+"""
+function Macchiato.build_weight_rule(
+    op,
+    pts_flat::Vector{Float64},
+    adjl,
+    basis,
+)
+    closure = _make_weight_closure(op, adjl, basis)
+    rule = Mooncake.build_rrule(closure, pts_flat)
+    return (closure = closure, rule = rule)
+end
+
+"""
+    apply_weight_rule(wr, pts_flat, ΔW)
+
+Run the pre-built rule with `ΔW` seeded as the output tangent. Returns Δpts as
+a `Vector{Float64}` of the same length as `pts_flat`.
+
+Uses `value_and_pullback!!` with `friendly_tangents=true`, so `ΔW` is passed as
+a primal-typed `SparseMatrixCSC` (we put gradient values in its `nzval`) and
+the returned gradient is a primal `Vector{Float64}`.
+"""
+function Macchiato.apply_weight_rule(
+    wr::NamedTuple,
+    pts_flat::Vector{Float64},
+    ΔW::SparseMatrixCSC{Float64, Int},
+)
+    _val, grads = Mooncake.value_and_pullback!!(
+        wr.rule, ΔW, wr.closure, pts_flat; friendly_tangents = true,
+    )
+    return grads[2]
+end
+
+"""
+    shape_gradient_dirichlet(
+        pts_flat, model, N, adjl, basis, active,
+        dirichlet_dofs, dirichlet_vals, ∂L_∂u, weight_rules,
+    )
+
+Phase-A manual adjoint for 2D linear elasticity with Dirichlet BCs only.
+Implements Steps 1–5 from `plan_manual_adjoint.md`:
+
+  1. Forward: build W_d2x/y/xy, assemble A, apply Dirichlet, solve A u = b.
+  2. Adjoint: η = Aᵀ \\ ∂L/∂u  (reuses the LU factor from forward).
+  3. Extract: ΔW_d2x/y/xy from (η, u, active) via the closed-form coefficient
+     map (per-DOF gated).
+  4. Local sensitivity: each ΔW_k → Δpts_k via the per-operator rule.
+  5. Accumulate: Δpts = Δpts_d2x + Δpts_d2y + Δpts_d2xy.
+
+Arguments
+- `∂L_∂u::Function`: callback `u::Vector{Float64} -> Vector{Float64}` (length 2N).
+- `weight_rules::NamedTuple`: must have `d2x`, `d2y`, `d2xy` fields — each a
+  `(closure, rule)` from `build_weight_rule`.
+
+Returns `(L_value=nothing, u, Δpts)`. The caller computes any user-facing loss
+from `u`; we just need `∂L/∂u` for the adjoint.
+"""
+function Macchiato.shape_gradient_dirichlet(
+    pts_flat::Vector{Float64},
+    model::LinearElasticity,
+    N::Int,
+    adjl,
+    basis,
+    active::AbstractVector{Bool},
+    dirichlet_dofs::Vector{Int},
+    dirichlet_vals::Vector{Float64},
+    ∂L_∂u::Function,
+    weight_rules::NamedTuple,
+)
+    μ, λstar = lame_parameters(model)
+
+    # Step 1: Forward
+    pts = _pts_from_flat(pts_flat)
+    W_d2x  = _build_weights(Partial(2, 1),      pts, pts, adjl, basis)
+    W_d2y  = _build_weights(Partial(2, 2),      pts, pts, adjl, basis)
+    W_d2xy = _build_weights(MixedPartial(1, 2), pts, pts, adjl, basis)
+
+    A = assemble_elasticity_from_weights(W_d2x, W_d2y, W_d2xy, N, λstar, μ)
+    b = zeros(2N)
+    apply_dirichlet!(A, b, dirichlet_dofs, dirichlet_vals)
+
+    F = lu(A)
+    u = F \ b
+
+    # Step 2: Adjoint solve (reuse F)
+    η = F' \ ∂L_∂u(u)
+
+    # Step 3: Extract ΔW (per-DOF gated)
+    ΔW_d2x, ΔW_d2y, ΔW_d2xy = allocate_weight_gradients(W_d2x)
+    extract_weight_sensitivities_elasticity!(
+        ΔW_d2x, ΔW_d2y, ΔW_d2xy,
+        W_d2x, η, u, active, λstar, μ,
+    )
+
+    # Step 4: Local sensitivity per operator
+    Δpts_d2x  = Macchiato.apply_weight_rule(weight_rules.d2x,  pts_flat, ΔW_d2x)
+    Δpts_d2y  = Macchiato.apply_weight_rule(weight_rules.d2y,  pts_flat, ΔW_d2y)
+    Δpts_d2xy = Macchiato.apply_weight_rule(weight_rules.d2xy, pts_flat, ΔW_d2xy)
+
+    # Step 5: Accumulate
+    Δpts = Δpts_d2x .+ Δpts_d2y .+ Δpts_d2xy
+
+    return (u = u, Δpts = Δpts)
 end
 
 end # module
