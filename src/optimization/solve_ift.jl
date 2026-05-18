@@ -25,11 +25,59 @@ function make_system_differentiable(
     W_d2y  = _build_weights(Partial(2, 2),      pts, pts, adjl, basis)
     W_d2xy = _build_weights(MixedPartial(1, 2), pts, pts, adjl, basis)
 
-    A11 = (λstar + 2μ) * W_d2x + μ * W_d2y
-    A12 = (λstar + μ)  * W_d2xy
-    A22 = μ * W_d2x + (λstar + 2μ) * W_d2y
+    c1 = λstar + 2μ
+    c2 = μ
+    c3 = λstar + μ
 
-    return [A11 A12; A12 A22]
+    # All 3 share the same sparsity pattern — build CSC format directly to avoid
+    # sparse-sparse addition and hvcat, which Mooncake traces at scalar level.
+    cp = W_d2x.colptr
+    rv = W_d2x.rowval
+    nz = length(W_d2x.nzval)
+
+    # Block nzvals: A11 = c1*W_d2x + c2*W_d2y,  A12 = c3*W_d2xy,
+    #               A21 = A12 (symmetry),         A22 = c2*W_d2x + c1*W_d2y
+    a11 = c1 .* W_d2x.nzval .+ c2 .* W_d2y.nzval
+    a12 = c3 .* W_d2xy.nzval
+    a22 = c2 .* W_d2x.nzval .+ c1 .* W_d2y.nzval
+
+    total_nz = 4 * nz
+    colptr_out = Vector{Int}(undef, 2N + 1)
+    rowval_out = Vector{Int}(undef, total_nz)
+    nzval_out   = Vector{Float64}(undef, total_nz)
+
+    colptr_out[1] = 1
+    ptr = 1
+    # First N columns: A11 (rows 1:N) then A21 (rows N+1:2N)
+    for j in 1:N
+        for idx in cp[j]:(cp[j+1] - 1)
+            rowval_out[ptr] = rv[idx]
+            nzval_out[ptr] = a11[idx]
+            ptr += 1
+        end
+        for idx in cp[j]:(cp[j+1] - 1)
+            rowval_out[ptr] = rv[idx] + N
+            nzval_out[ptr] = a12[idx]
+            ptr += 1
+        end
+        colptr_out[j+1] = ptr
+    end
+    # Second N columns: A12 (rows 1:N) then A22 (rows N+1:2N)
+    for j in 1:N
+        for idx in cp[j]:(cp[j+1] - 1)
+            rowval_out[ptr] = rv[idx]
+            nzval_out[ptr] = a12[idx]
+            ptr += 1
+        end
+        for idx in cp[j]:(cp[j+1] - 1)
+            rowval_out[ptr] = rv[idx] + N
+            nzval_out[ptr] = a22[idx]
+            ptr += 1
+        end
+        colptr_out[N+j+1] = ptr
+    end
+
+    return SparseMatrixCSC(2N, 2N, colptr_out, rowval_out, nzval_out)
 end
 
 """
@@ -246,4 +294,95 @@ Returns `Vector{SVector{2, Float64}}` (one gradient vector per point).
 """
 function gradient(args...; kwargs...)
     return error("Mooncake.jl must be loaded to use `gradient`. Run `using Mooncake` first.")
+end
+
+# ============================================================================
+# Neumann BC differentiability — generic sparse row assembly
+# ============================================================================
+
+"""
+    _find_nzval(W::SparseMatrixCSC, row::Int, col::Int)
+
+Return the nzval index of entry `(row, col)` in sparse matrix `W`, or `0` if
+the entry is a structural zero.
+"""
+function _find_nzval(W::SparseMatrixCSC, row::Int, col::Int)
+    @inbounds for idx in nzrange(W, col)
+        if W.rowval[idx] == row
+            return idx
+        end
+    end
+    return 0
+end
+
+"""
+    batch_overwrite_sparse_rows!(A, b, rows, col_ptr, a_cols, w_cols, weights,
+                                 coeffs, weight_rows, b_vals)
+
+Generic primitive for overwriting rows of a sparse matrix with values computed
+as linear combinations of weight-matrix entries. Model-agnostic — the physics
+lives in the `coeffs` computation, which the caller performs before invoking
+this function.
+
+# Arguments
+- `A, b`: system matrix and RHS (mutated in-place)
+- `rows::Vector{Int}`: global row indices to overwrite (length `R`)
+- `col_ptr::Vector{Int}`: offset array (length `R+1`). Row `k` uses entries
+  `col_ptr[k]:col_ptr[k+1]-1`.
+- `a_cols::Vector{Int}`: column indices in `A` for each entry (length `E`).
+- `w_cols::Vector{Int}`: column indices in `weights` for each entry (length `E`).
+  Separate from `a_cols` because vector-valued problems have different column
+  spaces (e.g. elasticity v-block columns are offset by N).
+- `weights::Vector{SparseMatrixCSC{Float64,Int}}`: `M` sparse weight matrices
+  from `_build_weights`, each with the same sparsity pattern.
+- `coeffs::Vector{Float64}`: flat coefficient array (length `M * E`,
+  interleaved: all `M` coefficients for entry 1, then entry 2, ...).
+- `weight_rows::Vector{Int}`: row in each weight matrix for global `rows[k]`
+  (length `R`).
+- `b_vals::Vector{Float64}`: RHS value for each row (length `R`).
+
+# Forward pass
+For each row `k` (global index `rows[k]`):
+  A[rows[k], a_cols[e]] = Σ_m coeffs[e*M + m] * weights[m][weight_rows[k], w_cols[e]]
+  b[rows[k]] = b_vals[k]
+
+# Backward pass (handled by Mooncake rrule!!)
+Redirects `ΔA` at the overwritten entries to `Δweights` using the transpose of
+`coeffs`, then zeros `ΔA`/`Δb` at those rows.
+"""
+function batch_overwrite_sparse_rows!(
+    A::SparseMatrixCSC{Float64, Int},
+    b::Vector{Float64},
+    rows::Vector{Int},
+    col_ptr::Vector{Int},
+    a_cols::Vector{Int},
+    w_cols::Vector{Int},
+    weights::Vector{SparseMatrixCSC{Float64, Int}},
+    coeffs::Vector{Float64},
+    weight_rows::Vector{Int},
+    b_vals::Vector{Float64},
+)
+    M = length(weights)
+    row_set = Set{Int}(rows)
+    zero_rows!(A, row_set)
+
+    for k in 1:length(rows)
+        global_row = rows[k]
+        wr = weight_rows[k]
+        for p in col_ptr[k]:(col_ptr[k + 1] - 1)
+            a_col = a_cols[p]
+            w_col = w_cols[p]
+            val = 0.0
+            for m in 1:M
+                idx_w = _find_nzval(weights[m], wr, w_col)
+                if idx_w > 0
+                    val += coeffs[(p - 1) * M + m] * weights[m].nzval[idx_w]
+                end
+            end
+            A[global_row, a_col] = val
+        end
+        b[global_row] = b_vals[k]
+    end
+
+    return nothing
 end

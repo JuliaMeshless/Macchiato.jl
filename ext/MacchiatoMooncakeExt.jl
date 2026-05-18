@@ -3,6 +3,7 @@ module MacchiatoMooncakeExt
 import Macchiato
 using Macchiato:
     PDESolveIFT, apply_dirichlet!,
+    batch_overwrite_sparse_rows!,
     active_dofs, build_dirichlet_info,
     Simulation
 using Mooncake
@@ -96,6 +97,108 @@ function Mooncake.rrule!!(
     end
 
     return u_cd, pde_solve_pb!!
+end
+
+# ============================================================================
+# batch_overwrite_sparse_rows! — generic sparse row assembly primitive
+# ============================================================================
+# Model-agnostic: overwrites specified rows of A with linear combinations of
+# weight-matrix entries. The physics lives in `coeffs`, computed by the model
+# callback outside this primitive. The backward pass redirects ΔA at the
+# overwritten entries to Δweights, then zeros ΔA/Δb at those rows.
+
+Mooncake.@is_primitive Mooncake.DefaultCtx Tuple{
+    typeof(batch_overwrite_sparse_rows!),
+    SparseMatrixCSC{Float64, Int},
+    Vector{Float64},
+    Vector{Int},
+    Vector{Int},
+    Vector{Int},
+    Vector{Int},
+    Vector{SparseMatrixCSC{Float64, Int}},
+    Vector{Float64},
+    Vector{Int},
+    Vector{Float64},
+}
+
+function Mooncake.rrule!!(
+    ::Mooncake.CoDual{typeof(batch_overwrite_sparse_rows!)},
+    A_cd::Mooncake.CoDual{SparseMatrixCSC{Float64, Int}},
+    b_cd::Mooncake.CoDual{Vector{Float64}},
+    rows_cd,
+    col_ptr_cd,
+    a_cols_cd,
+    w_cols_cd,
+    weights_cd,
+    coeffs_cd,
+    weight_rows_cd,
+    b_vals_cd,
+)
+    A  = Mooncake.primal(A_cd)
+    b  = Mooncake.primal(b_cd)
+    rows_vals  = Mooncake.primal(rows_cd)
+    col_ptr_vals  = Mooncake.primal(col_ptr_cd)
+    a_cols_vals  = Mooncake.primal(a_cols_cd)
+    w_cols_vals  = Mooncake.primal(w_cols_cd)
+    weights_vals = Mooncake.primal(weights_cd)
+    coeffs_vals  = Mooncake.primal(coeffs_cd)
+    weight_rows_vals = Mooncake.primal(weight_rows_cd)
+    b_vals_vals = Mooncake.primal(b_vals_cd)
+
+    batch_overwrite_sparse_rows!(
+        A, b, rows_vals, col_ptr_vals, a_cols_vals, w_cols_vals,
+        weights_vals, coeffs_vals, weight_rows_vals, b_vals_vals,
+    )
+
+    M = length(weights_vals)
+    row_set = Set{Int}(rows_vals)
+
+    function batch_overwrite_pb!!(::Mooncake.NoRData)
+        ΔA_nzval = Mooncake.tangent(A_cd).data.nzval
+        Δb = Mooncake.tangent(b_cd)
+        rows_A = rowvals(A)
+
+        # Collect Δweight nzval vectors
+        ΔW_nzvals = [Mooncake.tangent(weights_cd[m]).data.nzval for m in 1:M]
+
+        # Redirect ΔA to Δweights using transpose of coefficients
+        for k in 1:length(rows_vals)
+            global_row = rows_vals[k]
+            wr = weight_rows_vals[k]
+            for p in col_ptr_vals[k]:(col_ptr_vals[k + 1] - 1)
+                a_col = a_cols_vals[p]
+                w_col = w_cols_vals[p]
+                idx_a = Macchiato._find_nzval(A, global_row, a_col)
+                Δa = idx_a > 0 ? ΔA_nzval[idx_a] : 0.0
+                for m in 1:M
+                    c = coeffs_vals[(p - 1) * M + m]
+                    idx_w = Macchiato._find_nzval(weights_vals[m], wr, w_col)
+                    if idx_w > 0
+                        ΔW_nzvals[m][idx_w] += c * Δa
+                    end
+                end
+            end
+        end
+
+        # Zero ΔA and Δb at overwritten rows
+        for j in 1:size(A, 2)
+            for idx in nzrange(A, j)
+                if rows_A[idx] in row_set
+                    ΔA_nzval[idx] = 0.0
+                end
+            end
+        end
+        for i in row_set
+            Δb[i] = 0.0
+        end
+
+        return Mooncake.NoRData(), Mooncake.NoRData(), Mooncake.NoRData(),
+               Mooncake.NoRData(), Mooncake.NoRData(), Mooncake.NoRData(),
+               Mooncake.NoRData(), Mooncake.NoRData(), Mooncake.NoRData(),
+               Mooncake.NoRData(), Mooncake.NoRData()
+    end
+
+    return Mooncake.zero_fcodual(nothing), batch_overwrite_pb!!
 end
 
 # ============================================================================
