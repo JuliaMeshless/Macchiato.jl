@@ -126,6 +126,9 @@ export gradient
 export extract_weight_sensitivities_elasticity!, allocate_weight_gradients
 export assemble_elasticity_from_weights
 export build_weight_rule, apply_weight_rule, shape_gradient_dirichlet
+export TractionLayout, build_traction_layout, apply_traction!
+export extract_neumann_sensitivities!, allocate_neumann_weight_gradients
+export build_weight_rule_subset, apply_weight_rule_subset, shape_gradient_mixed_bc
 
 #################### Operators ####################
 abstract type AbstractOperator end

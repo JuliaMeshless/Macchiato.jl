@@ -18,6 +18,46 @@ each fast to compile, and combine them manually. Use Mooncake rrules **only**
 at the stencil level (where they are efficient and already compiled), and
 handle the global composition with manual linear algebra.
 
+**Verified unusable (2026-05-18)**: brute-force trace on the 25-pt Neumann
+test took 5min 51s of LLVM compile *and* failed on a `BoundsError` in the
+IFT pullback (sparsity mismatch when `batch_overwrite_sparse_rows!` adds
+structural nonzeros to A while `ΔA.nzval` keeps its pre-Neumann size). Both
+the compile time and the structural-tangent mismatch are fundamental to the
+monolithic-trace approach — settled rationale for this plan.
+
+---
+
+## Scope: What This Adjoint Computes
+
+This adjoint computes `∂L/∂pts` — the gradient of the loss with respect to
+**every point coordinate** in the cloud (boundary and interior). It is the
+discrete-AD analog of the classical Hadamard shape derivative; the two differ
+in framing:
+
+| Framework                                  | Output                                |
+|--------------------------------------------|---------------------------------------|
+| Continuous shape calculus (Hadamard)       | Boundary integral; interior never appears |
+| Discretize-then-differentiate (this plan)  | Full `∂L/∂pts` vector; boundary is a subset |
+
+In shape optimization the design-relevant slice is `∂L/∂pts_b`. The interior
+slice `∂L/∂pts_i` is **not** discarded by this adjoint: it is the input to
+the next chain-rule stage (mesh-morphing adjoint), which projects it back to
+the boundary via `(∂pts_i/∂pts_b)ᵀ · ∂L/∂pts_i`. With a differentiable
+morphing map (RBF interpolation as proposed in
+`plan_shape_optimization_pipeline.md` §2), both slices contribute to the
+final design gradient. With non-differentiable cloud regeneration, the
+interior slice is dropped downstream — but this adjoint still produces it.
+
+What this means at the implementation level:
+- Steps 1–5 below always produce the full `Δpts` vector. There is no cheap
+  path to "boundary entries only" in the discrete framework — the global
+  adjoint solve and stencil pullbacks couple all DOFs by construction. The
+  cost is fixed at ~2× forward solve.
+- Downstream layers (mesh-morphing adjoint, boundary parameterization) select
+  / combine entries. Those are out of scope for this document.
+- Phase A validation must compare AD vs FD on the **full** `Δpts` vector
+  (not just the boundary entries) — FD operates on all coordinates too.
+
 ---
 
 ## Architecture Overview
@@ -150,7 +190,12 @@ For each weight matrix W_k with nonzero ΔW_k, propagate to point coordinates.
 Each call is independent:
 
 ```julia
-# Build a rule for each operator individually (fast — single primitive)
+# Build a rule for each operator individually (fast — single primitive).
+# FIX-3: the closure builds `pts_from_flat(p)` twice. The `_build_weights`
+# rrule was tested with `data === eval_points`. Two distinct SVector arrays
+# both depending on p should sum correctly through Mooncake, but if Phase A
+# AD/FD shows a 2× error, use a single binding: `q = pts_from_flat(p);
+# _build_weights(op, q, q, adjl, basis)`. See Corrections §3.
 rule_d2x  = Mooncake.build_rrule(
     p -> _build_weights(Partial(2,1), pts_from_flat(p), pts_from_flat(p), adjl, basis),
     pts_flat)
@@ -159,7 +204,9 @@ rule_d2y  = Mooncake.build_rrule(
     pts_flat)
 # ... etc.
 
-# Forward + backward for each weight matrix
+# Forward + backward for each weight matrix (pseudocode — actual Mooncake API
+# requires seeding the output tangent via CoDual manipulation, not a bare
+# `pullback(rule, Δoutput)` call).
 Δpts_d2x  = pullback(rule_d2x, ΔW_d2x)
 Δpts_d2y  = pullback(rule_d2y, ΔW_d2y)
 # ... etc.
@@ -286,6 +333,13 @@ function extract_weight_sensitivities!(
     for j in 1:N, idx in nzrange(W_template, j)
         i = W_template.rowval[idx]
 
+        # FIX-1, FIX-2: see "Corrections (review pass)" at end of document.
+        # The AND below is too strict (per-DOF mask), and this loop must
+        # exclude Neumann rows (which were assembled from W_dx/W_dy, not
+        # W_d2x/y/xy). Phase A: both issues are moot (full clamping, no
+        # Neumann). Phase B: gate each term independently and skip Neumann
+        # rows here.
+
         # Only active rows contribute (Dirichlet rows are identity — zero gradient)
         if active[i] && active[i + N]
             ηi_x, ηi_y = η[i], η[i + N]
@@ -361,6 +415,93 @@ end
 10. Implement `extract_weight_sensitivities` for SolidEnergy (scalar PDE)
 11. Add support for body forces (∂b/∂pts term)
 12. Level 2: differentiable normals for Neumann BCs
+
+---
+
+## Corrections (review pass)
+
+Three issues flagged on re-read; all latent or Phase B-only. Step 2's math
+(`Aᵀ η = ∂L/∂u`, `ΔA = -η uᵀ`), the elasticity coefficient extraction signs,
+and the W_template-shares-pattern assumption all check out for Phase A.
+
+### §1 Per-DOF `active` mask, not per-point AND
+
+The inner loop of "Efficient Implementation of Step 3" gates the assignment
+with `active[i] && active[i + N]`. Each summand inside comes from an
+independent row of A:
+- `ΔA₁₁[i,j] = -η[i] · u[j]` (row `i`)
+- `ΔA₂₂[i,j] = -η[i+N] · u[j+N]` (row `i+N`)
+
+Mixed BCs (roller, slip, symmetry, contact) can have `active[i] = false,
+active[i+N] = true` (or vice versa). The AND drops a valid contribution from
+the still-free DOF. Each term must be gated by its own row's bit:
+
+```julia
+t11 = active[i]    ? -η[i]   * u[j]   : 0.0
+t22 = active[i+N]  ? -η[i+N] * u[j+N] : 0.0
+t12 = active[i]    ? -η[i]   * u[j+N] : 0.0
+t21 = active[i+N]  ? -η[i+N] * u[j]   : 0.0
+
+ΔW_d2x [i,j] = c1*t11 + c2*t22
+ΔW_d2y [i,j] = c2*t11 + c1*t22
+ΔW_d2xy[i,j] = c3*t12 + c3*t21
+```
+
+Phase A: full clamping ⇒ `active[i] == active[i+N]` everywhere ⇒ AND is
+correct by accident. Implement per-term gating anyway — Phase B will need it.
+
+### §2 Step 3's main loop must skip Neumann rows
+
+`ΔA = -η uᵀ` applies to all active rows of A, but the assembly map differs
+by row type:
+- Interior rows of A ← `c1·W_d2x + c2·W_d2y + c3·W_d2xy`
+- Neumann rows of A ← overwritten by `batch_overwrite_sparse_rows!` from
+  `W_dx, W_dy` (the d2x/y/xy entries at these rows are unused in the forward
+  pass)
+
+If the main extraction loop visits a Neumann row `i`, it writes a spurious
+`ΔW_d2x[i, j] += c1 · (-η[i] · u[j])` etc. — gradient that shouldn't exist
+because that weight entry never affected `A`. The `active` BitVector is
+binary and doesn't distinguish interior from Neumann.
+
+Fix: thread `interior_idx::Vector{Int}` (or `is_interior_row::BitVector`)
+through and iterate `for i in interior_idx` in the main loop; the Neumann
+loop (already in the plan) handles the rest.
+
+Phase A: no Neumann rows ⇒ moot.
+
+### §3 `_build_weights` closure binds `pts_from_flat(p)` twice
+
+```julia
+p -> _build_weights(Partial(2,1), pts_from_flat(p), pts_from_flat(p), adjl, basis)
+```
+
+Two independent `SVector{2,Float64}` arrays are built from the same `p`.
+Mooncake's `_build_weights` rrule was validated with `data === eval_points`
+(single argument). With two separate arrays, Mooncake computes `∂W/∂data`
+and `∂W/∂eval_points` as independent contributions and accumulates both back
+into `p` through the SVector constructors' tangents. **Mathematically equal**
+to the single-binding case, but a different code path. If Phase A AD/FD
+shows ~2× discrepancy or a systematic factor, switch to:
+
+```julia
+p -> begin
+    q = pts_from_flat(p)
+    _build_weights(Partial(2,1), q, q, adjl, basis)
+end
+```
+
+### §4 Cosmetic notes
+
+- "Neumann Contribution" pseudocode uses an undefined `pde_m + m` index. The
+  intent is the offset of `W_dx`, `W_dy` within the global `ΔW_list`.
+- Step 5's `Δpts_flat = Δpts_d2x + Δpts_d2y + Δpts_d2xy + Δpts_dx + Δpts_dy`
+  lists five operators; Phase A sums only the first three.
+- The plan's "`Δpts_d2x = pullback(rule_d2x, ΔW_d2x)`" is shorthand. Mooncake
+  has no top-level `pullback(rule, Δ)` function: actual usage requires
+  running the rule on a `CoDual(arg, zero_tangent(arg))`, capturing the
+  `(output_cd, pb)` pair, writing `ΔW_d2x` into `output_cd`'s tangent, and
+  invoking `pb(NoRData())` to accumulate into the arg's tangent.
 
 ---
 

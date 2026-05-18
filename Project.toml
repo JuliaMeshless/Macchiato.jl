@@ -44,10 +44,16 @@ NearestNeighbors = "0.4"
 OhMyThreads = "0.7, 0.8"
 OrdinaryDiffEq = "6"
 ProgressMeter = "1"
-RadialBasisFunctions = "0.3"
+RadialBasisFunctions = "0.3, 0.4, 0.5"
 StaticArrays = "1"
 Statistics = "1"
 Unitful = "1"
 WhatsThePoint = "0.2"
 WriteVTK = "1.21"
 julia = "1.11"
+
+[weakdeps]
+Mooncake = "da2b9cff-9c12-43a0-ae48-6db2b0edb7d6"
+
+[extensions]
+MacchiatoMooncakeExt = "Mooncake"
