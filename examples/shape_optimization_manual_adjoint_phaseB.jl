@@ -187,52 +187,40 @@ L0 = loss_pts(pts_flat)
 println(@sprintf("Loss at reference: %.6e", L0))
 
 # ============================================================================
-# Build all 5 rules
-# ============================================================================
-
-println("\nBuilding Mooncake rrules (5 operators)...")
-t_build = @elapsed begin
-    rule_d2x  = build_weight_rule(Partial(2, 1),      pts_flat, adjl, basis)
-    rule_d2y  = build_weight_rule(Partial(2, 2),      pts_flat, adjl, basis)
-    rule_d2xy = build_weight_rule(MixedPartial(1, 2), pts_flat, adjl, basis)
-    rule_dx   = build_weight_rule_subset(Partial(1, 1), pts_flat,
-                                          neumann_idx, neumann_adjl, basis)
-    rule_dy   = build_weight_rule_subset(Partial(1, 2), pts_flat,
-                                          neumann_idx, neumann_adjl, basis)
-end
-println(@sprintf("  5 rrules built in %.2f s", t_build))
-
-weight_rules = (d2x = rule_d2x, d2y = rule_d2y, d2xy = rule_d2xy,
-                dx  = rule_dx,  dy  = rule_dy)
-
-# ============================================================================
-# Manual-adjoint gradient
+# Manual-adjoint gradient (no rule-building — direct RBF backward)
 # ============================================================================
 
 println("\nManual-adjoint gradient (cold)...")
 t_ad_cold = @elapsed begin
-    result = shape_gradient_mixed_bc(
+    result = shape_gradient(
         pts_flat, model, N, adjl, basis,
-        active, interior_rows,
+        active,
         dirichlet_dofs, dirichlet_vals,
-        traction_layout, neumann_idx, neumann_adjl,
-        ∂loss_∂u, weight_rules,
+        ∂loss_∂u;
+        interior_rows = interior_rows,
+        traction_layout = traction_layout,
+        neumann_ids = neumann_idx,
+        neumann_adjl = neumann_adjl,
     )
 end
 grad_ad = result.Δpts
 println(@sprintf("  cold: %.3f s   ‖Δpts‖ = %.4e", t_ad_cold, norm(grad_ad)))
 
-t_ad_warm = @elapsed shape_gradient_mixed_bc(
+# Warm call
+t_ad_warm = @elapsed shape_gradient(
     pts_flat, model, N, adjl, basis,
-    active, interior_rows,
+    active,
     dirichlet_dofs, dirichlet_vals,
-    traction_layout, neumann_idx, neumann_adjl,
-    ∂loss_∂u, weight_rules,
+    ∂loss_∂u;
+    interior_rows = interior_rows,
+    traction_layout = traction_layout,
+    neumann_ids = neumann_idx,
+    neumann_adjl = neumann_adjl,
 )
 println(@sprintf("  warm: %.4f s", t_ad_warm))
 
 L_ad = loss_from_u(result.u)
-@assert isapprox(L_ad, L0; rtol = 1e-12) "forward solve drift between loss_pts and orchestrator"
+@assert isapprox(L_ad, L0; rtol = 1e-10) "forward solve drift between _build_weights and _build_weights_and_cache"
 
 # ============================================================================
 # FD reference

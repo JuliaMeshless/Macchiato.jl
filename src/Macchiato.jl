@@ -118,17 +118,13 @@ include("solve.jl")
 #################### Optimization / AD ####################
 include("optimization/solve_ift.jl")
 include("optimization/manual_adjoint.jl")
-export PDESolveIFT, make_system_differentiable
-export make_active_dofs_elasticity, apply_dirichlet!, compute_von_mises
+export apply_dirichlet!
 export active_dofs, build_dirichlet_info
-export batch_overwrite_sparse_rows!
-export gradient
 export extract_weight_sensitivities_elasticity!, allocate_weight_gradients
 export assemble_elasticity_from_weights
-export build_weight_rule, apply_weight_rule, shape_gradient_dirichlet
+export shape_gradient
 export TractionLayout, build_traction_layout, apply_traction!
-export extract_neumann_sensitivities!, allocate_neumann_weight_gradients
-export build_weight_rule_subset, apply_weight_rule_subset, shape_gradient_mixed_bc
+export extract_neumann_sensitivities!
 
 #################### Operators ####################
 abstract type AbstractOperator end
@@ -147,10 +143,6 @@ include("simulation.jl")
 
 export Simulation, run!, set!
 export temperature, velocity, pressure, displacement
-
-# test funcs
-export node_drop, findmin_turbo
-export cov, make_memory_contiguous, ranges_from_permutation, permute!
 
 # utils
 export findmin_turbo

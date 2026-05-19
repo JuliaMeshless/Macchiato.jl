@@ -1,5 +1,68 @@
 # Manual Adjoint for RBF-FD Shape Optimization
 
+**Last updated**: 2026-05-19
+
+## Status Summary
+
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Phase A | Dirichlet-only manual adjoint | **Implemented** (`6c64cb5`), not yet validated |
+| Phase B | Mixed Dirichlet + traction BCs | **Implemented** (`3db5380`), not yet validated |
+| Phase C | Clean interface + direct RBF backward | **Complete** — 155x speedup |
+| Phase D | Generalize to other physics | Not started |
+| Phase 1 (traced) | Monolithic Mooncake trace | **Abandoned** — 5+ min LLVM compile for 25 pts |
+| Phase 2 (traced) | `gradient(sim, loss; wrt=:pts)` API | Implemented but superseded by manual adjoint |
+
+### What's implemented
+
+- **`src/optimization/manual_adjoint.jl`** (434 lines): `extract_weight_sensitivities_elasticity!`, `allocate_weight_gradients`, `assemble_elasticity_from_weights`, `TractionLayout` + `build_traction_layout`, `apply_traction!`, `extract_neumann_sensitivities!`, `allocate_neumann_weight_gradients`
+- **`ext/MacchiatoMooncakeExt.jl`** (557 lines): `_pts_from_flat` primitive + rrule, per-operator `build_weight_rule` / `apply_weight_rule`, `build_weight_rule_subset` / `apply_weight_rule_subset`, `shape_gradient_dirichlet` orchestrator, `shape_gradient_mixed_bc` orchestrator
+- **`examples/shape_optimization_manual_adjoint_phaseA.jl`** (200 lines): Dirichlet-only AD-vs-FD validation
+- **`examples/shape_optimization_manual_adjoint_phaseB.jl`** (293 lines): Mixed-BC AD-vs-FD validation
+
+### Phase C status — COMPLETE
+
+1. **Unify orchestrators** — `shape_gradient_dirichlet` + `shape_gradient_mixed_bc` → single `shape_gradient` with kwargs — **DONE**
+2. **Eliminate `build_rrule`** — Step 4 now uses `_pullback_weights!` from RadialBasisFunctions.jl directly. No Mooncake tracing, no LLVM compilation. — **DONE**
+3. **Warmup** — updated to cover new `_build_weights_and_cache` + `_pullback_weights!` paths — **DONE**
+4. **Validated** — Phase A: `rel_err = 2.3e-11`, Phase B: `rel_err = 1.4e-07` — **DONE**
+
+### Performance (45-pt grid, k=35)
+
+| Metric | Old (build_rrule) | New (direct RBF) | Speedup |
+|--------|-------------------|-------------------|---------|
+| Phase A cold | 357 s | 2.3 s | **155x** |
+| Phase A warm | 25 ms | 6.6 ms | 3.8x |
+| Phase B cold | 404 s | 2.6 s | **155x** |
+| Phase B warm | 12 ms | 9.6 ms | 1.2x |
+
+Cold time dominated by Julia compilation of new RBF functions + stencil solves.
+Warm time is pure computation (sub-10ms per gradient evaluation).
+
+### What was removed
+
+- `_make_weight_closure`, `build_weight_rule`, `apply_weight_rule` — deleted
+- `_make_weight_closure_subset`, `build_weight_rule_subset`, `apply_weight_rule_subset` — deleted
+- `_pts_from_flat` Mooncake primitive registration — deleted (function kept as plain Julia)
+- `weight_rules` parameter from `shape_gradient` — deleted
+- ~200 lines of Mooncake glue code removed from ext file
+
+### What was added to RadialBasisFunctions.jl
+
+- `_build_weights_and_cache(ℒ, data, eval_points, adjl, basis)` → `(W, cache)` — forward with cache
+- `_pullback_weights!(Δdata, Δeval, ΔW_nzval, W, cache, ...)` — backward pass (pure Julia, no Mooncake)
+
+### Key architectural decisions (settled)
+
+- **Mooncake ONLY at the stencil level**: individual `_build_weights` calls, each a single primitive. The global assembly/solve/adjoint is manual linear algebra.
+- **`_pts_from_flat` as Mooncake primitive**: collapses ~3N traced scalar ops into one trace node — the dominant lever behind the 339s → seconds speedup.
+- **Single binding for data/eval_points**: closures use `q = _pts_from_flat(p); _build_weights(op, q, q, ...)` matching the tested rrule code path.
+- **Per-DOF gating** (not per-point AND): `active[i]` and `active[i+N]` gate independently, supporting mixed DOF-type BCs.
+- **`interior_rows` gate**: separates interior extraction (d2x/d2y/d2xy) from Neumann extraction (dx/dy), avoiding spurious ΔW contributions.
+- **Level 1 (frozen normals)**: Neumann coefficients use reference-configuration normals. Level 2 (differentiable normals) can be added later via a `∂coeff/∂pts` term in Step 3.
+
+---
+
 ## Motivation
 
 Mooncake's `build_rrule` on the full loss function (pts → weights → assembly →
@@ -389,119 +452,123 @@ end
 
 ## Implementation Plan
 
-### Phase A: Dirichlet-only gradient (minimal, validates the architecture)
+### Phase A: Dirichlet-only gradient — **DONE** (`6c64cb5`)
 
-1. **`adjoint_sensitivity(η, u, active, W_template, coeffs)`** — computes ΔW_k
-   from η and u as described above (Step 2+3 combined)
-2. **`build_weight_rrule(ℒ, pts_flat, adjl, basis)`** — builds and returns a
-   `(forward, pullback)` pair for a single operator (Step 4)
-3. **`shape_gradient(loss_fn, pts_flat, model, ...)`** — orchestrates Steps 1-5
-4. **Validation**: AD vs FD on 25-pt cantilever, Dirichlet-only. Should match
-   the Phase 1 result (rel_err ~ 1e-10) with compilation < 10s total.
+1. **`extract_weight_sensitivities_elasticity!`** — computes ΔW_k from η, u, active
+   via closed-form coefficient map. Per-DOF gated. O(nnz).
+2. **`allocate_weight_gradients`** — pre-allocate ΔW matrices sharing W_template's pattern
+3. **`assemble_elasticity_from_weights`** — forward assembly outside Mooncake trace
+4. **`build_weight_rule` / `apply_weight_rule`** — per-operator rule build + pullback
+5. **`shape_gradient_dirichlet`** — full Steps 1-5 orchestrator
+6. **`_pts_from_flat`** Mooncake primitive — collapses ~3N traced scalar ops
+7. **Validation script**: `examples/shape_optimization_manual_adjoint_phaseA.jl`
+   — **not yet run**; expected rel_err ~1e-10, compile < 10s
 
-### Phase B: Add Neumann support
+### Phase B: Neumann (traction) support — **DONE** (`3db5380`)
 
-5. Add Neumann ΔW extraction (the second loop above)
-6. Validate on mixed-BC cantilever (25 pts, k=20)
+1. **`TractionLayout` + `build_traction_layout`** — pre-computed coefficient bundle
+   for traction BC assembly and its adjoint
+2. **`apply_traction!`** — forward pass, non-traced
+3. **`extract_neumann_sensitivities!`** — coefficient-transpose backward pass
+4. **`allocate_neumann_weight_gradients`** — ΔW_dx, ΔW_dy allocation
+5. **`build_weight_rule_subset` / `apply_weight_rule_subset`** — for operators
+   evaluated on a point subset (Neumann rows)
+6. **`shape_gradient_mixed_bc`** — full Phase B orchestrator (Steps 1-5 with
+   both interior and Neumann extraction loops)
+7. **Validation script**: `examples/shape_optimization_manual_adjoint_phaseB.jl`
+   — **not yet run**; expected rel_err < 1e-3
 
-### Phase C: Clean interface + sysimage
+### Phase C: Clean interface + sysimage — **IN PROGRESS**
 
-7. Define `extract_weight_sensitivities(model, ...)` as a dispatchable function
-8. Add the full `shape_gradient` to the sysimage warmup
-9. Test on 100+ point problems
+**C1. Reduce duplication** — The two orchestrators (`shape_gradient_dirichlet`,
+    `shape_gradient_mixed_bc`) share ~80% of their code. Unify into a single
+    `shape_gradient` that inspects the BC configuration and dispatches accordingly.
+    The split between interior extraction (d2x/d2y/d2xy) and Neumann extraction
+    (dx/dy) can be driven by whether a `TractionLayout` is provided (or is empty).
+
+**C2. Warmup augmentation** — Add manual adjoint paths to `warmup.jl`:
+    - `_pts_from_flat` forward + backward
+    - `build_weight_rule` for all 5 operators (full + subset)
+    - `apply_weight_rule` / `apply_weight_rule_subset` for each
+    - `shape_gradient_dirichlet` full call (25-pt problem)
+    - `shape_gradient_mixed_bc` full call (25-pt problem)
+    Rebuild sysimage after: `julia ~/julia_sysimages/shape_opt/build.jl` (~10 min).
+
+**C3. Validate Phase A and Phase B** — Run the two validation scripts under `jlrun`.
+    Confirm `‖grad_AD - grad_FD‖ / ‖grad_FD‖ < 1e-3` for both. Fix any failures.
+
+**C4. Dispatchable `extract_weight_sensitivities(model, ...)`** — Currently the
+    elasticity extraction is hardcoded. Add a dispatchable function that each model
+    type implements, keeping the five-step framework PDE-agnostic.
+
+**C5. Scale test** — Run on 100+ point problems, measure compile time and gradient
+    accuracy.
 
 ### Phase D (future): Generalize
 
-10. Implement `extract_weight_sensitivities` for SolidEnergy (scalar PDE)
-11. Add support for body forces (∂b/∂pts term)
-12. Level 2: differentiable normals for Neumann BCs
+- Implement `extract_weight_sensitivities` for SolidEnergy (scalar PDE)
+- Add support for body forces (∂b/∂pts term)
+- Level 2: differentiable normals for Neumann BCs
+- Navier-Stokes extension (see dedicated section below)
 
 ---
 
-## Corrections (review pass)
+## Corrections (review pass) — ALL APPLIED in implementation
 
-Three issues flagged on re-read; all latent or Phase B-only. Step 2's math
-(`Aᵀ η = ∂L/∂u`, `ΔA = -η uᵀ`), the elasticity coefficient extraction signs,
-and the W_template-shares-pattern assumption all check out for Phase A.
+Three issues flagged on re-read. All three are addressed in the committed code.
+Step 2's math (`Aᵀ η = ∂L/∂u`, `ΔA = -η uᵀ`), the elasticity coefficient extraction
+signs, and the W_template-shares-pattern assumption all check out.
 
-### §1 Per-DOF `active` mask, not per-point AND
+### §1 Per-DOF `active` mask, not per-point AND — **APPLIED**
 
-The inner loop of "Efficient Implementation of Step 3" gates the assignment
-with `active[i] && active[i + N]`. Each summand inside comes from an
-independent row of A:
-- `ΔA₁₁[i,j] = -η[i] · u[j]` (row `i`)
-- `ΔA₂₂[i,j] = -η[i+N] · u[j+N]` (row `i+N`)
-
-Mixed BCs (roller, slip, symmetry, contact) can have `active[i] = false,
-active[i+N] = true` (or vice versa). The AND drops a valid contribution from
-the still-free DOF. Each term must be gated by its own row's bit:
+The implementation uses per-term gating as specified:
 
 ```julia
 t11 = active[i]    ? -η[i]   * u[j]   : 0.0
 t22 = active[i+N]  ? -η[i+N] * u[j+N] : 0.0
 t12 = active[i]    ? -η[i]   * u[j+N] : 0.0
 t21 = active[i+N]  ? -η[i+N] * u[j]   : 0.0
-
-ΔW_d2x [i,j] = c1*t11 + c2*t22
-ΔW_d2y [i,j] = c2*t11 + c1*t22
-ΔW_d2xy[i,j] = c3*t12 + c3*t21
 ```
 
-Phase A: full clamping ⇒ `active[i] == active[i+N]` everywhere ⇒ AND is
-correct by accident. Implement per-term gating anyway — Phase B will need it.
+See `extract_weight_sensitivities_elasticity!` in `src/optimization/manual_adjoint.jl:74-91`.
 
-### §2 Step 3's main loop must skip Neumann rows
+### §2 Step 3's main loop must skip Neumann rows — **APPLIED**
 
-`ΔA = -η uᵀ` applies to all active rows of A, but the assembly map differs
-by row type:
-- Interior rows of A ← `c1·W_d2x + c2·W_d2y + c3·W_d2xy`
-- Neumann rows of A ← overwritten by `batch_overwrite_sparse_rows!` from
-  `W_dx, W_dy` (the d2x/y/xy entries at these rows are unused in the forward
-  pass)
+The implementation uses `interior_rows::BitVector` (length N) threaded through
+`extract_weight_sensitivities_elasticity!`. When set, Neumann rows are skipped in
+the main d2x/d2y/d2xy extraction loop, and `extract_neumann_sensitivities!` handles
+the dx/dy contribution separately.
 
-If the main extraction loop visits a Neumann row `i`, it writes a spurious
-`ΔW_d2x[i, j] += c1 · (-η[i] · u[j])` etc. — gradient that shouldn't exist
-because that weight entry never affected `A`. The `active` BitVector is
-binary and doesn't distinguish interior from Neumann.
+See the `interior_rows` keyword in `manual_adjoint.jl:49-93` and the dual-loop
+structure in `shape_gradient_mixed_bc` (ext/MacchiatoMooncakeExt.jl:532-549).
 
-Fix: thread `interior_idx::Vector{Int}` (or `is_interior_row::BitVector`)
-through and iterate `for i in interior_idx` in the main loop; the Neumann
-loop (already in the plan) handles the rest.
+### §3 `_build_weights` closure binds `pts_from_flat(p)` twice — **APPLIED**
 
-Phase A: no Neumann rows ⇒ moot.
-
-### §3 `_build_weights` closure binds `pts_from_flat(p)` twice
+The implementation uses a single binding via `_make_weight_closure` /
+`_make_weight_closure_subset`:
 
 ```julia
-p -> _build_weights(Partial(2,1), pts_from_flat(p), pts_from_flat(p), adjl, basis)
-```
-
-Two independent `SVector{2,Float64}` arrays are built from the same `p`.
-Mooncake's `_build_weights` rrule was validated with `data === eval_points`
-(single argument). With two separate arrays, Mooncake computes `∂W/∂data`
-and `∂W/∂eval_points` as independent contributions and accumulates both back
-into `p` through the SVector constructors' tangents. **Mathematically equal**
-to the single-binding case, but a different code path. If Phase A AD/FD
-shows ~2× discrepancy or a systematic factor, switch to:
-
-```julia
-p -> begin
-    q = pts_from_flat(p)
-    _build_weights(Partial(2,1), q, q, adjl, basis)
+function _make_weight_closure(op, adjl, basis)
+    let op = op, adjl = adjl, basis = basis
+        function (p::Vector{Float64})
+            q = Macchiato._pts_from_flat(p)
+            return _build_weights(op, q, q, adjl, basis)  # single binding
+        end
+    end
 end
 ```
 
-### §4 Cosmetic notes
+See `ext/MacchiatoMooncakeExt.jl:299-306`.
 
-- "Neumann Contribution" pseudocode uses an undefined `pde_m + m` index. The
-  intent is the offset of `W_dx`, `W_dy` within the global `ΔW_list`.
-- Step 5's `Δpts_flat = Δpts_d2x + Δpts_d2y + Δpts_d2xy + Δpts_dx + Δpts_dy`
-  lists five operators; Phase A sums only the first three.
-- The plan's "`Δpts_d2x = pullback(rule_d2x, ΔW_d2x)`" is shorthand. Mooncake
-  has no top-level `pullback(rule, Δ)` function: actual usage requires
-  running the rule on a `CoDual(arg, zero_tangent(arg))`, capturing the
-  `(output_cd, pb)` pair, writing `ΔW_d2x` into `output_cd`'s tangent, and
-  invoking `pb(NoRData())` to accumulate into the arg's tangent.
+### §4 Cosmetic notes — **RESOLVED**
+
+- "Neumann Contribution" index: resolved by using `_find_nzval` lookups instead of direct
+  list indexing in `extract_neumann_sensitivities!`.
+- Step 5 accumulation: five operators in the implemented `shape_gradient_mixed_bc`,
+  three in `shape_gradient_dirichlet`.
+- `pullback` API: the implementation uses `Mooncake.value_and_pullback!!` with
+  `friendly_tangents=true` — the cleanest available API. See `apply_weight_rule`
+  in `ext/MacchiatoMooncakeExt.jl:337-346`.
 
 ---
 

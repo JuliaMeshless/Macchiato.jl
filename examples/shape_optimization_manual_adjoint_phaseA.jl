@@ -71,13 +71,18 @@ dirichlet_vals = vcat(
     [u_exact(p[1], p[2]) for p in points[boundary_idx]],
     [v_exact(p[1], p[2]) for p in points[boundary_idx]],
 )
-active = make_active_dofs_elasticity(interior_idx, N)
+active = falses(2N)
+active[interior_idx]      .= true
+active[interior_idx .+ N] .= true
 
 # ============================================================================
 # Sanity check: Timoshenko recovery at reference config
 # ============================================================================
 
-A0 = make_system_differentiable(model, pts_flat, N, adjl, basis, λstar, μ)
+W0_d2x  = _build_weights(Partial(2, 1),      points, points, adjl, basis)
+W0_d2y  = _build_weights(Partial(2, 2),      points, points, adjl, basis)
+W0_d2xy = _build_weights(MixedPartial(1, 2), points, points, adjl, basis)
+A0 = assemble_elasticity_from_weights(W0_d2x, W0_d2y, W0_d2xy, N, λstar, μ)
 b0 = zeros(2N)
 apply_dirichlet!(A0, b0, dirichlet_dofs, dirichlet_vals)
 u0 = lu(A0) \ b0
@@ -111,43 +116,29 @@ L0 = loss_pts(pts_flat)
 println(@sprintf("Loss at reference: %.6e", L0))
 
 # ============================================================================
-# Build per-operator Mooncake rules (one-time cost)
-# ============================================================================
-
-println("\nBuilding Mooncake rrules per operator...")
-t_build = @elapsed begin
-    rule_d2x  = build_weight_rule(Partial(2, 1),      pts_flat, adjl, basis)
-    rule_d2y  = build_weight_rule(Partial(2, 2),      pts_flat, adjl, basis)
-    rule_d2xy = build_weight_rule(MixedPartial(1, 2), pts_flat, adjl, basis)
-end
-println(@sprintf("  3 rrules built in %.2f s", t_build))
-
-weight_rules = (d2x = rule_d2x, d2y = rule_d2y, d2xy = rule_d2xy)
-
-# ============================================================================
-# Manual-adjoint gradient
+# Manual-adjoint gradient (no rule-building needed — direct RBF backward)
 # ============================================================================
 
 println("\nManual-adjoint gradient (cold)...")
 t_ad_cold = @elapsed begin
-    result = shape_gradient_dirichlet(
+    result = shape_gradient(
         pts_flat, model, N, adjl, basis, active,
-        dirichlet_dofs, dirichlet_vals, ∂loss_∂u, weight_rules,
+        dirichlet_dofs, dirichlet_vals, ∂loss_∂u,
     )
 end
 grad_ad = result.Δpts
 println(@sprintf("  cold: %.3f s   ‖Δpts‖ = %.4e", t_ad_cold, norm(grad_ad)))
 
-# Warm call (rule reuse)
-t_ad_warm = @elapsed shape_gradient_dirichlet(
+# Warm call
+t_ad_warm = @elapsed shape_gradient(
     pts_flat, model, N, adjl, basis, active,
-    dirichlet_dofs, dirichlet_vals, ∂loss_∂u, weight_rules,
+    dirichlet_dofs, dirichlet_vals, ∂loss_∂u,
 )
 println(@sprintf("  warm: %.4f s", t_ad_warm))
 
 # Sanity: loss values agree
 L_ad = loss_from_u(result.u)
-@assert isapprox(L_ad, L0; rtol = 1e-12) "forward solve drift between loss_pts and shape_gradient_dirichlet"
+@assert isapprox(L_ad, L0; rtol = 1e-12) "forward solve drift between loss_pts and shape_gradient"
 
 # ============================================================================
 # FD reference

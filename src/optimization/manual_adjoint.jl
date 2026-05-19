@@ -1,4 +1,5 @@
-import RadialBasisFunctions: _build_weights, Partial, MixedPartial
+import RadialBasisFunctions: _build_weights, Partial, MixedPartial,
+    _build_weights_and_cache, _pullback_weights!
 
 """
     _pts_from_flat(p)
@@ -7,10 +8,9 @@ Reshape a flat coordinate vector `[x1, y1, x2, y2, …]` of length `2N` into a
 `Vector{SVector{2, eltype(p)}}` of length `N`. Inverse of
 `vcat([collect(pt) for pt in pts]...)`.
 
-Declared as a Mooncake primitive in `MacchiatoMooncakeExt`: its hand-written
-rrule replaces what would otherwise be ~3N traced scalar ops per closure body
-(the dominant compile cost of `build_weight_rule` in Phase A — 339s → ~seconds
-after this fix).
+No longer a Mooncake primitive — the manual adjoint Step 4 now uses
+`_pullback_weights!` from RadialBasisFunctions.jl directly, avoiding
+`build_rrule` entirely.
 """
 function _pts_from_flat(p::AbstractVector{T}) where {T<:Real}
     N = length(p) ÷ 2
@@ -94,19 +94,17 @@ function extract_weight_sensitivities_elasticity!(
 end
 
 """
-    allocate_weight_gradients(W_template)
+    allocate_weight_gradients(templates...)
 
-Allocate `(ΔW_d2x, ΔW_d2y, ΔW_d2xy)` as zero `SparseMatrixCSC` matrices sharing
-`W_template`'s sparsity pattern (independent colptr/rowval copies, so mutating
-one ΔW won't affect another or the template).
+Allocate zero `SparseMatrixCSC` matrices sharing the sparsity pattern of each
+template. Returns a tuple of the same length as the input.
 """
-function allocate_weight_gradients(W_template::SparseMatrixCSC{Float64, Int})
-    m, n = size(W_template)
-    nnz = length(W_template.nzval)
-    mk() = SparseMatrixCSC(m, n, copy(W_template.colptr),
-                                  copy(W_template.rowval),
-                                  zeros(nnz))
-    return mk(), mk(), mk()
+function allocate_weight_gradients(templates::SparseMatrixCSC{Float64,Int}...)
+    return map(templates) do W
+        SparseMatrixCSC(size(W, 1), size(W, 2),
+                        copy(W.colptr), copy(W.rowval),
+                        zeros(length(W.nzval)))
+    end
 end
 
 """
@@ -381,54 +379,75 @@ function extract_neumann_sensitivities!(
     return nothing
 end
 
-"""
-    allocate_neumann_weight_gradients(W_dx_template, W_dy_template)
+# ============================================================================
+# Direct gradient propagation (no Mooncake — calls RBF._pullback_weights!)
+# ============================================================================
 
-Allocate zero `SparseMatrixCSC` matrices sharing the sparsity pattern of the
-two Neumann-side weight matrices `W_dx` and `W_dy` (which may differ from the
-Dirichlet-side `W_d2x` pattern because they are built on the Neumann row
-subset).
 """
-function allocate_neumann_weight_gradients(
-    W_dx_t::SparseMatrixCSC{Float64, Int},
-    W_dy_t::SparseMatrixCSC{Float64, Int},
+    _propagate_weight_gradient!(Δpts_flat, ΔW, W, cache, pts, eval_pts, adjl, basis, op)
+
+Propagate a weight-matrix gradient `ΔW` back to the flat coordinate gradient
+`Δpts_flat`. Uses RBF's `_pullback_weights!` (pure Julia, sub-millisecond).
+
+- `Δpts_flat`: `Vector{Float64}` (length 2N), accumulated in-place.
+- `ΔW`: sparse matrix with gradient values in `nzval`.
+- `W`, `cache`: from `_build_weights_and_cache(op, pts, eval_pts, adjl, basis)`.
+- `pts`: all data points (length N).
+- `eval_pts`: evaluation points (same as `pts` for full operators, subset for Neumann).
+- `eval_offset`: if `eval_pts` is a subset of `pts`, the global indices of eval points.
+"""
+function _propagate_weight_gradient!(
+    Δpts_flat::Vector{Float64},
+    ΔW::SparseMatrixCSC{Float64,Int},
+    W::SparseMatrixCSC{Float64,Int},
+    cache,
+    pts::AbstractVector{<:AbstractVector{Float64}},
+    eval_pts::AbstractVector{<:AbstractVector{Float64}},
+    adjl::AbstractVector,
+    basis,
+    op;
+    eval_offset::Union{Nothing,Vector{Int}} = nothing,
 )
-    mk(W) = SparseMatrixCSC(size(W, 1), size(W, 2),
-                            copy(W.colptr), copy(W.rowval),
-                            zeros(length(W.nzval)))
-    return mk(W_dx_t), mk(W_dy_t)
+    TD = Float64
+    dim = 2
+    N = length(pts)
+    M = length(eval_pts)
+
+    Δdata = [zeros(TD, dim) for _ in 1:N]
+    Δeval  = [zeros(TD, dim) for _ in 1:M]
+
+    _pullback_weights!(Δdata, Δeval, ΔW.nzval, W, cache, pts, eval_pts, adjl, basis, op)
+
+    # Accumulate Δdata → Δpts_flat (all N data points)
+    @inbounds for i in 1:N
+        Δpts_flat[2i - 1] += Δdata[i][1]
+        Δpts_flat[2i]     += Δdata[i][2]
+    end
+
+    # Accumulate Δeval → Δpts_flat
+    if eval_offset !== nothing
+        # Subset case: eval_pts correspond to specific global indices
+        @inbounds for i_local in 1:M
+            i_global = eval_offset[i_local]
+            Δpts_flat[2i_global - 1] += Δeval[i_local][1]
+            Δpts_flat[2i_global]     += Δeval[i_local][2]
+        end
+    else
+        # Full case: eval_pts === pts, add both contributions
+        @inbounds for i in 1:N
+            Δpts_flat[2i - 1] += Δeval[i][1]
+            Δpts_flat[2i]     += Δeval[i][2]
+        end
+    end
+
+    return nothing
 end
 
 # ============================================================================
 # Mooncake-extension stubs (real implementations in MacchiatoMooncakeExt)
 # ============================================================================
 
-function build_weight_rule(args...; kwargs...)
-    return error("Mooncake.jl must be loaded to use `build_weight_rule`. " *
-                 "Run `using Mooncake` first.")
-end
-
-function apply_weight_rule(args...; kwargs...)
-    return error("Mooncake.jl must be loaded to use `apply_weight_rule`. " *
-                 "Run `using Mooncake` first.")
-end
-
-function shape_gradient_dirichlet(args...; kwargs...)
-    return error("Mooncake.jl must be loaded to use `shape_gradient_dirichlet`. " *
-                 "Run `using Mooncake` first.")
-end
-
-function build_weight_rule_subset(args...; kwargs...)
-    return error("Mooncake.jl must be loaded to use `build_weight_rule_subset`. " *
-                 "Run `using Mooncake` first.")
-end
-
-function apply_weight_rule_subset(args...; kwargs...)
-    return error("Mooncake.jl must be loaded to use `apply_weight_rule_subset`. " *
-                 "Run `using Mooncake` first.")
-end
-
-function shape_gradient_mixed_bc(args...; kwargs...)
-    return error("Mooncake.jl must be loaded to use `shape_gradient_mixed_bc`. " *
+function shape_gradient(args...; kwargs...)
+    return error("Mooncake.jl must be loaded to use `shape_gradient`. " *
                  "Run `using Mooncake` first.")
 end
