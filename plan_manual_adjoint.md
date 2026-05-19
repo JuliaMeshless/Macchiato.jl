@@ -1,14 +1,15 @@
 # Manual Adjoint for RBF-FD Shape Optimization
 
-**Last updated**: 2026-05-19
+**Last updated**: 2026-05-19 (Phase 3 planned)
 
 ## Status Summary
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| Phase A | Dirichlet-only manual adjoint | **Implemented** (`6c64cb5`), not yet validated |
-| Phase B | Mixed Dirichlet + traction BCs | **Implemented** (`3db5380`), not yet validated |
+| Phase A | Dirichlet-only manual adjoint | **Validated** — `rel_err = 2.3e-11` |
+| Phase B | Mixed Dirichlet + traction BCs | **Validated** — `rel_err = 1.4e-07` |
 | Phase C | Clean interface + direct RBF backward | **Complete** — 155x speedup |
+| Phase 3 | Practical application: cantilever compliance minimization | **Planned** — see §Phase 3 below |
 | Phase D | Generalize to other physics | Not started |
 | Phase 1 (traced) | Monolithic Mooncake trace | **Abandoned** — 5+ min LLVM compile for 25 pts |
 | Phase 2 (traced) | `gradient(sim, loss; wrt=:pts)` API | Implemented but superseded by manual adjoint |
@@ -503,6 +504,149 @@ end
 
 **C5. Scale test** — Run on 100+ point problems, measure compile time and gradient
     accuracy.
+
+### Phase 3: Practical Application — Cantilever Compliance Minimization — **PLANNED**
+
+This is the first end-to-end shape optimization example. Unlike Phase A/B
+(gradient validation: compute ∂L/∂pts once, compare against FD), Phase 3 runs
+a full optimization loop — gradient → optimizer step → point update → neighbor
+recompute → repeat — producing a visibly improved design. This is the
+minimum-viable demonstration that the manual adjoint pipeline works for actual
+shape optimization, not just gradient checking.
+
+#### Problem statement
+
+Minimize the compliance (external work) of a 2D cantilever beam subject to a
+volume constraint by moving boundary points.
+
+```
+Domain:  [0, L] × [-D, D]   (rectangle, N = 9×5 = 45 points)
+BCs:     left edge clamped  (Dirichlet: u = v = 0)
+         right edge loaded  (Neumann: parabolic shear traction, P = 1000)
+         top/bottom free    (Neumann: zero traction)
+Loss:    compliance = bᵀu   (with ∂L/∂u = b for linear elasticity)
+Constraint: volume ≤ volume₀   (or area ≤ A₀ in 2D)
+```
+
+**Known optimal shape**: a tapered beam — thicker near the clamped end,
+thinner near the loaded tip — approximating a parabolic thickness profile.
+This is the classical Michell / Bernoulli optimum for a tip-loaded cantilever.
+
+#### Why this problem (and not the plate-with-hole yet)
+
+1. **All BC machinery exercised** — mixed Dirichlet + traction, exactly the
+   Phase B setup. No new BC code needed.
+2. **Simple loss** — compliance `bᵀu` has the trivial adjoint source
+   `∂L/∂u = b` (because `b` is independent of `u` for linear elasticity with
+   fixed external loads). No complex functional to derive.
+3. **Known optimum** — the beam should taper following a parabolic-like
+   profile. Qualitatively verifiable: if the optimizer thickens the clamped
+   end and thins the tip, it's working.
+4. **Same scale as validation** — 45 points is enough to see meaningful shape
+   change. No new scale challenges.
+5. **Compelling PR demo** — starting from a rectangle, after ~20 iterations
+   the design visibly bends toward the optimal taper. Side-by-side initial vs
+   optimized plots tell the story immediately.
+
+The plate-with-hole (plan's "driving application") is a better second example —
+it needs a more complex geometry setup and is more visually striking once the
+pipeline is proven.
+
+#### Design variables
+
+All point coordinates are design variables, but only boundary points can move
+freely. Interior points must follow via mesh morphing to maintain point-cloud
+quality. The design-relevant gradient is `∂L/∂pts_b` — the boundary slice of
+the full Δpts vector.
+
+**Mesh morphing** (simple approach for this first example): freeze interior
+points and move only free boundary points. The top, bottom, and right edges
+are free to move; the left edge (Dirichlet) stays fixed. The interior points
+are held fixed — this limits the number of iterations before remeshing is
+needed but avoids the complexity of a differentiable mesh morphing step for
+now.
+
+#### Optimization loop
+
+```julia
+pts = reference_rectangle(L, D, nx, ny)
+adjl = find_neighbors(pts, k)
+traction_layout = build_traction_layout(...)  # frozen normals (Level 1)
+
+for iter in 1:max_iter
+    pts_flat = vcat([collect(p) for p in pts]...)
+
+    result = shape_gradient(
+        pts_flat, model, N, adjl, basis, active,
+        dirichlet_dofs, dirichlet_vals, ∂L_∂u;
+        interior_rows = interior_rows,
+        traction_layout = traction_layout,
+        neumann_ids = neumann_idx,
+        neumann_adjl = neumann_adjl,
+    )
+
+    # Gradient descent with line search (or use NLopt L-BFGS)
+    α = linesearch(pts_flat, result.Δpts, loss_fn)
+    pts_flat .-= α .* result.Δpts
+
+    # Project volume constraint (move boundary outward if volume < target)
+    if current_volume < target_volume
+        # scale boundary coordinates to maintain constraint
+    end
+
+    # Rebuild after geometry update
+    pts = _pts_from_flat(pts_flat)
+    adjl = find_neighbors(pts, k)
+    # traction_layout is kept frozen (Level 1 normals at reference config)
+end
+```
+
+#### What this adds to the codebase
+
+1. **`examples/shape_optimization_phase3_cantilever.jl`** (~200 lines):
+   - Sets up the cantilever geometry, BCs, and loss
+   - Runs the optimization loop
+   - Plots initial vs optimized shape + convergence history
+2. **No new source code in src/** — everything needed is already implemented
+   (Phase A/B/C). This is purely an example script.
+3. **Optional: simple line search** — could be inlined in the script or use
+   NLopt's `LD_LBFGS` with inequality constraint for volume.
+
+#### Expected results
+
+| Quantity | Initial (rectangle) | Optimized |
+|----------|--------------------|-----------|
+| Compliance bᵀu | baseline | lower (20-40% reduction) |
+| Volume | V₀ | ≤ V₀ (active constraint) |
+| Shape | rectangular | tapered (thicker at clamp, thinner at tip) |
+| Gradient norm ‖Δpts‖ | large | decreasing, approaching KKT |
+
+#### Success criteria
+
+- [ ] Optimization runs for ≥ 15 iterations without NaN / divergence
+- [ ] Compliance decreases monotonically (or nearly so)
+- [ ] Final shape is visibly tapered (qualitative check)
+- [ ] Volume constraint is satisfied at final iteration
+- [ ] Gradient norm decreases by at least 1 order of magnitude
+- [ ] Warm gradient evaluation time < 20 ms per iteration
+
+#### Implementation notes
+
+- **Frozen normals**: Neumann normals are computed once at the reference
+  rectangle and kept constant (Level 1). The boundary points move but the
+  normal vectors in `traction_layout` are not updated. This is valid for
+  small shape changes; for large deformations of the loaded edge, normals
+  should be recomputed.
+- **Neighbor recomputation**: `find_neighbors` must be called each iteration
+  after point coordinates change. This is O(N log N) via KD-tree and
+  negligible compared to the PDE solve.
+- **Volume constraint**: simplest approach is a penalty term
+  `L += ρ * (V - V₀)²` with increasing penalty parameter ρ. NLopt
+  inequality constraint is cleaner but adds a dependency. Start with the
+  penalty approach for simplicity.
+- **Interior point freezing**: only boundary points on the top, bottom, and
+  right edges are design variables. A simple mask zeros out the interior and
+  left-edge components of Δpts. This avoids the need for mesh morphing.
 
 ### Phase D (future): Generalize
 
