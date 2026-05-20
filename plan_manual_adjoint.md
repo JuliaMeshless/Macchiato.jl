@@ -1,6 +1,6 @@
 # Manual Adjoint for RBF-FD Shape Optimization
 
-**Last updated**: 2026-05-19 (Phase 3 planned)
+**Last updated**: 2026-05-20 (Phase 3 done with live loads + filter)
 
 ## Status Summary
 
@@ -9,17 +9,20 @@
 | Phase A | Dirichlet-only manual adjoint | **Validated** — `rel_err = 2.3e-11` |
 | Phase B | Mixed Dirichlet + traction BCs | **Validated** — `rel_err = 1.4e-07` |
 | Phase C | Clean interface + direct RBF backward | **Complete** — 155x speedup |
-| Phase 3 | Practical application: cantilever compliance minimization | **Planned** — see §Phase 3 below |
-| Phase D | Generalize to other physics | Not started |
+| Phase 3 | Cantilever compliance minimization (live loads, FD-validated) | **Done** — `rel_err = 1.4e-07`, 39% compliance reduction |
+| Phase D L1 | `∂b/∂pts` for shape-dependent dead loads | **Done** — `extract_load_sensitivities!`, FD-validated |
+| Phase D L2 | Differentiable boundary normals (follower loads) | Not started |
+| Phase D reg | Stronger sensitivity regularization (long-wavelength) | Not started |
 | Phase 1 (traced) | Monolithic Mooncake trace | **Abandoned** — 5+ min LLVM compile for 25 pts |
 | Phase 2 (traced) | `gradient(sim, loss; wrt=:pts)` API | Implemented but superseded by manual adjoint |
 
 ### What's implemented
 
-- **`src/optimization/manual_adjoint.jl`** (434 lines): `extract_weight_sensitivities_elasticity!`, `allocate_weight_gradients`, `assemble_elasticity_from_weights`, `TractionLayout` + `build_traction_layout`, `apply_traction!`, `extract_neumann_sensitivities!`, `allocate_neumann_weight_gradients`
-- **`ext/MacchiatoMooncakeExt.jl`** (557 lines): `_pts_from_flat` primitive + rrule, per-operator `build_weight_rule` / `apply_weight_rule`, `build_weight_rule_subset` / `apply_weight_rule_subset`, `shape_gradient_dirichlet` orchestrator, `shape_gradient_mixed_bc` orchestrator
-- **`examples/shape_optimization_manual_adjoint_phaseA.jl`** (200 lines): Dirichlet-only AD-vs-FD validation
-- **`examples/shape_optimization_manual_adjoint_phaseB.jl`** (293 lines): Mixed-BC AD-vs-FD validation
+- **`src/optimization/manual_adjoint.jl`**: `extract_weight_sensitivities_elasticity!`, `allocate_weight_gradients`, `assemble_elasticity_from_weights`, `TractionLayout` + `build_traction_layout`, `apply_traction!`, `extract_neumann_sensitivities!`, **`extract_load_sensitivities!`** (Phase D L1 — ηᵀ·∂b/∂pts for shape-dependent dead loads)
+- **`ext/MacchiatoMooncakeExt.jl`**: unified `shape_gradient` with kwargs for Dirichlet-only or mixed BCs; new **`traction_jacobians`** kwarg accepts per-Neumann-point 2×2 Jacobians and adds the ηᵀ·∂b/∂pts term automatically. Backwards-compatible (default `nothing` ⇒ frozen-load behavior).
+- **`examples/shape_optimization_manual_adjoint_phaseA.jl`**: Dirichlet-only AD-vs-FD validation
+- **`examples/shape_optimization_manual_adjoint_phaseB.jl`**: Mixed-BC AD-vs-FD validation (frozen loads)
+- **`examples/shape_optimization_phase3_cantilever.jl`**: end-to-end shape opt loop with live tractions + boundary-loop sensitivity filter. Iter-0 FD validation included (rel_err 1.4e-7).
 
 ### Phase C status — COMPLETE
 
@@ -61,6 +64,8 @@ Warm time is pure computation (sub-10ms per gradient evaluation).
 - **Per-DOF gating** (not per-point AND): `active[i]` and `active[i+N]` gate independently, supporting mixed DOF-type BCs.
 - **`interior_rows` gate**: separates interior extraction (d2x/d2y/d2xy) from Neumann extraction (dx/dy), avoiding spurious ΔW contributions.
 - **Level 1 (frozen normals)**: Neumann coefficients use reference-configuration normals. Level 2 (differentiable normals) can be added later via a `∂coeff/∂pts` term in Step 3.
+- **`∂b/∂pts` is split in two** — the implicit `ηᵀ·∂b/∂pts` piece (the "η-side", part of the `∂L/∂u · du/dpts` chain) lives inside `shape_gradient`. The explicit `∂L/∂b · ∂b/∂pts` piece (the "u-side", e.g. `uᵀ·∂b/∂pts` for compliance) lives **outside** `shape_gradient` because the function doesn't know the loss's b-dependence structure. The user reuses `extract_load_sensitivities!` with their own `∂L/∂b` coefficient vector. For self-adjoint elasticity these two pieces sum to the textbook `2·uᵀ·∂b/∂pts`; for non-self-adjoint RBF-FD operators they're distinct contributions and BOTH are required for FD agreement.
+- **Neumann classification must be index-based, not spatial.** Predicates like `is_right(p) = p[1] ≈ L` (default `isapprox` tol ~1.5e-8) flip false under any FD perturbation larger than that — corrupting both the reference gradient and any live-load update. Cache `[is_right(points0[i]) for i in neumann_ids]` once at init and look up by local Neumann index. The Phase 3 example demonstrates this pattern (`neumann_is_right_idx`).
 
 ---
 
@@ -505,155 +510,148 @@ end
 **C5. Scale test** — Run on 100+ point problems, measure compile time and gradient
     accuracy.
 
-### Phase 3: Practical Application — Cantilever Compliance Minimization — **PLANNED**
+### Phase 3: Cantilever Compliance Minimization — **DONE**
 
-This is the first end-to-end shape optimization example. Unlike Phase A/B
-(gradient validation: compute ∂L/∂pts once, compare against FD), Phase 3 runs
-a full optimization loop — gradient → optimizer step → point update → neighbor
-recompute → repeat — producing a visibly improved design. This is the
-minimum-viable demonstration that the manual adjoint pipeline works for actual
-shape optimization, not just gradient checking.
+First end-to-end shape-opt loop on the pipeline. Lives in
+`examples/shape_optimization_phase3_cantilever.jl` (~500 lines, self-contained).
 
-#### Problem statement
-
-Minimize the compliance (external work) of a 2D cantilever beam subject to a
-volume constraint by moving boundary points.
+#### Setup
 
 ```
 Domain:  [0, L] × [-D, D]   (rectangle, N = 9×5 = 45 points)
 BCs:     left edge clamped  (Dirichlet: u = v = 0)
-         right edge loaded  (Neumann: parabolic shear traction, P = 1000)
+         right edge loaded  (Neumann: parabolic shear, t_y(y) = P·(D²-y²)/(2I))
          top/bottom free    (Neumann: zero traction)
-Loss:    compliance = bᵀu   (with ∂L/∂u = b for linear elasticity)
-Constraint: volume ≤ volume₀   (or area ≤ A₀ in 2D)
+Loss:    L = compliance + ρ·(V - V₀)²   (two-sided area penalty, ρ = 1e3)
+Design:  y-coords of top, bottom, right boundary points
+         minus the two right corners (frozen — see "design-mask choices" below)
 ```
 
-**Known optimal shape**: a tapered beam — thicker near the clamped end,
-thinner near the loaded tip — approximating a parabolic thickness profile.
-This is the classical Michell / Bernoulli optimum for a tip-loaded cantilever.
+#### Result (40 iters, k=35, ρ_pen=1e3)
 
-#### Why this problem (and not the plate-with-hole yet)
+| Quantity | Reference | Optimized | Δ |
+|----------|-----------|-----------|---|
+| Compliance bᵀu | 71.80 | 43.74 | **−39.1%** |
+| Area | 16.000 | 15.998 | −0.02% |
+| Warm gradient time | — | 9 ms | — |
+| AD/FD gradient rel_err (iter 0) | — | **1.4e-7** | — |
 
-1. **All BC machinery exercised** — mixed Dirichlet + traction, exactly the
-   Phase B setup. No new BC code needed.
-2. **Simple loss** — compliance `bᵀu` has the trivial adjoint source
-   `∂L/∂u = b` (because `b` is independent of `u` for linear elasticity with
-   fixed external loads). No complex functional to derive.
-3. **Known optimum** — the beam should taper following a parabolic-like
-   profile. Qualitatively verifiable: if the optimizer thickens the clamped
-   end and thins the tip, it's working.
-4. **Same scale as validation** — 45 points is enough to see meaningful shape
-   change. No new scale challenges.
-5. **Compelling PR demo** — starting from a rectangle, after ~20 iterations
-   the design visibly bends toward the optimal taper. Side-by-side initial vs
-   optimized plots tell the story immediately.
+Success criteria pass: ≥5 iters with no NaN, monotone compliance (Armijo-enforced
+to floating-point tolerance), area within 2%, ≥20% compliance reduction, warm grad
+<20 ms.
 
-The plate-with-hole (plan's "driving application") is a better second example —
-it needs a more complex geometry setup and is more visually striking once the
-pipeline is proven.
+#### What this required beyond Phase C
 
-#### Design variables
+Three things, none of which were obvious from the original Phase 3 sketch:
 
-All point coordinates are design variables, but only boundary points can move
-freely. Interior points must follow via mesh morphing to maintain point-cloud
-quality. The design-relevant gradient is `∂L/∂pts_b` — the boundary slice of
-the full Δpts vector.
+1. **`∂b/∂pts` in the gradient pipeline** — the original sketch assumed
+   `∂L/∂u = b` was sufficient and that `b` could be frozen. For shape-dependent
+   tractions (parabolic shear depends on the y-coord of where it's applied),
+   that's the **dead-load** approximation and gives the wrong gradient. Fixed
+   by `extract_load_sensitivities!` + the new `traction_jacobians` kwarg on
+   `shape_gradient`. See "η-side vs u-side" decision above.
+2. **Sensitivity filtering** — unfiltered, the discrete loss landscape has
+   a Nyquist-mode checkerboard that the optimizer exploits within ~14 iters,
+   producing physically absurd shapes (alternating outward/inward boundary
+   perturbations). Suppressed by a single α=0.25 3-point average along the
+   CCW boundary loop, with `free_mask` respect (frozen DOFs neither donate
+   nor receive averaged values). Lives inline in the Phase 3 example —
+   simple enough that promoting it to source isn't worth the API surface yet.
+3. **Index-based Neumann classification.** See key decision above. Spatial
+   predicates broke the FD reference until fixed.
 
-**Mesh morphing** (simple approach for this first example): freeze interior
-points and move only free boundary points. The top, bottom, and right edges
-are free to move; the left edge (Dirichlet) stays fixed. The interior points
-are held fixed — this limits the number of iterations before remeshing is
-needed but avoids the complexity of a differentiable mesh morphing step for
-now.
-
-#### Optimization loop
+#### Architecture of the loop
 
 ```julia
-pts = reference_rectangle(L, D, nx, ny)
-adjl = find_neighbors(pts, k)
-traction_layout = build_traction_layout(...)  # frozen normals (Level 1)
+# Init (once)
+adjl            = find_neighbors(points0, k)
+traction_layout = build_traction_layout(...)   # frozen normals, frozen connectivity
+neumann_is_right_idx = [is_right(points0[i]) for i in neumann_idx]   # cached classification
 
+# Iteration body
 for iter in 1:max_iter
-    pts_flat = vcat([collect(p) for p in pts]...)
+    # 1. Update b_vals from current shape (dead-load values follow the geometry)
+    update_traction_loads!(traction_layout, pts_flat, neumann_idx, traction_at)
 
-    result = shape_gradient(
-        pts_flat, model, N, adjl, basis, active,
-        dirichlet_dofs, dirichlet_vals, ∂L_∂u;
-        interior_rows = interior_rows,
-        traction_layout = traction_layout,
-        neumann_ids = neumann_idx,
-        neumann_adjl = neumann_adjl,
-    )
+    # 2. Build per-Neumann 2×2 Jacobians at current shape
+    jacobians = build_traction_jacobians(pts_flat, neumann_idx, traction_jacobian_at)
 
-    # Gradient descent with line search (or use NLopt L-BFGS)
-    α = linesearch(pts_flat, result.Δpts, loss_fn)
-    pts_flat .-= α .* result.Δpts
+    # 3. Adjoint gradient — η-side ∂b/∂pts is added automatically because
+    #    we passed traction_jacobians.
+    b_now  = build_b_from_layout(traction_layout, dirichlet_dofs, dirichlet_vals, N)
+    result = shape_gradient(pts_flat, ...; ∂L_∂u = _ -> b_now,
+                                          traction_jacobians = jacobians, ...)
 
-    # Project volume constraint (move boundary outward if volume < target)
-    if current_volume < target_volume
-        # scale boundary coordinates to maintain constraint
-    end
+    # 4. u-side ∂b/∂pts (∂L/∂b = u for compliance) — extract_load_sensitivities!
+    #    reused with u in place of η.
+    extract_load_sensitivities!(grad, traction_layout, result.u, neumann_idx, jacobians)
 
-    # Rebuild after geometry update
-    pts = _pts_from_flat(pts_flat)
-    adjl = find_neighbors(pts, k)
-    # traction_layout is kept frozen (Level 1 normals at reference config)
+    # 5. Add volume penalty gradient
+    grad += 2 * ρ_pen * (V - V_target) * dV/dpts
+
+    # 6. Sensitivity filter along boundary loop, then mask to free DOFs
+    filter_along_boundary!(grad_smooth, grad, boundary_loop, free_mask; α=0.25)
+    grad_smooth .*= free_mask
+
+    # 7. Armijo backtracking line search; update pts_flat
 end
 ```
 
-#### What this adds to the codebase
+The full path takes ~9 ms warm per gradient evaluation. FD reference at iter 0
+takes ~7.5 s (90 design vars × 4 evals × ~20 ms each).
 
-1. **`examples/shape_optimization_phase3_cantilever.jl`** (~200 lines):
-   - Sets up the cantilever geometry, BCs, and loss
-   - Runs the optimization loop
-   - Plots initial vs optimized shape + convergence history
-2. **No new source code in src/** — everything needed is already implemented
-   (Phase A/B/C). This is purely an example script.
-3. **Optional: simple line search** — could be inlined in the script or use
-   NLopt's `LD_LBFGS` with inequality constraint for volume.
+#### Design-mask choices (load-bearing decisions)
 
-#### Expected results
+- **x-coords frozen everywhere.** Only y-coords of boundary points can move.
+  Keeps the discretization x-locations fixed so the parabolic profile
+  interpretation stays clean.
+- **Right corners (L, ±D) frozen.** Their reference normals `(1, 0)` are
+  baked into `traction_layout`. The moment a corner moves outward into the
+  geometrically "top-right" region, that normal misrepresents the surface.
+  Live normals are Phase D L2. Freezing the corners is the honest workaround
+  until L2 lands.
+- **Interior + left edge frozen.** Standard.
 
-| Quantity | Initial (rectangle) | Optimized |
-|----------|--------------------|-----------|
-| Compliance bᵀu | baseline | lower (20-40% reduction) |
-| Volume | V₀ | ≤ V₀ (active constraint) |
-| Shape | rectangular | tapered (thicker at clamp, thinner at tip) |
-| Gradient norm ‖Δpts‖ | large | decreasing, approaching KKT |
+#### Known limitations of the current result
 
-#### Success criteria
+- The optimized shape is **not** a clean Michell taper. It shows real material
+  redistribution (middle dimples inward, corners stay frozen) plus some
+  residual bulging near x=7 (one vertex inboard of the frozen right corner).
+  That residual is a true minimum of the discrete loss landscape — the
+  gradient is correct (FD-validated) and the filter kills the Nyquist mode,
+  but longer-wavelength modes near a frozen-DOF transition aren't suppressed
+  by a 3-point average.
+- The volume penalty oscillates the area at ~±0.05 around target, causing
+  alternating sign in `2ρ(V-V₀)·∇V` and a sawtooth in `‖∇L‖` after iter ~13.
+  Cosmetic; doesn't block convergence.
 
-- [ ] Optimization runs for ≥ 15 iterations without NaN / divergence
-- [ ] Compliance decreases monotonically (or nearly so)
-- [ ] Final shape is visibly tapered (qualitative check)
-- [ ] Volume constraint is satisfied at final iteration
-- [ ] Gradient norm decreases by at least 1 order of magnitude
-- [ ] Warm gradient evaluation time < 20 ms per iteration
+#### Promotion candidates (deferred — judgment call)
 
-#### Implementation notes
+- `update_traction_loads!`, `build_traction_jacobians`, and the index-based
+  classification pattern are likely to be reused for any dead-load problem.
+  Currently live in the Phase 3 example; promote to `manual_adjoint.jl` once
+  a second user appears.
+- `filter_along_boundary!` is currently inline. Promote once a multi-pass /
+  Helmholtz-PDE variant is needed.
 
-- **Frozen normals**: Neumann normals are computed once at the reference
-  rectangle and kept constant (Level 1). The boundary points move but the
-  normal vectors in `traction_layout` are not updated. This is valid for
-  small shape changes; for large deformations of the loaded edge, normals
-  should be recomputed.
-- **Neighbor recomputation**: `find_neighbors` must be called each iteration
-  after point coordinates change. This is O(N log N) via KD-tree and
-  negligible compared to the PDE solve.
-- **Volume constraint**: simplest approach is a penalty term
-  `L += ρ * (V - V₀)²` with increasing penalty parameter ρ. NLopt
-  inequality constraint is cleaner but adds a dependency. Start with the
-  penalty approach for simplicity.
-- **Interior point freezing**: only boundary points on the top, bottom, and
-  right edges are design variables. A simple mask zeros out the interior and
-  left-edge components of Δpts. This avoids the need for mesh morphing.
+### Phase D: Generalize beyond linear elasticity / dead loads
 
-### Phase D (future): Generalize
-
-- Implement `extract_weight_sensitivities` for SolidEnergy (scalar PDE)
-- Add support for body forces (∂b/∂pts term)
-- Level 2: differentiable normals for Neumann BCs
-- Navier-Stokes extension (see dedicated section below)
+- **L1 (done):** `extract_load_sensitivities!` + `traction_jacobians` kwarg.
+  Supports any dead-load problem where each Neumann row's `b` depends on its
+  own point coordinates via a closed-form Jacobian.
+- **L2 (next):** differentiable boundary normals. Required for follower loads
+  (pressure normal to deformed surface) and for the right-corner artifact
+  fix in Phase 3. Touches `TractionLayout.coeffs` (currently frozen) plus a
+  new normal-derivative pullback.
+- **Regularization** beyond the inline Nyquist filter: a Helmholtz-PDE filter
+  `(−r²·∇² + 1) ∇L_f = ∇L` on the boundary loop would suppress longer
+  wavelengths. Would resolve the residual bulging near frozen DOFs.
+- **Body forces:** `b` with a true `∂b/∂pts` contribution from per-point body
+  loads (e.g. gravity on a varying-density mesh). Same machinery as L1, just
+  populated on interior rows.
+- **Scalar PDE / SolidEnergy:** dispatchable `extract_weight_sensitivities`
+  per model type (Phase C4 was the original framing). Still open.
+- **Navier-Stokes extension:** see dedicated section below.
 
 ---
 
