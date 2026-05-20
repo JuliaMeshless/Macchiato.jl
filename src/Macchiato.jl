@@ -125,6 +125,7 @@ export assemble_elasticity_from_weights
 export shape_gradient
 export TractionLayout, build_traction_layout, apply_traction!
 export extract_neumann_sensitivities!
+export extract_load_sensitivities!
 
 #################### Operators ####################
 abstract type AbstractOperator end

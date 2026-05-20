@@ -5,6 +5,7 @@ using Macchiato:
     apply_dirichlet!,
     extract_weight_sensitivities_elasticity!,
     extract_neumann_sensitivities!,
+    extract_load_sensitivities!,
     allocate_weight_gradients,
     assemble_elasticity_from_weights,
     apply_traction!,
@@ -57,6 +58,7 @@ function Macchiato.shape_gradient(
     traction_layout::Union{Nothing, TractionLayout} = nothing,
     neumann_ids::Union{Nothing, Vector{Int}} = nothing,
     neumann_adjl::Union{Nothing, Vector{Vector{Int}}} = nothing,
+    traction_jacobians::Union{Nothing, AbstractVector{<:AbstractMatrix{Float64}}} = nothing,
 )
     has_neumann = traction_layout !== nothing
     μ, λstar = lame_parameters(model)
@@ -110,6 +112,13 @@ function Macchiato.shape_gradient(
         _propagate_weight_gradient!(Δpts, ΔW_dy,   W_dy,   cache_dy,
                                     pts, neumann_pts, neumann_adjl, basis, Partial(1, 2);
                                     eval_offset = neumann_ids)
+    end
+
+    # --- Step 4b: dead-load b-side contribution (ηᵀ · ∂b/∂pts) ------------
+    # No-op unless caller supplied per-Neumann-point traction Jacobians; safe
+    # for the frozen-load case used by Phase A/B and the original Phase 3 run.
+    if has_neumann && traction_jacobians !== nothing
+        extract_load_sensitivities!(Δpts, traction_layout, η, neumann_ids, traction_jacobians)
     end
 
     return (u = u, Δpts = Δpts)

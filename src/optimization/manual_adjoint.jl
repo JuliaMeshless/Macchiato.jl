@@ -379,6 +379,43 @@ function extract_neumann_sensitivities!(
     return nothing
 end
 
+"""
+    extract_load_sensitivities!(Δpts, layout, η, neumann_ids, traction_jacobians)
+
+Step 3 (b-side) — accumulate `ηᵀ · ∂b/∂pts` into `Δpts` for the dead-load
+case where each Neumann point's traction depends on its own coordinates,
+`t = t(p_i)`.
+
+`traction_jacobians[i_local]` is a 2×2 matrix `J` with `J[a, b] = ∂t_a/∂p_b`
+evaluated at the current location of Neumann point `i_local` (whose global
+index is `neumann_ids[i_local]`). For the x-equation row `g = neumann_ids[i_local]`
+and y-equation row `g + N`, the contribution to `Δpts` is
+
+    Δpts[2g-1] += η[g] · J[1,1] + η[g+N] · J[2,1]
+    Δpts[2g]   += η[g] · J[1,2] + η[g+N] · J[2,2]
+
+(positive sign — recall `dL/dpts = +ηᵀ·∂b/∂pts − ηᵀ·∂A/∂pts·u`).
+"""
+function extract_load_sensitivities!(
+    Δpts::AbstractVector{Float64},
+    layout::TractionLayout,
+    η::AbstractVector{Float64},
+    neumann_ids::AbstractVector{Int},
+    traction_jacobians::AbstractVector{<:AbstractMatrix{Float64}},
+)
+    N = length(η) ÷ 2
+    @assert length(traction_jacobians) == length(neumann_ids)
+    @inbounds for i_local in eachindex(neumann_ids)
+        g  = neumann_ids[i_local]
+        ηx = η[g]
+        ηy = η[g + N]
+        J  = traction_jacobians[i_local]
+        Δpts[2g - 1] += ηx * J[1, 1] + ηy * J[2, 1]
+        Δpts[2g]     += ηx * J[1, 2] + ηy * J[2, 2]
+    end
+    return nothing
+end
+
 # ============================================================================
 # Direct gradient propagation (no Mooncake — calls RBF._pullback_weights!)
 # ============================================================================
