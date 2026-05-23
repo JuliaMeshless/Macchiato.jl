@@ -6,10 +6,12 @@ using Macchiato:
     extract_weight_sensitivities_elasticity!,
     extract_neumann_sensitivities!,
     extract_load_sensitivities!,
+    extract_normal_sensitivities!,
     allocate_weight_gradients,
     assemble_elasticity_from_weights,
     apply_traction!,
     TractionLayout,
+    NormalJacobian,
     LinearElasticity, lame_parameters,
     _propagate_weight_gradient!
 using Mooncake
@@ -59,6 +61,7 @@ function Macchiato.shape_gradient(
     neumann_ids::Union{Nothing, Vector{Int}} = nothing,
     neumann_adjl::Union{Nothing, Vector{Vector{Int}}} = nothing,
     traction_jacobians::Union{Nothing, AbstractVector{<:AbstractMatrix{Float64}}} = nothing,
+    normal_jacobians::Union{Nothing, AbstractVector{NormalJacobian}} = nothing,
 )
     has_neumann = traction_layout !== nothing
     μ, λstar = lame_parameters(model)
@@ -119,6 +122,16 @@ function Macchiato.shape_gradient(
     # for the frozen-load case used by Phase A/B and the original Phase 3 run.
     if has_neumann && traction_jacobians !== nothing
         extract_load_sensitivities!(Δpts, traction_layout, η, neumann_ids, traction_jacobians)
+    end
+
+    # --- Step 4c: Phase D L2 — differentiable normals ---------------------
+    # -ηᵀ · (∂A/∂n · ∂n/∂pts) · u, distributed via the sparse NormalJacobians.
+    # No-op unless caller supplied normal Jacobians and the layout's coeffs
+    # were updated to match the live normals (see `update_traction_coeffs!`).
+    if has_neumann && normal_jacobians !== nothing
+        extract_normal_sensitivities!(Δpts, traction_layout, η, u,
+                                      W_dx, W_dy, normal_jacobians, λstar, μ;
+                                      active = active)
     end
 
     return (u = u, Δpts = Δpts)

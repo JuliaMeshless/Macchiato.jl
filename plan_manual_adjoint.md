@@ -1,6 +1,6 @@
 # Manual Adjoint for RBF-FD Shape Optimization
 
-**Last updated**: 2026-05-20 (Phase 3 done with live loads + filter)
+**Last updated**: 2026-05-23 (Phase D L2 + Helmholtz sensitivity filter)
 
 ## Status Summary
 
@@ -9,10 +9,11 @@
 | Phase A | Dirichlet-only manual adjoint | **Validated** — `rel_err = 2.3e-11` |
 | Phase B | Mixed Dirichlet + traction BCs | **Validated** — `rel_err = 1.4e-07` |
 | Phase C | Clean interface + direct RBF backward | **Complete** — 155x speedup |
-| Phase 3 | Cantilever compliance minimization (live loads, FD-validated) | **Done** — `rel_err = 1.4e-07`, 39% compliance reduction |
+| Phase 3 | Cantilever compliance minimization (live loads, FD-validated) | **Done** — `rel_err = 1.4e-07`, 39% reduction with corners frozen |
 | Phase D L1 | `∂b/∂pts` for shape-dependent dead loads | **Done** — `extract_load_sensitivities!`, FD-validated |
-| Phase D L2 | Differentiable boundary normals (follower loads) | Not started |
-| Phase D reg | Stronger sensitivity regularization (long-wavelength) | Not started |
+| Phase D L2 | Differentiable polyline normals (corners unfrozen) | **Done** — `rel_err = 1.4e-07`, 52% reduction with 3-point filter |
+| Phase D L2-follower | Live normals as input to t(n) for follower loads | Not started |
+| Phase D reg (Helmholtz) | PDE sensitivity filter on the boundary loop | **Done** — 46.6% reduction at r=1, smoother shape; 52% (3-point) was noise exploitation |
 | Phase 1 (traced) | Monolithic Mooncake trace | **Abandoned** — 5+ min LLVM compile for 25 pts |
 | Phase 2 (traced) | `gradient(sim, loss; wrt=:pts)` API | Implemented but superseded by manual adjoint |
 
@@ -639,19 +640,163 @@ takes ~7.5 s (90 design vars × 4 evals × ~20 ms each).
 - **L1 (done):** `extract_load_sensitivities!` + `traction_jacobians` kwarg.
   Supports any dead-load problem where each Neumann row's `b` depends on its
   own point coordinates via a closed-form Jacobian.
-- **L2 (next):** differentiable boundary normals. Required for follower loads
-  (pressure normal to deformed surface) and for the right-corner artifact
-  fix in Phase 3. Touches `TractionLayout.coeffs` (currently frozen) plus a
-  new normal-derivative pullback.
-- **Regularization** beyond the inline Nyquist filter: a Helmholtz-PDE filter
-  `(−r²·∇² + 1) ∇L_f = ∇L` on the boundary loop would suppress longer
-  wavelengths. Would resolve the residual bulging near frozen DOFs.
+- **L2 (done):** differentiable polyline normals via `polyline_normals`,
+  `NormalJacobian`, `extract_normal_sensitivities!`, `update_traction_coeffs!`,
+  and the `normal_jacobians` kwarg on `shape_gradient`. The chord-based
+  formula `n_i = R(-π/2)·normalize(p_{next} - p_{prev})` gives smooth normals
+  at edge midpoints (equal to the canonical edge normal) and length-weighted
+  normals at corners. For the cantilever, corners use the chord-formula
+  normal, which biases the bending BC and flips compliance sign — so the
+  Phase 3 example freezes the corner *normal* at the canonical `(1, 0)` while
+  leaving the corner *coordinates* free; L2 sensitivity flows through the
+  corner's boundary-loop neighbors (edge midpoints whose chord touches the
+  corner). FD-validated `rel_err = 1.4e-7`; 40-iter loop achieves **52%
+  compliance reduction**, up from the corner-frozen 39%. See §Phase 3 L2
+  results below.
+- **L2 follower-load extension:** the current L2 only differentiates the
+  bilinear assembly. Genuine follower loads (`t = t(n)` — e.g. pressure
+  `t = -p·n`) would also need `∂t/∂n · ∂n/∂pts` in the b-side. Not started.
+- **Regularization (done):** Helmholtz-PDE sensitivity filter on the boundary
+  loop, `helmholtz_filter_along_boundary!` in the Phase 3 example. See
+  §Helmholtz sensitivity filter below.
 - **Body forces:** `b` with a true `∂b/∂pts` contribution from per-point body
   loads (e.g. gravity on a varying-density mesh). Same machinery as L1, just
   populated on interior rows.
 - **Scalar PDE / SolidEnergy:** dispatchable `extract_weight_sensitivities`
   per model type (Phase C4 was the original framing). Still open.
 - **Navier-Stokes extension:** see dedicated section below.
+
+### Phase 3 L2 results (corners unfrozen)
+
+```
+Domain:        same as Phase 3 (9×5 cantilever, parabolic shear)
+Design vars:   19 y-coords (top, bottom, right boundary — corners now included)
+Corner normal: frozen at (1, 0) (beam-natural) — see §"Why freeze corners"
+L2 path:       chord normals + ∂n/∂pts at non-corner Neumann pts
+Iterations:    40 (Armijo-monotone)
+```
+
+| Quantity | Phase 3 (corners frozen) | Phase D L2 (corners free) |
+|----------|--------------------------|---------------------------|
+| Compliance C₀ → C₄₀ | 71.80 → 43.74 (−39.1%) | 71.80 → 34.40 (**−52.1%**) |
+| Area drift | −0.02% | −0.04% |
+| iter-0 AD/FD rel_err | 1.4e-7 | 1.4e-7 |
+| Warm gradient time | ~9 ms | ~9 ms |
+
+#### Why freeze the corner *normal* but let the corner *coordinate* move?
+
+For a 90° polygon corner, the chord-tangent formula gives a length-weighted
+normal `n = R(-π/2)·(p_next - p_prev)/|·|`. For a rectangle with Δx ≠ Δy this
+is NOT the angular bisector — at the cantilever's top-right corner it's
+`(1, 2)/√5 ≈ (0.447, 0.894)`, biased toward the longer (top) edge. Imposing
+`σ·n = 0` with that normal mixes σ_xx and σ_xy in a way that's poorly
+aligned with beam bending physics (which expects σ_xx = 0 at the free end).
+With the chord-formula corner, the cantilever's compliance sign flips
+(C₀ = -182.7 instead of +71.8), tripping the physical guardrail at iter 1.
+
+Fix: freeze corner normals at `(1, 0)` (canonical right-edge normal, same as
+Phase 3 used everywhere). The corner *coordinates* are still free design
+variables, so the optimizer can move them. L2 still captures the geometry
+sensitivity at the corner because the corner appears as a `(prev, next)`
+neighbor of the boundary-loop vertices on either side — when the corner
+moves in y, those neighbors' chord normals rotate, and the gradient picks up
+their `∂n/∂(corner_y)` contributions. The `NormalJacobian` for corners
+themselves is zeroed so `extract_normal_sensitivities!` is a no-op at corner
+rows.
+
+#### Implementation surface (Phase D L2)
+
+- `src/optimization/manual_adjoint.jl`:
+  - `NormalJacobian` struct (i_prev, i_next + four `SVector{2}` blocks).
+  - `polyline_normals(pts_flat, boundary_loop, neumann_loop_pos)`.
+  - `update_traction_coeffs!(layout, normals, λstar, μ)`.
+  - `extract_normal_sensitivities!(...)`.
+- `ext/MacchiatoMooncakeExt.jl`: new `normal_jacobians` kwarg on
+  `shape_gradient`. Default `nothing` ⇒ frozen-normal behavior, backwards-
+  compatible with Phase A/B/3 (Phase B regression rel_err unchanged).
+- `examples/test_polyline_normals.jl`: unit test, analytic Jacobians vs
+  `central_fdm(5,1)`, worst case 3.9e-12.
+- `examples/shape_optimization_phase3_cantilever.jl`: L2 wired in,
+  `is_corner` removed from free_mask, `build_live_normals` helper overrides
+  corner entries at the canonical `(1, 0)` with zero Jacobians.
+
+### Helmholtz sensitivity filter (Phase D reg)
+
+The single-pass 3-point average has transfer function `H₃(ω) = cos²(ω/2)`:
+nullifies ω=π (Nyquist) but only mildly attenuates intermediate
+frequencies. With L2 unfreezing the corners, the optimizer found a 52%
+compliance reduction whose final shape exhibits visible long-wavelength
+undulations on the top and bottom edges. **Iter-0 gradient diagnostics
+ruled out a bug**: top/bottom symmetry holds to 2e-8, global Nyquist
+projection ratio is 1.5e-12 (filtered cleanly), the raw gradient is
+correctly oscillatory at Nyquist within each edge (RBF stencil noise) and
+the 3-point filter removes it. The undulations are therefore a
+discrete-loss-landscape feature surfaced once L2 made the corner DOFs
+available — exactly the case that calls for stronger low-pass smoothing.
+
+The Helmholtz-PDE filter solves
+`(I − r² ∇²_loop) f = g`
+along the closed CCW boundary loop, with `∇²_loop` the discrete 1D
+periodic Laplacian (stencil `[-1, 2, -1]`). Transfer function:
+
+```
+H_H(ω; r) = 1 / (1 + 4 r² sin²(ω/2))
+```
+
+| ω | H₃ (3-point) | H_H, r=1 | H_H, r=2 |
+|---|--------------|----------|----------|
+| 0 (DC) | 1 | 1 | 1 |
+| π/4 (period 8) | 0.85 | 0.62 | 0.29 |
+| π/2 (period 4) | 0.50 | 0.33 | 0.09 |
+| π (Nyquist) | 0 | 0.20 | 0.06 |
+
+Frozen entries (per `free_mask`) act as Dirichlet boundary values inside
+the filter system: their row is the identity `f_k = g_k`, anchoring the
+clamped left edge so the gradient is attenuated as it approaches that
+boundary (physical). The cost is one 24×24 dense solve per iteration —
+sub-millisecond at the cantilever scale.
+
+#### Result comparison (40 iterations each)
+
+| Configuration | Compliance reduction | Boundary shape | Notes |
+|---|---|---|---|
+| L2 + 3-point, corners frozen | 47.6% | mild waviness | "frozen-corner baseline with L2" |
+| L2 + 3-point, corners free | **52.1%** | visible undulations | optimizer exploits unfiltered modes |
+| L2 + Helmholtz r=1, corners free | 46.6% | mostly smooth | sweet spot |
+| L2 + Helmholtz r=2, corners free | 38.5% | very smooth | over-regularized |
+
+The 52.1% with the 3-point filter was the *apparent* minimum on an
+under-regularized discrete loss; the Helmholtz r=1 result at 46.6% is
+the *honest* minimum on the smooth design subspace. The compliance gap
+(5.5 pp) is the cost of restricting the design to physically meaningful
+modes.
+
+#### Implementation surface (Helmholtz)
+
+- `examples/shape_optimization_phase3_cantilever.jl`:
+  - `helmholtz_filter_along_boundary!(out, in_, loop, free_mask; r)`.
+  - `sensitivity_filter::Symbol = :helmholtz` and `helmholtz_r = 1.0`
+    constants — toggle `:helmholtz` ↔ `:nyquist` to switch filters.
+- Not yet promoted to `manual_adjoint.jl` source — same threshold as
+  `filter_along_boundary!` (await second user / sysimage benefit).
+
+#### Open shortcomings flagged by this comparison
+
+- The Helmholtz `r` is hand-tuned. A principled choice would scale `r`
+  with the boundary segment length or the expected feature size of the
+  optimum. Adaptive `r` is open.
+- The penalty oscillation in `‖∇L‖` (sawtooth from `2ρ(V − V₀)∇V` sign
+  flipping between line-search trials) is still present. Augmented
+  Lagrangian or a hard area constraint via projection would fix it
+  cleanly.
+- The 9×5 grid is coarse. A finer discretization (matching the planned
+  Phase C5 scale test) would reveal whether the smooth Helmholtz result
+  converges to a clean Michell taper as `h → 0`.
+- Boundary-segment lengths differ between top/bottom edges (Δx=1.0) and
+  the right edge (Δy=0.5). The Helmholtz filter treats them as a
+  uniform 1D mesh, which slightly over-smooths the longer edges relative
+  to the right edge. A geometric Laplacian with arc-length weights would
+  be more rigorous but the visual difference at this scale is marginal.
 
 ---
 

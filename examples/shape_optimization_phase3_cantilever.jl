@@ -1,5 +1,5 @@
 # ============================================================================
-# Phase 3: Cantilever Compliance Minimization (plan_manual_adjoint.md §Phase 3)
+# Phase 3 + D L2: Cantilever Compliance Minimization with live normals
 # ============================================================================
 # End-to-end shape optimization on a 9×5 cantilever (N=45):
 #   - Left edge:   clamped (Dirichlet, u=v=0)
@@ -8,7 +8,8 @@
 #   - Loss:        compliance = bᵀu          (∂L/∂u = b)
 #   - Constraint:  area ≈ A₀                 (two-sided quadratic penalty)
 #   - Design:      y-coords of top, bottom, right boundary points
-#                  (interior + left edge + all x-coords frozen)
+#                  (interior + left edge + all x-coords frozen).
+#                  **Corner y-coords are free** (Phase D L2).
 #
 # Pipeline: shape_gradient → boundary-loop sensitivity filter → free-DOF mask
 # → Armijo line search → pts update.
@@ -21,9 +22,16 @@
 #   2. Sensitivity filtering: a single α=0.25 3-point average along the
 #      boundary loop suppresses the Nyquist-mode checkerboard artifact that
 #      the unfiltered gradient was exploiting.
-#
-# Connectivity (adjl), traction normals, and coefficient stencils stay frozen
-# (Level 1 — see plan §Key architectural decisions). Live normals are Level 2.
+#   3. **Phase D L2 — live polyline normals.** Edge-midpoint Neumann rows
+#      now use a chord-formula normal `n_i = R(-π/2)·(p_next - p_prev)/|·|`
+#      that depends on neighboring boundary-loop coordinates. The matching
+#      `NormalJacobian`s feed `extract_normal_sensitivities!` to capture the
+#      ηᵀ·(∂A/∂n)·(∂n/∂pts)·u gradient term. Coefficients are refreshed each
+#      iter by `update_traction_coeffs!`. The two right *corners* keep their
+#      frozen `(1, 0)` normal (see comment near `build_live_normals` — the
+#      chord formula at sharp 90° corners is length-weighted and flips the
+#      cantilever compliance sign). Their coordinates remain free design
+#      variables.
 # ============================================================================
 using Pkg
 Pkg.activate(@__DIR__)
@@ -99,21 +107,17 @@ end
 # Design mask: which entries of Δpts the optimizer is allowed to use
 # ============================================================================
 # Layout of pts_flat: [x_1, y_1, x_2, y_2, …]. Index of y_i is 2i.
-# Free design variables: y-coords of top, bottom, right boundary points —
-# *except* the two right corners (L, ±D). Those corners are kept frozen
-# because their reference normals (1, 0) are baked into `traction_layout`
-# and would misrepresent the geometry the moment a corner moves outward
-# (Level 2 / live-normals territory, see plan §Phase D).
-
-is_corner(p) = is_right(p) && (p[2] ≈ D || p[2] ≈ -D)
+# Free design variables: y-coords of top, bottom, right boundary points,
+# **including the two right corners (L, ±D)**. Phase D L2 makes the corner
+# normals live (length-weighted polyline tangent), so moving a corner no
+# longer breaks the assembly.
 
 free_mask = falses(2N)
 for i in vcat(top_idx, bottom_idx, right_idx)
-    is_corner(points0[i]) && continue
     free_mask[2i] = true          # y-component only
 end
 n_free = count(free_mask)
-println("Design variables (free y-coords, corners excluded): $n_free")
+println("Design variables (free y-coords, L2 normals → corners included): $n_free")
 
 # ============================================================================
 # Dirichlet + Neumann BC values
@@ -162,6 +166,9 @@ function traction_jacobian_at(i_local::Int, p)
     end
 end
 
+# Reference normals — only used to seed `build_traction_layout`. The actual
+# coefficients in `traction_layout.coeffs` are overwritten each iteration by
+# `update_traction_coeffs!` once live (polyline) normals are available.
 neumann_normals   = [normal_of(points0[i])             for i in neumann_idx]
 neumann_tractions = [traction_at(i, points0[neumann_idx[i]])
                      for i in eachindex(neumann_idx)]
@@ -214,6 +221,48 @@ end
 const boundary_loop = build_boundary_loop(points0)
 @assert length(boundary_loop) == 2 * (nx - 1) + 2 * (ny - 1)
 println("Boundary polygon vertices: $(length(boundary_loop))  (expected $(2*(nx-1)+2*(ny-1)))")
+
+# Map each Neumann point to its position in the CCW boundary loop. Used by
+# polyline_normals to recover (prev, next) neighbors. All Neumann points lie
+# on the boundary by construction.
+const _loop_pos_of = Dict(g => k for (k, g) in enumerate(boundary_loop))
+const neumann_loop_pos = [_loop_pos_of[i] for i in neumann_idx]
+
+# Identify corners by *index* (robust to corner y-coord motion). Corners need
+# special handling because the polyline-tangent (chord) normal at a sharp 90°
+# corner is length-weighted, not the beam-natural σ·n_right = 0 condition.
+# We freeze corner normals at (1, 0) — the canonical right-edge convention
+# used by Phase B — and zero out their NormalJacobians so the L2 path
+# contributes nothing at corners themselves. L2 still flows through corners
+# via the chord-formula normals of their *adjacent* boundary-loop neighbors
+# (edge midpoints whose chord touches the corner), which is the geometric
+# information the gradient needs.
+const corner_neumann_local = [i_local for i_local in eachindex(neumann_idx)
+    if is_right(points0[neumann_idx[i_local]]) &&
+       (points0[neumann_idx[i_local]][2] ≈  D ||
+        points0[neumann_idx[i_local]][2] ≈ -D)]
+println("Corner Neumann indices (frozen normal (1, 0)): $corner_neumann_local")
+
+# Build live normals + Jacobians, overriding corners with the frozen normal.
+function build_live_normals(pts_flat::Vector{Float64})
+    normals, jacs = polyline_normals(pts_flat, boundary_loop, neumann_loop_pos)
+    zero_v = SVector{2,Float64}(0.0, 0.0)
+    @inbounds for i_local in corner_neumann_local
+        normals[i_local] = SVector{2,Float64}(1.0, 0.0)
+        nj = jacs[i_local]
+        jacs[i_local] = NormalJacobian(nj.i_prev, nj.i_next,
+                                        zero_v, zero_v, zero_v, zero_v)
+    end
+    return normals, jacs
+end
+
+# Initialize layout coefficients so the very first forward solve is consistent
+# with the chord-at-edges + frozen-(1,0)-at-corners convention.
+let
+    init_pts = collect(reduce(vcat, [collect(p) for p in points0]))
+    normals_init, _ = build_live_normals(init_pts)
+    update_traction_coeffs!(traction_layout, normals_init, λstar, μ)
+end
 
 # Shoelace area of a CCW polygon given pts_flat
 function polygon_area(pts_flat::AbstractVector, loop::Vector{Int})
@@ -320,7 +369,20 @@ function build_traction_jacobians(pts_flat::Vector{Float64},
     ]
 end
 
-# Sensitivity filter — 3-point boundary-loop average on the y-gradient.
+# Phase D L2: refresh layout to be consistent with the current point cloud.
+# Updates b_vals (traction values), then live normals → coeffs (so the
+# forward solve sees the deformed-geometry Neumann row), then returns the
+# matching NormalJacobian array for use in shape_gradient. Corner normals
+# are frozen at (1, 0) via `build_live_normals`; their NormalJacobians are
+# zeroed so the L2 path contributes nothing at corners themselves.
+function update_layout_for!(pts_flat::Vector{Float64})
+    update_traction_loads!(traction_layout, pts_flat, neumann_idx, traction_at)
+    normals_live, jacs_live = build_live_normals(pts_flat)
+    update_traction_coeffs!(traction_layout, normals_live, λstar, μ)
+    return jacs_live
+end
+
+# --- 3-point Nyquist filter (kept for reference / single-pass baseline) -----
 # A single α=0.25 pass nulls the Nyquist (every-other-vertex) mode, killing
 # the checkerboard artifact while preserving smooth design modes. Honors
 # `free_mask`: frozen DOFs neither contribute to nor receive averaged values.
@@ -343,7 +405,61 @@ function filter_along_boundary!(out::Vector{Float64},
     return out
 end
 
+# --- Helmholtz-PDE sensitivity filter ---------------------------------------
+# Solves (I − r² · ∇²) g_smooth = g_raw on the closed CCW boundary loop, with
+# ∇² the discrete 1D periodic Laplacian (stencil [-1, 2, -1] per vertex).
+#
+# Transfer function in periodic Fourier modes (k = wavenumber per segment):
+#     H(k) = 1 / (1 + r² · 4 · sin²(k/2))
+# - H(0)   = 1   (DC preserved)
+# - H(π)   ≈ 1/(1 + 4r²)  → small for r ≥ 1 (Nyquist killed)
+# - H(π/2) ≈ 1/(1 + 2r²)  → ~0.09 at r=2 (half-Nyquist suppressed)
+#
+# Frozen entries (per `free_mask`) act as Dirichlet boundary values: their
+# equation is the identity row `f_k = g_k`, so they pass through unchanged
+# and "anchor" their free neighbors (the gradient is attenuated as it
+# approaches the clamped left edge, which is physical).
+#
+# Cost: one 24×24 dense solve at the cantilever scale — milliseconds, run
+# once per optimization iteration. The system is built fresh each call so
+# it tolerates a `free_mask` that changes between iterations (it doesn't
+# here, but it's a cheap luxury).
+function helmholtz_filter_along_boundary!(out::Vector{Float64},
+                                            in_::Vector{Float64},
+                                            loop::Vector{Int},
+                                            free_mask::BitVector;
+                                            r::Float64 = 2.0)
+    out .= in_
+    n_loop = length(loop)
+    A = zeros(n_loop, n_loop)
+    rhs = zeros(n_loop)
+    @inbounds for k in 1:n_loop
+        i_curr = loop[k]
+        rhs[k] = in_[2 * i_curr]
+        if free_mask[2 * i_curr]
+            k_prev = mod1(k - 1, n_loop)
+            k_next = mod1(k + 1, n_loop)
+            A[k, k_prev] = -r * r
+            A[k, k]      = 1.0 + 2.0 * r * r
+            A[k, k_next] = -r * r
+        else
+            A[k, k] = 1.0   # identity row — frozen entry passes through
+        end
+    end
+    f = A \ rhs
+    @inbounds for k in 1:n_loop
+        i_curr = loop[k]
+        free_mask[2 * i_curr] || continue
+        out[2 * i_curr] = f[k]
+    end
+    return out
+end
+
+const helmholtz_r = 1.0
+# Choose the filter via constant — set to :nyquist (single-pass 3-point) or
+# :helmholtz (PDE filter). The Phase D L2 + Helmholtz run uses :helmholtz.
 const smoothing_α = 0.25
+const sensitivity_filter = :helmholtz
 
 # ============================================================================
 # Total loss + gradient (live tractions, filtered gradient)
@@ -351,14 +467,14 @@ const smoothing_α = 0.25
 
 # total_loss(pts_flat) = compliance(u(pts_flat)) + ρ·(V - V_target)²
 function total_loss(pts_flat::Vector{Float64})
-    update_traction_loads!(traction_layout, pts_flat, neumann_idx, traction_at)
+    update_layout_for!(pts_flat)   # b_vals + live-normal coeffs in one shot
     sol = forward_solve(pts_flat)
     V   = polygon_area(pts_flat, boundary_loop)
     return compliance(sol.u, sol.b) + ρ_pen * (V - V_target)^2
 end
 
 function total_gradient!(grad::Vector{Float64}, pts_flat::Vector{Float64})
-    update_traction_loads!(traction_layout, pts_flat, neumann_idx, traction_at)
+    normal_jacs = update_layout_for!(pts_flat)
     jacobians = build_traction_jacobians(pts_flat, neumann_idx, traction_jacobian_at)
     # ∂L/∂u = b at the *current* shape. Compute it cheaply (no PDE solve):
     # zero everywhere except Dirichlet rows (= dirichlet_vals) and Neumann
@@ -380,6 +496,7 @@ function total_gradient!(grad::Vector{Float64}, pts_flat::Vector{Float64})
         neumann_ids        = neumann_idx,
         neumann_adjl       = neumann_adjl,
         traction_jacobians = jacobians,
+        normal_jacobians   = normal_jacs,
     )
     grad .= result.Δpts
     # Explicit ∂L/∂b·∂b/∂pts contribution. For compliance L = bᵀu, ∂L/∂b = u,
@@ -392,7 +509,13 @@ function total_gradient!(grad::Vector{Float64}, pts_flat::Vector{Float64})
     @. grad += 2 * ρ_pen * (V - V_target) * g_area
     # Apply boundary-loop smoother, then mask to free DOFs.
     grad_smooth = similar(grad)
-    filter_along_boundary!(grad_smooth, grad, boundary_loop, free_mask; α = smoothing_α)
+    if sensitivity_filter === :helmholtz
+        helmholtz_filter_along_boundary!(grad_smooth, grad, boundary_loop, free_mask;
+                                           r = helmholtz_r)
+    else
+        filter_along_boundary!(grad_smooth, grad, boundary_loop, free_mask;
+                                 α = smoothing_α)
+    end
     grad_smooth .*= free_mask
     grad .= grad_smooth
     return (u = result.u, V = V)
@@ -405,13 +528,13 @@ end
 # (no penalty, no filter, no mask) at the reference geometry.
 
 function loss_compl_only(pts_flat::Vector{Float64})
-    update_traction_loads!(traction_layout, pts_flat, neumann_idx, traction_at)
+    update_layout_for!(pts_flat)
     sol = forward_solve(pts_flat)
     return compliance(sol.u, sol.b)
 end
 
 function grad_compl_only_ad(pts_flat::Vector{Float64})
-    update_traction_loads!(traction_layout, pts_flat, neumann_idx, traction_at)
+    normal_jacs = update_layout_for!(pts_flat)
     jacobians = build_traction_jacobians(pts_flat, neumann_idx, traction_jacobian_at)
     b_now = zeros(2N)
     @inbounds for (i, d) in enumerate(dirichlet_dofs)
@@ -430,6 +553,7 @@ function grad_compl_only_ad(pts_flat::Vector{Float64})
         neumann_ids        = neumann_idx,
         neumann_adjl       = neumann_adjl,
         traction_jacobians = jacobians,
+        normal_jacobians   = normal_jacs,
     )
     g = copy(result.Δpts)
     # Explicit u-side b contribution (∂L/∂b = u for compliance).
@@ -467,7 +591,92 @@ else
                           i, which, pt, grad_ad_check[i], grad_fd_check[i], diff[i]))
     end
 end
-update_traction_loads!(traction_layout, pts_flat, neumann_idx, traction_at)
+update_layout_for!(pts_flat)   # restore reference layout after FD probe
+
+# ============================================================================
+# Iter-0 gradient diagnostic — smoothness + top/bottom symmetry
+# ============================================================================
+# Print the raw (unfiltered, unmasked) total-loss gradient along the CCW
+# boundary loop. Two sanity checks:
+#   (a) Smoothness — if the iter-0 gradient is already wavy (alternating
+#       signs / large magnitude jumps between neighbors), the optimizer
+#       starts from a noisy descent direction and there might be a bug.
+#       If it's smooth, the wavy result of the 3-point-filter run is a
+#       discrete-loss-landscape feature → Helmholtz is the right cure.
+#   (b) Symmetry — geometry + loading are symmetric under y → -y; the loss
+#       and its gradient should match the same symmetry. So grad[2·i_top]
+#       should equal -grad[2·i_bottom_mirror] where the bottom mirror is
+#       the symmetric counterpart. Asymmetry > 1e-6 → suspect.
+
+let
+    println()
+    println("Iter-0 gradient diagnostic — raw (unfiltered) total-loss gradient:")
+    grad_raw = zeros(2N)
+    info = total_gradient!(grad_raw, pts_flat)   # `grad_raw` is filtered+masked
+    # Re-derive the unfiltered version by inlining the gradient build but
+    # skipping the filter+mask step.
+    normal_jacs = update_layout_for!(pts_flat)
+    jacobians = build_traction_jacobians(pts_flat, neumann_idx, traction_jacobian_at)
+    b_now = zeros(2N)
+    for (i, d) in enumerate(dirichlet_dofs); b_now[d] = dirichlet_vals[i]; end
+    for k in eachindex(traction_layout.rows); b_now[traction_layout.rows[k]] = traction_layout.b_vals[k]; end
+    res = shape_gradient(pts_flat, model, N, adjl, basis, active,
+                        dirichlet_dofs, dirichlet_vals, _ -> b_now;
+                        interior_rows = interior_rows,
+                        traction_layout = traction_layout,
+                        neumann_ids = neumann_idx,
+                        neumann_adjl = neumann_adjl,
+                        traction_jacobians = jacobians,
+                        normal_jacobians = normal_jacs)
+    grad_unf = copy(res.Δpts)
+    extract_load_sensitivities!(grad_unf, traction_layout, res.u, neumann_idx, jacobians)
+    g_area = similar(grad_unf); polygon_area_grad!(g_area, pts_flat, boundary_loop)
+    V_now = polygon_area(pts_flat, boundary_loop)
+    @. grad_unf += 2 * ρ_pen * (V_now - V_target) * g_area
+
+    println(@sprintf("  ‖grad_unfiltered‖ = %.4e   ‖grad_filtered+masked‖ = %.4e",
+                      norm(grad_unf), norm(grad_raw)))
+    println("  Walking CCW boundary loop. Column 'y' = pts_flat[2i]; 'g_y' = grad_unf[2i].")
+    println(@sprintf("  %4s %5s %12s %12s %12s", "k", "i", "y", "g_y", "edge"))
+    edge_of(i) = is_left(points0[i])   ? "L" :
+                 is_right(points0[i])  ? "R" :
+                 is_top(points0[i])    ? "T" : "B"
+    for k in eachindex(boundary_loop)
+        i = boundary_loop[k]
+        println(@sprintf("  %4d %5d %+12.4e %+12.4e %12s",
+                          k, i, pts_flat[2i], grad_unf[2i], edge_of(i)))
+    end
+
+    # Smoothness probe: how much of ‖grad_unf‖ is in the Nyquist mode? Compute
+    # the projection onto the alternating-sign mode (k → (-1)^k) restricted to
+    # the y-components of the boundary loop.
+    n_loop = length(boundary_loop)
+    g_y_loop = [grad_unf[2 * boundary_loop[k]] for k in 1:n_loop]
+    alt = [(-1.0)^k for k in 1:n_loop]
+    nyq_proj = dot(g_y_loop, alt) / norm(alt)
+    println(@sprintf("  ‖grad_y_loop‖ = %.4e   Nyquist-projection = %.4e   (ratio = %.2e)",
+                      norm(g_y_loop), nyq_proj, abs(nyq_proj) / norm(g_y_loop)))
+
+    # Symmetry probe: for each top-edge point, find its bottom-edge mirror by
+    # matching x-coords, then compare grad_y.
+    top_pts = [(i, pts_flat[2i - 1]) for i in top_idx]
+    bot_pts = [(i, pts_flat[2i - 1]) for i in bottom_idx]
+    sym_err_max = 0.0
+    for (it, xt) in top_pts
+        ib_match = nothing
+        for (ib, xb) in bot_pts
+            if abs(xt - xb) < 1e-10
+                ib_match = ib; break
+            end
+        end
+        ib_match === nothing && continue
+        # Under y → -y symmetry, grad_y at top equals -grad_y at bottom mirror.
+        e = abs(grad_unf[2 * it] + grad_unf[2 * ib_match])
+        sym_err_max = max(sym_err_max, e)
+    end
+    println(@sprintf("  max |g_y(top) + g_y(bot_mirror)| = %.4e   (perfect symmetry = 0)",
+                      sym_err_max))
+end
 
 # ============================================================================
 # Optimization loop — gradient descent with Armijo backtracking

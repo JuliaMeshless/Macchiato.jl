@@ -417,6 +417,299 @@ function extract_load_sensitivities!(
 end
 
 # ============================================================================
+# Phase D L2: differentiable polyline normals
+# ============================================================================
+
+"""
+    NormalJacobian
+
+Sparse Jacobian of an outward normal `n_i` at a Neumann point w.r.t. its two
+boundary-loop neighbors. The normal is defined by
+`n_i = R(-π/2) · normalize(p_{next} - p_{prev})`; only `p_prev` and `p_next`
+appear in `∂n_i/∂pts`.
+
+Fields:
+- `i_prev::Int`, `i_next::Int` — global point indices (1..N) of the polyline
+  predecessor and successor of point `i_local` along the CCW boundary loop.
+- `Jx_prev::SVector{2,Float64}` — `(∂n_x/∂x_{i_prev}, ∂n_x/∂y_{i_prev})`.
+- `Jx_next::SVector{2,Float64}` — `(∂n_x/∂x_{i_next}, ∂n_x/∂y_{i_next})`.
+- `Jy_prev::SVector{2,Float64}` — `(∂n_y/∂x_{i_prev}, ∂n_y/∂y_{i_prev})`.
+- `Jy_next::SVector{2,Float64}` — `(∂n_y/∂x_{i_next}, ∂n_y/∂y_{i_next})`.
+
+By construction `Jx_prev = -Jx_next` and `Jy_prev = -Jy_next`; both are stored
+for clarity (8 floats per Neumann point — negligible).
+"""
+struct NormalJacobian
+    i_prev::Int
+    i_next::Int
+    Jx_prev::SVector{2,Float64}
+    Jx_next::SVector{2,Float64}
+    Jy_prev::SVector{2,Float64}
+    Jy_next::SVector{2,Float64}
+end
+
+"""
+    polyline_normals(pts_flat, boundary_loop, neumann_loop_pos)
+        -> (normals::Vector{SVector{2,Float64}},
+            jacobians::Vector{NormalJacobian})
+
+Compute outward normals and their sparse Jacobians at Neumann points along
+a closed CCW polyline.
+
+Each Neumann point's normal is `n_i = R(-π/2) · normalize(p_{next} - p_{prev})`
+where `(p_prev, p_next)` are the polyline neighbors taken from `boundary_loop`
+(indices wrap mod the loop length).
+
+Arguments:
+- `pts_flat`: flat coordinate vector `[x_1, y_1, …, x_N, y_N]`.
+- `boundary_loop`: vector of global indices (1..N) listing polyline vertices
+  in CCW order. Must be a closed loop (last element connects back to first).
+- `neumann_loop_pos`: for each Neumann point `i_local` (1..n_neu),
+  `neumann_loop_pos[i_local] = k` such that `boundary_loop[k]` is that point's
+  global index. Lets us recover prev/next from the loop without scanning.
+
+Returns `(normals, jacobians)`, each of length `n_neu = length(neumann_loop_pos)`.
+
+Derivatives (with `d = p_{next} - p_{prev}`, `ℓ = |d|`, `t = d/ℓ`):
+
+    ∂n_x/∂d = (-t_x·t_y/ℓ,  t_x²/ℓ )
+    ∂n_y/∂d = (-t_y²/ℓ,     t_x·t_y/ℓ)
+
+then `∂n/∂p_{next} = +∂n/∂d`, `∂n/∂p_{prev} = -∂n/∂d`.
+"""
+function polyline_normals(
+    pts_flat::AbstractVector{Float64},
+    boundary_loop::AbstractVector{Int},
+    neumann_loop_pos::AbstractVector{Int},
+)
+    n_loop = length(boundary_loop)
+    n_neu = length(neumann_loop_pos)
+    normals = Vector{SVector{2,Float64}}(undef, n_neu)
+    jacobians = Vector{NormalJacobian}(undef, n_neu)
+
+    @inbounds for i_local in 1:n_neu
+        k = neumann_loop_pos[i_local]
+        k_prev = mod1(k - 1, n_loop)
+        k_next = mod1(k + 1, n_loop)
+        ip = boundary_loop[k_prev]
+        in_ = boundary_loop[k_next]
+
+        dx = pts_flat[2in_ - 1] - pts_flat[2ip - 1]
+        dy = pts_flat[2in_]     - pts_flat[2ip]
+        ℓ = sqrt(dx * dx + dy * dy)
+        ℓ > 0.0 || error("polyline_normals: zero-length edge at Neumann $i_local")
+        tx = dx / ℓ
+        ty = dy / ℓ
+
+        # n = (t_y, -t_x)
+        normals[i_local] = SVector{2,Float64}(ty, -tx)
+
+        # ∂n/∂d (then multiply by ±1 for next/prev)
+        dnx_dx = -tx * ty / ℓ
+        dnx_dy = (tx * tx) / ℓ
+        dny_dx = -(ty * ty) / ℓ
+        dny_dy = tx * ty / ℓ
+
+        Jx_next = SVector{2,Float64}( dnx_dx,  dnx_dy)
+        Jx_prev = SVector{2,Float64}(-dnx_dx, -dnx_dy)
+        Jy_next = SVector{2,Float64}( dny_dx,  dny_dy)
+        Jy_prev = SVector{2,Float64}(-dny_dx, -dny_dy)
+
+        jacobians[i_local] = NormalJacobian(ip, in_, Jx_prev, Jx_next, Jy_prev, Jy_next)
+    end
+
+    return normals, jacobians
+end
+
+"""
+    update_traction_coeffs!(layout::TractionLayout, normals, λstar, μ)
+
+Rebuild `layout.coeffs` in place from a fresh set of per-Neumann-point normals.
+Mirrors the coefficient block in `build_traction_layout` exactly, but does not
+touch any other field. Use this each iteration when normals are live (Phase D
+Level 2). No-op-equivalent if normals are unchanged.
+"""
+function update_traction_coeffs!(
+    layout::TractionLayout,
+    normals::AbstractVector{<:AbstractVector{Float64}},
+    λstar::Real,
+    μ::Real,
+)
+    M = layout.M
+    @assert M == 2
+    n_neu = length(layout.rows) ÷ 2
+    @assert length(normals) == n_neu
+
+    @inbounds for i_local in 1:n_neu
+        nx = normals[i_local][1]
+        ny = normals[i_local][2]
+        rx = 2 * i_local - 1
+        ry = 2 * i_local
+
+        # x-equation: pairs of (u-col, v-col)
+        ptr0 = layout.col_ptr[rx]
+        ptr1 = layout.col_ptr[rx + 1] - 1
+        for p in ptr0:ptr1
+            is_u_col = ((p - ptr0) & 1) == 0
+            base = (p - 1) * M
+            if is_u_col
+                layout.coeffs[base + 1] = nx * (λstar + 2μ)
+                layout.coeffs[base + 2] = ny * μ
+            else
+                layout.coeffs[base + 1] = ny * μ
+                layout.coeffs[base + 2] = nx * λstar
+            end
+        end
+
+        # y-equation
+        ptr0 = layout.col_ptr[ry]
+        ptr1 = layout.col_ptr[ry + 1] - 1
+        for p in ptr0:ptr1
+            is_u_col = ((p - ptr0) & 1) == 0
+            base = (p - 1) * M
+            if is_u_col
+                layout.coeffs[base + 1] = ny * λstar
+                layout.coeffs[base + 2] = nx * μ
+            else
+                layout.coeffs[base + 1] = nx * μ
+                layout.coeffs[base + 2] = ny * (λstar + 2μ)
+            end
+        end
+    end
+    return nothing
+end
+
+"""
+    extract_normal_sensitivities!(
+        Δpts, layout, η, u,
+        W_dx, W_dy, normal_jacobians, λstar, μ;
+        active = nothing,
+    )
+
+Step 3 (n-side) — accumulate the L2 contribution `-ηᵀ · (∂A/∂n) · (∂n/∂pts) · u`
+into `Δpts`. For each Neumann point `i_local`, both the x- and y-equation rows
+share the same normal `n_i`, so we contract their η×u sums against the row's
+analytic `∂coeff/∂n`, then distribute through the sparse `NormalJacobian`.
+
+The four `∂coeff/∂n` cases (x-eq u-col, x-eq v-col, y-eq u-col, y-eq v-col)
+follow from differentiating the coefficient block in `build_traction_layout`:
+
+    x-eq u-col coeff = (nx·(λ+2μ),  ny·μ)
+    x-eq v-col coeff = (ny·μ,       nx·λ)
+    y-eq u-col coeff = (ny·λ,       nx·μ)
+    y-eq v-col coeff = (nx·μ,       ny·(λ+2μ))
+
+`active`, if provided, is the 2N per-DOF mask used everywhere else (Dirichlet
+rows ⇒ false). Default `nothing` ⇒ all rows contribute (Neumann rows are
+always "active" in the gradient sense).
+"""
+function extract_normal_sensitivities!(
+    Δpts::AbstractVector{Float64},
+    layout::TractionLayout,
+    η::AbstractVector{Float64},
+    u::AbstractVector{Float64},
+    W_dx::SparseMatrixCSC{Float64, Int},
+    W_dy::SparseMatrixCSC{Float64, Int},
+    normal_jacobians::AbstractVector{NormalJacobian},
+    λstar::Real,
+    μ::Real;
+    active::Union{Nothing, AbstractVector{Bool}} = nothing,
+)
+    M = layout.M
+    @assert M == 2
+    c1 = λstar + 2μ
+    c_lambda = λstar
+    c_mu = μ
+
+    n_neu = length(normal_jacobians)
+    @assert length(layout.rows) == 2 * n_neu
+
+    @inbounds for i_local in 1:n_neu
+        rx = 2 * i_local - 1
+        ry = 2 * i_local
+        g_x = layout.rows[rx]
+        g_y = layout.rows[ry]
+        wr  = layout.weight_rows[rx]
+
+        # Gate against active mask (Neumann rows are typically active).
+        active_x = active === nothing || active[g_x]
+        active_y = active === nothing || active[g_y]
+        (active_x || active_y) || continue
+
+        # Per-row n-contractions: r_x[g] = Σ_p (∂coeff_p/∂n_x) · W_m_p · u
+        rx_nx = 0.0; rx_ny = 0.0
+        ry_nx = 0.0; ry_ny = 0.0
+
+        # x-equation walk
+        if active_x
+            ptr0 = layout.col_ptr[rx]
+            ptr1 = layout.col_ptr[rx + 1] - 1
+            for p in ptr0:ptr1
+                a_col = layout.a_cols[p]
+                w_col = layout.w_cols[p]
+                ix = _find_nzval(W_dx, wr, w_col)
+                iy = _find_nzval(W_dy, wr, w_col)
+                wx = ix > 0 ? W_dx.nzval[ix] : 0.0
+                wy = iy > 0 ? W_dy.nzval[iy] : 0.0
+                up = u[a_col]
+                is_u_col = ((p - ptr0) & 1) == 0
+                if is_u_col
+                    # ∂c_dx/∂nx = c1, ∂c_dy/∂ny = μ
+                    rx_nx += c1   * wx * up
+                    rx_ny += c_mu * wy * up
+                else
+                    # ∂c_dx/∂ny = μ, ∂c_dy/∂nx = λ
+                    rx_ny += c_mu     * wx * up
+                    rx_nx += c_lambda * wy * up
+                end
+            end
+        end
+
+        # y-equation walk
+        if active_y
+            ptr0 = layout.col_ptr[ry]
+            ptr1 = layout.col_ptr[ry + 1] - 1
+            for p in ptr0:ptr1
+                a_col = layout.a_cols[p]
+                w_col = layout.w_cols[p]
+                ix = _find_nzval(W_dx, wr, w_col)
+                iy = _find_nzval(W_dy, wr, w_col)
+                wx = ix > 0 ? W_dx.nzval[ix] : 0.0
+                wy = iy > 0 ? W_dy.nzval[iy] : 0.0
+                up = u[a_col]
+                is_u_col = ((p - ptr0) & 1) == 0
+                if is_u_col
+                    # ∂c_dx/∂ny = λ, ∂c_dy/∂nx = μ
+                    ry_ny += c_lambda * wx * up
+                    ry_nx += c_mu     * wy * up
+                else
+                    # ∂c_dx/∂nx = μ, ∂c_dy/∂ny = c1
+                    ry_nx += c_mu * wx * up
+                    ry_ny += c1   * wy * up
+                end
+            end
+        end
+
+        # Sign: dL/dpts = +ηᵀ·∂b/∂pts - ηᵀ·∂A/∂pts·u. We're computing the
+        # second term, which carries a leading minus.
+        eta_x = active_x ? η[g_x] : 0.0
+        eta_y = active_y ? η[g_y] : 0.0
+        S_x = -(eta_x * rx_nx + eta_y * ry_nx)
+        S_y = -(eta_x * rx_ny + eta_y * ry_ny)
+
+        nj = normal_jacobians[i_local]
+        ip = nj.i_prev
+        in_ = nj.i_next
+
+        Δpts[2ip  - 1] += S_x * nj.Jx_prev[1] + S_y * nj.Jy_prev[1]
+        Δpts[2ip]      += S_x * nj.Jx_prev[2] + S_y * nj.Jy_prev[2]
+        Δpts[2in_ - 1] += S_x * nj.Jx_next[1] + S_y * nj.Jy_next[1]
+        Δpts[2in_]     += S_x * nj.Jx_next[2] + S_y * nj.Jy_next[2]
+    end
+    return nothing
+end
+
+# ============================================================================
 # Direct gradient propagation (no Mooncake — calls RBF._pullback_weights!)
 # ============================================================================
 
