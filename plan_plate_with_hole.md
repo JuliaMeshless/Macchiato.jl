@@ -103,8 +103,11 @@ constraint, optimization driver.
 - [~] **Morphing-filter / Helmholtz**: `helmholtz_loop` on the closed hole loop
       (arc-length, physical `r=0.10`) — works as the Sobolev smoother. TODO:
       verify mesh-independence (same shape at two resolutions, same physical `r`).
-- [ ] **Interior deformation** (gap #2): interior cloud currently FIXED ⇒ valid
-      only for modest hole motion; need an RBF morph (∂pts_i/∂pts_b) for big moves.
+- [ ] **Interior deformation** (gap #2) — **⚠ BLOCKING — DO THIS NEXT.** Interior
+      cloud is FIXED ⇒ degrading near-hole stencils + stale `adjl` + a HARD failure
+      (engulfing) once the boundary passes the initial margin. Needs an RBF morph
+      (∂pts_i/∂pts_b) carried into the gradient. **Larger optimization steps make
+      this worse, not better — they are NOT a substitute.**
 - [~] **Constraint** (gap #5): hole area held by exact radial rescale each step
       (works). Projected-gradient form still optional.
 - [x] **Optimizer** (gap #4): hand-rolled adjoint-only descent (normalized step;
@@ -203,13 +206,26 @@ yet — 3D is deferred, see §"3D lift").
    b 0.20→0.230), compliance ↓2.5% over 20 iters @ dx=0.05. Artifacts:
    `plate_with_hole_evolution.gif`, `plate_with_hole_opt_summary.png`.
 
-**Stage-1 polish (next):**
-- **Convergence** — the normalized step is small (`max_move=0.007`) ⇒ ~25% to the
-  circle in 20 iters (correct direction, not converged). Bump `max_move` (~0.02) /
-  `n_iter` (~60), or run `dx=0.03` in the background, to land on the circle.
-- **Mesh-independent Helmholtz `r`** — verify same shape at two resolutions.
-- **Interior deformation** — currently the interior cloud is fixed; add an RBF
-  morph for larger hole motion.
+**NEXT STEP — NON-NEGOTIABLE, must come before anything else: interior deformation
+(mesh motion).** The interior cloud is currently FIXED while the hole boundary
+moves. This is the blocking defect, not a polish item:
+- it injects *growing* numerical error — as the boundary nears the fixed interior,
+  near-hole spacing compresses into anisotropic, ill-conditioned RBF-FD stencils,
+  and the once-computed `adjl` becomes stale (wrong neighbours); AND
+- it **hard-fails** once the boundary passes the initial interior margin (~0.26 in
+  y): interior nodes end up *inside* the hole ⇒ stencils straddle the void ⇒
+  garbage solve. The target circle needs b≈0.283 > 0.26, so it WOULD engulf.
+
+⇒ **Do NOT "converge" by bumping `max_move`/`n_iter`/finer `dx` — a larger step
+just engulfs sooner. That is the opposite of the fix.** First carry the interior
+*with* the boundary: a smooth RBF morph (boundary displacement → interior),
+refresh `adjl`, and add the chain-rule term `Jᵀ_morph · Δpts_interior` to the
+gradient (the morph is a smooth function of the boundary, so it stays
+differentiable). Only *after* this is driving ellipse→circle meaningful.
+
+**Only after the morph:** mesh-independent Helmholtz `r` (same shape at two
+resolutions); proper projected area constraint; then Stage 2 (stress objective +
+boundary-stress recovery); then the 3D lift.
 
 **Then:** Stage 2 (stress objective + boundary-stress recovery — recovery is
 biased near free surfaces, flagged), and the 3D lift (needs a 3D elasticity model;

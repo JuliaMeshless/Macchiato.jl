@@ -2,10 +2,16 @@
 # Plate-with-hole — Stage 1 optimization: compliance minimization, equibiaxial
 # ============================================================================
 # Elliptical hole (2:1) in a square plate under equibiaxial tension. The hole
-# boundary is the design surface; interior is FIXED for now (valid for modest hole
-# motion — RBF morph is the TODO). Expected: ellipse → circle (min-compliance shape
-# at fixed area under equibiaxial load). Status: WORKING (ellipse rounds toward the
-# circle, compliance ↓); see plan_plate_with_hole.md §"CURRENT STATE".
+# boundary is the design surface. Expected: ellipse → circle (min-compliance shape
+# at fixed area under equibiaxial load). Status: WORKING but PARTIAL (ellipse rounds
+# toward the circle, compliance ↓ — directional only); see plan_plate_with_hole.md.
+#
+# ⚠ BLOCKING LIMITATION: the interior cloud is FIXED while the hole moves. This
+# degrades near-hole RBF-FD stencils, and HARD-FAILS (interior nodes fall inside the
+# hole) once the boundary passes the initial margin (~0.26 in y) — so it CANNOT
+# reach the circle (b≈0.283) as-is. The required next step is an RBF interior morph
+# (boundary displacement → interior) carried into the gradient. Do NOT try to
+# converge by increasing max_move/n_iter/dx — a bigger step just engulfs sooner.
 #
 # Solver validated via manufactured-solution Kirsch test (plate_with_hole_kirsch.jl):
 # global L2 stress error 0.62%, K_t = 2.966 vs exact 3.0.
