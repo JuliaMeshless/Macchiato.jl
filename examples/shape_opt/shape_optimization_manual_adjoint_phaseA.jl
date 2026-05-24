@@ -15,7 +15,7 @@
 #   - Rule-build wall time         (cold; warm should be ms after first call)
 # ============================================================================
 using Pkg
-Pkg.activate(@__DIR__)
+Pkg.activate(joinpath(@__DIR__, ".."))
 
 using Macchiato
 using Mooncake

@@ -9,7 +9,7 @@
 #      element-wise to better than 1e-9.
 # ============================================================================
 using Pkg
-Pkg.activate(@__DIR__)
+Pkg.activate(joinpath(@__DIR__, ".."))
 
 using Macchiato
 using StaticArrays

@@ -16,7 +16,7 @@
 # where I = 2D³/3 is the second moment of area.
 # ============================================================================
 using Pkg
-Pkg.activate(@__DIR__)
+Pkg.activate(joinpath(@__DIR__, ".."))
 
 using Macchiato
 import Macchiato as MM

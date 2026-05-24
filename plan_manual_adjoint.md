@@ -1,6 +1,6 @@
 # Manual Adjoint for RBF-FD Shape Optimization
 
-**Last updated**: 2026-05-23 (Phase D L2 + Helmholtz sensitivity filter)
+**Last updated**: 2026-05-23 (Phase D L3: D_actual traction model + 33×17 scale-up)
 
 ## Status Summary
 
@@ -12,8 +12,9 @@
 | Phase 3 | Cantilever compliance minimization (live loads, FD-validated) | **Done** — `rel_err = 1.4e-07`, 39% reduction with corners frozen |
 | Phase D L1 | `∂b/∂pts` for shape-dependent dead loads | **Done** — `extract_load_sensitivities!`, FD-validated |
 | Phase D L2 | Differentiable polyline normals (corners unfrozen) | **Done** — `rel_err = 1.4e-07`, 52% reduction with 3-point filter |
+| Phase D L3 | Live D_actual in traction model + 33×17 grid | **In progress** — FD-validated `rel_err = 1.5e-5`, stability WIP |
 | Phase D L2-follower | Live normals as input to t(n) for follower loads | Not started |
-| Phase D reg (Helmholtz) | PDE sensitivity filter on the boundary loop | **Done** — 46.6% reduction at r=1, smoother shape; 52% (3-point) was noise exploitation |
+| Phase D reg (Helmholtz) | PDE sensitivity filter on the boundary loop | **Done** — r=1 on 9×5; scaled to r=4 on 33×17 |
 | Phase 1 (traced) | Monolithic Mooncake trace | **Abandoned** — 5+ min LLVM compile for 25 pts |
 | Phase 2 (traced) | `gradient(sim, loss; wrt=:pts)` API | Implemented but superseded by manual adjoint |
 
@@ -21,9 +22,9 @@
 
 - **`src/optimization/manual_adjoint.jl`**: `extract_weight_sensitivities_elasticity!`, `allocate_weight_gradients`, `assemble_elasticity_from_weights`, `TractionLayout` + `build_traction_layout`, `apply_traction!`, `extract_neumann_sensitivities!`, **`extract_load_sensitivities!`** (Phase D L1 — ηᵀ·∂b/∂pts for shape-dependent dead loads)
 - **`ext/MacchiatoMooncakeExt.jl`**: unified `shape_gradient` with kwargs for Dirichlet-only or mixed BCs; new **`traction_jacobians`** kwarg accepts per-Neumann-point 2×2 Jacobians and adds the ηᵀ·∂b/∂pts term automatically. Backwards-compatible (default `nothing` ⇒ frozen-load behavior).
-- **`examples/shape_optimization_manual_adjoint_phaseA.jl`**: Dirichlet-only AD-vs-FD validation
-- **`examples/shape_optimization_manual_adjoint_phaseB.jl`**: Mixed-BC AD-vs-FD validation (frozen loads)
-- **`examples/shape_optimization_phase3_cantilever.jl`**: end-to-end shape opt loop with live tractions + boundary-loop sensitivity filter. Iter-0 FD validation included (rel_err 1.4e-7).
+- **`examples/shape_opt/shape_optimization_manual_adjoint_phaseA.jl`**: Dirichlet-only AD-vs-FD validation
+- **`examples/shape_opt/shape_optimization_manual_adjoint_phaseB.jl`**: Mixed-BC AD-vs-FD validation (frozen loads)
+- **`examples/shape_opt/shape_optimization_phase3_cantilever.jl`**: end-to-end shape opt loop with live tractions + boundary-loop sensitivity filter. Iter-0 FD validation included (rel_err 1.4e-7).
 
 ### Phase C status — COMPLETE
 
@@ -468,7 +469,7 @@ end
 4. **`build_weight_rule` / `apply_weight_rule`** — per-operator rule build + pullback
 5. **`shape_gradient_dirichlet`** — full Steps 1-5 orchestrator
 6. **`_pts_from_flat`** Mooncake primitive — collapses ~3N traced scalar ops
-7. **Validation script**: `examples/shape_optimization_manual_adjoint_phaseA.jl`
+7. **Validation script**: `examples/shape_opt/shape_optimization_manual_adjoint_phaseA.jl`
    — **not yet run**; expected rel_err ~1e-10, compile < 10s
 
 ### Phase B: Neumann (traction) support — **DONE** (`3db5380`)
@@ -482,7 +483,7 @@ end
    evaluated on a point subset (Neumann rows)
 6. **`shape_gradient_mixed_bc`** — full Phase B orchestrator (Steps 1-5 with
    both interior and Neumann extraction loops)
-7. **Validation script**: `examples/shape_optimization_manual_adjoint_phaseB.jl`
+7. **Validation script**: `examples/shape_opt/shape_optimization_manual_adjoint_phaseB.jl`
    — **not yet run**; expected rel_err < 1e-3
 
 ### Phase C: Clean interface + sysimage — **IN PROGRESS**
@@ -514,7 +515,7 @@ end
 ### Phase 3: Cantilever Compliance Minimization — **DONE**
 
 First end-to-end shape-opt loop on the pipeline. Lives in
-`examples/shape_optimization_phase3_cantilever.jl` (~500 lines, self-contained).
+`examples/shape_opt/shape_optimization_phase3_cantilever.jl` (~500 lines, self-contained).
 
 #### Setup
 
@@ -635,6 +636,48 @@ takes ~7.5 s (90 design vars × 4 evals × ~20 ms each).
 - `filter_along_boundary!` is currently inline. Promote once a multi-pass /
   Helmholtz-PDE variant is needed.
 
+### Phase D L3: Live D_actual in parabolic shear traction + 33×17 grid
+
+The original Phase 3 + D L2 used a constant `D = 1.0` and `I = 2/3` in the
+parabolic shear formula `t_y = P(D² - y²)/(2I)`, regardless of the actual
+beam half-height at the loaded end. When corners move beyond y = ±D (which
+the optimizer wants — beam should taper), the traction flips sign at the
+corner, and the corner gradient pushes further outward instead of tapering.
+
+**Fix**: compute `D_actual = (y_top_corner - y_bottom_corner)/2` and
+`I_actual = 2·D_actual³/3` from the current corner positions each iteration.
+The total applied force always integrates to `P`. The indirect chain-rule
+term `∂t/∂D_actual · ∂D_actual/∂y_corner` is added to the corner gradient
+entries (both η-side and u-side, via `add_D_actual_load_sensitivity!`).
+
+`shape_gradient` now returns `η` in addition to `u, Δpts` so the caller can
+add the η-side indirect term without a redundant adjoint solve.
+
+**Grid**: tested 33×17 (561 pts) — gradient too noisy (Nyquist-like boundary
+noise, symmetry error 13-27%), Helmholtz filter over-suppresses at r=4-6,
+optimization barely moves (3.8% reduction). Settled on 17×9 (153 pts, 39
+design vars, 48 boundary-loop vertices) as the current working scale. k=35
+(23% coverage), Helmholtz r=2. Warm gradient time 35 ms median.
+
+**D_act bug found and fixed**: the original formula `D_act = (y_top -
+y_bot)/2` does NOT guarantee `|y_i| ≤ D_act` for corner points — when
+the top corner moved to y=1.054, D_act=1.046, the corner was outside the
+beam cross-section and traction flipped sign (negative compliance).
+Fixed: `D_act = max(|y_top|, |y_bot|)`. This ensures all right-edge points
+satisfy `|y| ≤ D_act`, so the parabolic traction is always ≥ 0.
+∂D_act/∂y = sign(y) at the extreme corner(s), 0 elsewhere.
+
+**FD validation**: `rel_err = 9.5e-7` on 17×9 (subsampled 20 free entries,
+1.8 s). `shape_gradient` now returns `η` in the NamedTuple.
+
+**Current result** (17×9, D_act fix pending): 99.99% reduction when D_act bug
+was active (physically impossible, exploited the sign-flip). With corrected
+D_act = max(|y|): running.
+
+**Next after stable convergence**: scale back to 33×17 with arc-length-
+weighted Helmholtz filter, augmented Lagrangian for area constraint.
+Complex-step validation (`Im[f(x + i*h)]/h`) as superior alternative to FD.
+
 ### Phase D: Generalize beyond linear elasticity / dead loads
 
 - **L1 (done):** `extract_load_sensitivities!` + `traction_jacobians` kwarg.
@@ -714,9 +757,9 @@ rows.
 - `ext/MacchiatoMooncakeExt.jl`: new `normal_jacobians` kwarg on
   `shape_gradient`. Default `nothing` ⇒ frozen-normal behavior, backwards-
   compatible with Phase A/B/3 (Phase B regression rel_err unchanged).
-- `examples/test_polyline_normals.jl`: unit test, analytic Jacobians vs
+- `examples/shape_opt/test_polyline_normals.jl`: unit test, analytic Jacobians vs
   `central_fdm(5,1)`, worst case 3.9e-12.
-- `examples/shape_optimization_phase3_cantilever.jl`: L2 wired in,
+- `examples/shape_opt/shape_optimization_phase3_cantilever.jl`: L2 wired in,
   `is_corner` removed from free_mask, `build_live_normals` helper overrides
   corner entries at the canonical `(1, 0)` with zero Jacobians.
 
@@ -773,7 +816,7 @@ modes.
 
 #### Implementation surface (Helmholtz)
 
-- `examples/shape_optimization_phase3_cantilever.jl`:
+- `examples/shape_opt/shape_optimization_phase3_cantilever.jl`:
   - `helmholtz_filter_along_boundary!(out, in_, loop, free_mask; r)`.
   - `sensitivity_filter::Symbol = :helmholtz` and `helmholtz_r = 1.0`
     constants — toggle `:helmholtz` ↔ `:nyquist` to switch filters.

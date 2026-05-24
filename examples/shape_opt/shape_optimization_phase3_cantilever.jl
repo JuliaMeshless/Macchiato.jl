@@ -34,7 +34,7 @@
 #      variables.
 # ============================================================================
 using Pkg
-Pkg.activate(@__DIR__)
+Pkg.activate(joinpath(@__DIR__, ".."))
 
 using Macchiato
 using Mooncake
@@ -66,7 +66,7 @@ model    = LinearElasticity(E = E_val, ν = ν_val)
 # Reference grid + BC classification (matches Phase B)
 # ============================================================================
 
-const nx, ny = 9, 5
+const nx, ny = 17, 9
 xs0 = range(0.0, L; length = nx)
 ys0 = range(-D, D; length = ny)
 points0 = [SVector{2}(x, y) for x in xs0 for y in ys0]
@@ -138,40 +138,87 @@ function normal_of(p)
     end
 end
 
-# Classify Neumann points by *index* once at init. This is critical: using
-# spatial predicates (`p[1] ≈ L`) inside the live-load loop is fragile —
-# even a 1e-4 FD perturbation of a right-edge x-coord makes `is_right(p)`
-# return false, which discontinuously drops the traction and corrupts the
-# FD reference gradient. Index-based classification stays stable under any
-# perturbation we ever apply.
+# Identify right-edge Neumann points by local index (stable under perturbation).
 const neumann_is_right_idx = [is_right(points0[i]) for i in neumann_idx]
+const right_edge_locals = findall(neumann_is_right_idx)
 
-# Traction as a function of (local Neumann index, current point coords). The
-# right-edge parabolic shear depends on the y-coord; all other Neumann points
-# carry zero traction regardless of location.
-function traction_at(i_local::Int, p)
+# Corners are the right-edge points with extreme y. Index-based (robust).
+const corner_neumann_local = [i_local for i_local in right_edge_locals
+    if points0[neumann_idx[i_local]][2] ≈  D ||
+       points0[neumann_idx[i_local]][2] ≈ -D]
+@assert length(corner_neumann_local) == 2
+const top_corner_local    = points0[neumann_idx[corner_neumann_local[1]]][2] > 0 ?
+                            corner_neumann_local[1] : corner_neumann_local[2]
+const bottom_corner_local = points0[neumann_idx[corner_neumann_local[1]]][2] < 0 ?
+                            corner_neumann_local[1] : corner_neumann_local[2]
+
+# Compute actual beam half-height from right-edge extreme y-values.
+# Using D_act = max(|y_top|, |y_bot|) guarantees |y_i| ≤ D_act for all right-edge
+# points, so the parabolic traction t_y = P(D_act² - y²)/(2I_act) is always ≥ 0.
+function get_beam_dims(pts_flat::Vector{Float64})
+    y_top = pts_flat[2 * neumann_idx[top_corner_local]]
+    y_bot = pts_flat[2 * neumann_idx[bottom_corner_local]]
+    D_act = max(abs(y_top), abs(y_bot))
+    D_act = max(D_act, D / 2)      # prevent traction 1/D singularity as beam tapers
+    I_act = 2 * D_act^3 / 3
+    return D_act, I_act
+end
+
+# Traction as a function of (local Neumann index, current point coords, beam dims).
+# Right-edge parabolic shear depends on y-coord AND the actual beam height.
+function traction_at(i_local::Int, p, D_act::Float64, I_act::Float64)
     if neumann_is_right_idx[i_local]
-        return SVector{2}(0.0, P * (D^2 - p[2]^2) / (2 * I_val))
+        return SVector{2}(0.0, P * (D_act^2 - p[2]^2) / (2 * I_act))
     else
         return SVector{2}(0.0, 0.0)
     end
 end
 
-# 2×2 Jacobian J[a, b] = ∂t_a / ∂p_b. Only right edge contributes (∂ty/∂y).
-function traction_jacobian_at(i_local::Int, p)
+# 2×2 Jacobian ∂t_a/∂p_b — direct (own-point) terms only. The indirect
+# ∂t/∂D_actual · ∂D_actual/∂y_corner contribution is added separately via
+# `add_D_actual_load_sensitivity!`.
+function traction_jacobian_at(i_local::Int, p, D_act::Float64, I_act::Float64)
     if neumann_is_right_idx[i_local]
-        return SMatrix{2, 2, Float64}(0.0, 0.0, 0.0, -P * p[2] / I_val)
+        return SMatrix{2, 2, Float64}(0.0, 0.0, 0.0, -P * p[2] / I_act)
     else
         return SMatrix{2, 2, Float64}(0.0, 0.0, 0.0, 0.0)
     end
+end
+
+# Indirect sensitivity: ∂L/∂D_actual · ∂D_actual/∂y_corner. Since
+# D_act = max(|y_top|, |y_bot|), ∂D_actual/∂y = sign(y) if |y| is the max, else 0.
+function add_D_actual_load_sensitivity!(grad::Vector{Float64}, pts_flat::Vector{Float64},
+                                         coeffs::Vector{Float64})
+    D_act, I_act = get_beam_dims(pts_flat)
+    y_top = pts_flat[2 * neumann_idx[top_corner_local]]
+    y_bot = pts_flat[2 * neumann_idx[bottom_corner_local]]
+    sum_dD = 0.0
+    @inbounds for i_local in right_edge_locals
+        g = neumann_idx[i_local]
+        y_i = pts_flat[2g]
+        # ∂t_y/∂D = (3P/4) * (-1/D² + 3y²/D⁴)
+        dty_dD = (3P / 4) * (-1 / D_act^2 + 3 * y_i^2 / D_act^4)
+        sum_dD += coeffs[g + N] * dty_dD
+    end
+    # ∂D_act/∂y = sign(y) if |y| == D_act (the extreme corner), else 0.
+    if abs(y_top) >= abs(y_bot)
+        grad[2 * neumann_idx[top_corner_local]] += sum_dD * sign(y_top)
+    end
+    if abs(y_bot) >= abs(y_top)
+        grad[2 * neumann_idx[bottom_corner_local]] += sum_dD * sign(y_bot)
+    end
+    return nothing
 end
 
 # Reference normals — only used to seed `build_traction_layout`. The actual
 # coefficients in `traction_layout.coeffs` are overwritten each iteration by
 # `update_traction_coeffs!` once live (polyline) normals are available.
 neumann_normals   = [normal_of(points0[i])             for i in neumann_idx]
-neumann_tractions = [traction_at(i, points0[neumann_idx[i]])
+neumann_tractions = [traction_at(i, points0[neumann_idx[i]], 1.0, 2/3)
                      for i in eachindex(neumann_idx)]
+
+println("Corner Neumann local indices (frozen normal (1, 0)): $corner_neumann_local")
+println("  top_corner_local=$top_corner_local  bottom_corner_local=$bottom_corner_local")
 
 # ============================================================================
 # RBF setup — connectivity is frozen for the whole loop
@@ -228,22 +275,9 @@ println("Boundary polygon vertices: $(length(boundary_loop))  (expected $(2*(nx-
 const _loop_pos_of = Dict(g => k for (k, g) in enumerate(boundary_loop))
 const neumann_loop_pos = [_loop_pos_of[i] for i in neumann_idx]
 
-# Identify corners by *index* (robust to corner y-coord motion). Corners need
-# special handling because the polyline-tangent (chord) normal at a sharp 90°
-# corner is length-weighted, not the beam-natural σ·n_right = 0 condition.
-# We freeze corner normals at (1, 0) — the canonical right-edge convention
-# used by Phase B — and zero out their NormalJacobians so the L2 path
-# contributes nothing at corners themselves. L2 still flows through corners
-# via the chord-formula normals of their *adjacent* boundary-loop neighbors
-# (edge midpoints whose chord touches the corner), which is the geometric
-# information the gradient needs.
-const corner_neumann_local = [i_local for i_local in eachindex(neumann_idx)
-    if is_right(points0[neumann_idx[i_local]]) &&
-       (points0[neumann_idx[i_local]][2] ≈  D ||
-        points0[neumann_idx[i_local]][2] ≈ -D)]
-println("Corner Neumann indices (frozen normal (1, 0)): $corner_neumann_local")
-
-# Build live normals + Jacobians, overriding corners with the frozen normal.
+# Build live normals + Jacobians, overriding corners with the frozen normal (1,0).
+# Corner coordinates remain free design variables; L2 sensitivity at corners
+# flows through the chord-formula normals of adjacent edge midpoints.
 function build_live_normals(pts_flat::Vector{Float64})
     normals, jacs = polyline_normals(pts_flat, boundary_loop, neumann_loop_pos)
     zero_v = SVector{2,Float64}(0.0, 0.0)
@@ -328,7 +362,7 @@ V_target = V0           # keep area at the reference value
 # Penalty parameter — scaled so the gradient magnitudes are commensurate at iter 0.
 # Order of magnitude: ‖∇C‖ ~ shape_gradient norm at iter 0; ‖∇Vpen‖ ~ 2ρ·(V-V₀)·‖∇V‖.
 # At iter 0 V=V₀ so penalty=0 but its slope still matters once we step.
-const ρ_pen = 1.0e3
+const ρ_pen = 2.0e3   # proportional to ~39 design vars (was 1e3 for 19)
 
 println()
 println("Reference state")
@@ -347,12 +381,12 @@ println(@sprintf("  area V₀       = %.6e   (target = %.6e)", V0, V_target))
 
 function update_traction_loads!(layout::TractionLayout,
                                   pts_flat::Vector{Float64},
-                                  neumann_ids::Vector{Int},
-                                  traction_fn)
+                                  neumann_ids::Vector{Int})
+    D_act, I_act = get_beam_dims(pts_flat)
     @inbounds for i_local in eachindex(neumann_ids)
         g = neumann_ids[i_local]
         p = SVector{2}(pts_flat[2g - 1], pts_flat[2g])
-        t = traction_fn(i_local, p)
+        t = traction_at(i_local, p, D_act, I_act)
         layout.b_vals[2i_local - 1] = t[1]
         layout.b_vals[2i_local]     = t[2]
     end
@@ -360,11 +394,13 @@ function update_traction_loads!(layout::TractionLayout,
 end
 
 function build_traction_jacobians(pts_flat::Vector{Float64},
-                                   neumann_ids::Vector{Int},
-                                   jac_fn)
+                                   neumann_ids::Vector{Int})
+    D_act, I_act = get_beam_dims(pts_flat)
     return [
-        jac_fn(i_local, SVector{2}(pts_flat[2neumann_ids[i_local] - 1],
-                                     pts_flat[2neumann_ids[i_local]]))
+        traction_jacobian_at(i_local,
+            SVector{2}(pts_flat[2neumann_ids[i_local] - 1],
+                       pts_flat[2neumann_ids[i_local]]),
+            D_act, I_act)
         for i_local in eachindex(neumann_ids)
     ]
 end
@@ -376,7 +412,7 @@ end
 # are frozen at (1, 0) via `build_live_normals`; their NormalJacobians are
 # zeroed so the L2 path contributes nothing at corners themselves.
 function update_layout_for!(pts_flat::Vector{Float64})
-    update_traction_loads!(traction_layout, pts_flat, neumann_idx, traction_at)
+    update_traction_loads!(traction_layout, pts_flat, neumann_idx)
     normals_live, jacs_live = build_live_normals(pts_flat)
     update_traction_coeffs!(traction_layout, normals_live, λstar, μ)
     return jacs_live
@@ -455,7 +491,7 @@ function helmholtz_filter_along_boundary!(out::Vector{Float64},
     return out
 end
 
-const helmholtz_r = 1.0
+const helmholtz_r = 2.0   # scaled for 48 boundary vertices (was 1.0 on 9×5)
 # Choose the filter via constant — set to :nyquist (single-pass 3-point) or
 # :helmholtz (PDE filter). The Phase D L2 + Helmholtz run uses :helmholtz.
 const smoothing_α = 0.25
@@ -475,10 +511,7 @@ end
 
 function total_gradient!(grad::Vector{Float64}, pts_flat::Vector{Float64})
     normal_jacs = update_layout_for!(pts_flat)
-    jacobians = build_traction_jacobians(pts_flat, neumann_idx, traction_jacobian_at)
-    # ∂L/∂u = b at the *current* shape. Compute it cheaply (no PDE solve):
-    # zero everywhere except Dirichlet rows (= dirichlet_vals) and Neumann
-    # rows (= layout.b_vals).
+    jacobians = build_traction_jacobians(pts_flat, neumann_idx)
     b_now = zeros(2N)
     @inbounds for (i, d) in enumerate(dirichlet_dofs)
         b_now[d] = dirichlet_vals[i]
@@ -499,10 +532,12 @@ function total_gradient!(grad::Vector{Float64}, pts_flat::Vector{Float64})
         normal_jacobians   = normal_jacs,
     )
     grad .= result.Δpts
-    # Explicit ∂L/∂b·∂b/∂pts contribution. For compliance L = bᵀu, ∂L/∂b = u,
-    # so this is uᵀ·∂b/∂pts — same sparse VJP as inside shape_gradient but
-    # with u in place of η (which handled the implicit ηᵀ·∂b/∂pts piece).
+    # Explicit ∂L/∂b·∂b/∂pts: uᵀ·∂b/∂pts (direct own-point terms).
     extract_load_sensitivities!(grad, traction_layout, result.u, neumann_idx, jacobians)
+    # Indirect ∂b/∂D_actual · ∂D_actual/∂y_corner: both η-side and u-side.
+    add_D_actual_load_sensitivity!(grad, pts_flat, result.η)       # η-side
+    add_D_actual_load_sensitivity!(grad, pts_flat, result.u)       # u-side
+
     g_area = similar(grad)
     polygon_area_grad!(g_area, pts_flat, boundary_loop)
     V = polygon_area(pts_flat, boundary_loop)
@@ -535,7 +570,7 @@ end
 
 function grad_compl_only_ad(pts_flat::Vector{Float64})
     normal_jacs = update_layout_for!(pts_flat)
-    jacobians = build_traction_jacobians(pts_flat, neumann_idx, traction_jacobian_at)
+    jacobians = build_traction_jacobians(pts_flat, neumann_idx)
     b_now = zeros(2N)
     @inbounds for (i, d) in enumerate(dirichlet_dofs)
         b_now[d] = dirichlet_vals[i]
@@ -558,37 +593,55 @@ function grad_compl_only_ad(pts_flat::Vector{Float64})
     g = copy(result.Δpts)
     # Explicit u-side b contribution (∂L/∂b = u for compliance).
     extract_load_sensitivities!(g, traction_layout, result.u, neumann_idx, jacobians)
+    # Indirect D_actual contributions.
+    add_D_actual_load_sensitivity!(g, pts_flat, result.η)
+    add_D_actual_load_sensitivity!(g, pts_flat, result.u)
     return g
 end
+
+# ── Setup-only mode ─────────────────────────────────────────────────────────
+# When a driver sets `MACCHIATO_SETUP_ONLY = true` before `include`ing this file
+# (e.g. examples/test_fd_edge_noise.jl), everything above is defined — grid, BCs,
+# layout, forward_solve, loss_compl_only / grad_compl_only_ad, reference solve —
+# but the runtime FD validation, iter-0 diagnostic, and 40-iter optimization loop
+# below are skipped. A top-level `if` at global scope introduces no new scope, so
+# every `const`/`function`/global inside it stays top-level. Default (flag unset
+# or false): the full script runs exactly as before.
+if !(@isdefined(MACCHIATO_SETUP_ONLY) && MACCHIATO_SETUP_ONLY === true)
 
 println()
 println("Validating compliance gradient (AD with ∂b/∂pts vs central FD)...")
 grad_ad_check = grad_compl_only_ad(pts_flat)
-t_fd_check = @elapsed begin
-    grad_fd_check = FiniteDifferences.grad(
-        FiniteDifferences.central_fdm(5, 1), loss_compl_only, pts_flat,
-    )[1]
+# FD on a subset of free entries (full 2N=1122 FD takes >15 min)
+free_entries = findall(free_mask)
+n_probe = min(20, n_free)
+fd_probe = free_entries[1:div(n_free, n_probe):end][1:n_probe]
+fd_pert = zeros(2N)
+J_fd = zeros(length(fd_probe))
+t_fd_check = @elapsed for (k, j) in enumerate(fd_probe)
+    fd_pert[j] = 1e-4
+    Lp = loss_compl_only(pts_flat .+ fd_pert)
+    Lm = loss_compl_only(pts_flat .- fd_pert)
+    J_fd[k] = (Lp - Lm) / (2e-4)
+    fd_pert[j] = 0.0
 end
-rel_err = norm(grad_ad_check .- grad_fd_check) / norm(grad_fd_check)
+g_ad_probe = grad_ad_check[fd_probe]
+rel_err = norm(g_ad_probe .- J_fd) / max(norm(J_fd), 1e-10)
 println(@sprintf("  ‖grad_AD - grad_FD‖ / ‖grad_FD‖ = %.4e   (FD took %.2f s)",
                   rel_err, t_fd_check))
 if rel_err < 1.0e-4
     println("  PASS — ∂b/∂pts contribution is correct.")
 else
     @warn "AD/FD mismatch — gradient implementation may be off ($rel_err)"
-    diff = grad_ad_check .- grad_fd_check
-    perm = sortperm(abs.(diff); rev = true)
+    gdiff = grad_ad_check .- grad_fd_check
+    perm = sortperm(abs.(gdiff); rev = true)
     println("  Top 10 component mismatches:")
     for k in 1:min(10, length(perm))
         i = perm[k]
         which = i > N ? "v" : "u"
         pt    = i > N ? i - N : i
-        # Reconstruct (x, y) from pts_flat via the global flat index. The flat
-        # index 2k-1, 2k are the x, y of point k. But i here is in the
-        # *block-stacked* convention used by η/u (1:N is x-eq, N+1:2N is y-eq).
-        # For diagnosis, just show which DOF this corresponds to.
         println(@sprintf("    DOF %3d (%s_%d):  AD = %+10.3e   FD = %+10.3e   Δ = %+10.3e",
-                          i, which, pt, grad_ad_check[i], grad_fd_check[i], diff[i]))
+                          i, which, pt, grad_ad_check[i], grad_fd_check[i], gdiff[i]))
     end
 end
 update_layout_for!(pts_flat)   # restore reference layout after FD probe
@@ -616,7 +669,7 @@ let
     # Re-derive the unfiltered version by inlining the gradient build but
     # skipping the filter+mask step.
     normal_jacs = update_layout_for!(pts_flat)
-    jacobians = build_traction_jacobians(pts_flat, neumann_idx, traction_jacobian_at)
+    jacobians = build_traction_jacobians(pts_flat, neumann_idx)
     b_now = zeros(2N)
     for (i, d) in enumerate(dirichlet_dofs); b_now[d] = dirichlet_vals[i]; end
     for k in eachindex(traction_layout.rows); b_now[traction_layout.rows[k]] = traction_layout.b_vals[k]; end
@@ -630,6 +683,8 @@ let
                         normal_jacobians = normal_jacs)
     grad_unf = copy(res.Δpts)
     extract_load_sensitivities!(grad_unf, traction_layout, res.u, neumann_idx, jacobians)
+    add_D_actual_load_sensitivity!(grad_unf, pts_flat, res.η)
+    add_D_actual_load_sensitivity!(grad_unf, pts_flat, res.u)
     g_area = similar(grad_unf); polygon_area_grad!(g_area, pts_flat, boundary_loop)
     V_now = polygon_area(pts_flat, boundary_loop)
     @. grad_unf += 2 * ρ_pen * (V_now - V_target) * g_area
@@ -683,7 +738,7 @@ end
 # ============================================================================
 
 max_iter   = 40
-α_init     = 1.0e-7
+α_init     = 5.0e-7
 c_armijo   = 1.0e-4
 β_backtrack = 0.5
 max_ls_steps = 25
@@ -741,9 +796,15 @@ let α = α_init
             for ls in 1:max_ls_steps
                 @. pts_try = pts_flat + α_try * p
                 L_new = total_loss(pts_try)
+                # Reject steps that create ill-conditioned systems (compliance < 0).
                 if L_new ≤ L_cur + c_armijo * α_try * descent_slope
-                    accepted = true
-                    break
+                    sol_try = forward_solve(pts_try)
+                    C_try   = compliance(sol_try.u, sol_try.b)
+                    if C_try >= compl_floor && C_try >= 0 &&
+                       norm(sol_try.u) ≤ u_norm_max
+                        accepted = true
+                        break
+                    end
                 end
                 α_try *= β_backtrack
             end
@@ -762,12 +823,19 @@ let α = α_init
         println(@sprintf("%4d  %12.4e  %12.4e  %12.4e  %12.4e  %8.2e  %8.2f",
                           iter, L_cur, hist_compl[end], info.V, gnorm, α_try, 1e3 * t_ls))
 
-        # Physical guardrail — bail if compliance turns negative or u blows up.
+        # Physical guardrail — restore last valid state if compliance went negative
+        # or u blew up. This can happen when penalty method allows area drift that
+        # eventually corrupts the linear system.
         sol_check = forward_solve(pts_flat)
         C_check   = compliance(sol_check.u, sol_check.b)
         if C_check < compl_floor || C_check < 0 || norm(sol_check.u) > u_norm_max
-            println(@sprintf("  stop: physical guardrail tripped (C=%.3e, ‖u‖=%.3e)",
-                              C_check, norm(sol_check.u)))
+            # Restore previous valid state
+            pts_flat .= pts_flat .- α_try .* p
+            update_layout_for!(pts_flat)
+            sol_check = forward_solve(pts_flat)
+            C_check = compliance(sol_check.u, sol_check.b)
+            println(@sprintf("%4d  %12.4e  %12.4e  %12.4e  %12.4e  (halt: guardrail, restored)",
+                              iter, L_cur, C_check, info.V, gnorm))
             break
         end
         # Natural convergence — gradient norm fell to a tiny fraction of init.
@@ -872,3 +940,5 @@ fig_path = joinpath(@__DIR__, "phase3_cantilever_result.png")
 save(fig_path, fig)
 println()
 println("Figure saved: $fig_path")
+
+end  # MACCHIATO_SETUP_ONLY guard (opened just after grad_compl_only_ad)

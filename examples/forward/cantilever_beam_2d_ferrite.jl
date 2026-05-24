@@ -19,7 +19,7 @@
 # Mesh: 80×20 elements (dx ≈ 0.1, comparable to meshless spacing)
 # ============================================================================
 using Pkg
-Pkg.activate(@__DIR__)
+Pkg.activate(joinpath(@__DIR__, ".."))
 
 using Ferrite
 using SparseArrays: nonzeros, nnz

@@ -14,7 +14,7 @@
 # Validates Phase B's manual adjoint vs central FD on full Δpts vector.
 # ============================================================================
 using Pkg
-Pkg.activate(@__DIR__)
+Pkg.activate(joinpath(@__DIR__, ".."))
 
 using Macchiato
 using Mooncake

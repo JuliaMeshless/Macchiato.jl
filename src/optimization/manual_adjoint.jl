@@ -117,9 +117,9 @@ without rebuilding. Outside Mooncake's trace ⇒ we can use sparse-sparse `+`
 and `hvcat` freely.
 """
 function assemble_elasticity_from_weights(
-    W_d2x::SparseMatrixCSC{Float64, Int},
-    W_d2y::SparseMatrixCSC{Float64, Int},
-    W_d2xy::SparseMatrixCSC{Float64, Int},
+    W_d2x::SparseMatrixCSC{<:Number, <:Integer},
+    W_d2y::SparseMatrixCSC{<:Number, <:Integer},
+    W_d2xy::SparseMatrixCSC{<:Number, <:Integer},
     N::Int,
     λstar::Real,
     μ::Real,
@@ -296,11 +296,11 @@ the corresponding entries of `b` to `layout.b_vals`. Non-traced — Phase B's
 forward pass runs this outside any Mooncake context.
 """
 function apply_traction!(
-    A::SparseMatrixCSC{Float64, Int},
-    b::Vector{Float64},
+    A::SparseMatrixCSC{<:Number, <:Integer},
+    b::AbstractVector{<:Number},
     layout::TractionLayout,
-    W_dx::SparseMatrixCSC{Float64, Int},
-    W_dy::SparseMatrixCSC{Float64, Int},
+    W_dx::SparseMatrixCSC{<:Number, <:Integer},
+    W_dy::SparseMatrixCSC{<:Number, <:Integer},
 )
     M = layout.M
     @assert M == 2 "apply_traction! assumes (W_dx, W_dy) only"

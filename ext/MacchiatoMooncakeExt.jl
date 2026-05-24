@@ -134,7 +134,7 @@ function Macchiato.shape_gradient(
                                       active = active)
     end
 
-    return (u = u, Δpts = Δpts)
+    return (u = u, Δpts = Δpts, η = η)
 end
 
 end # module
