@@ -103,11 +103,18 @@ constraint, optimization driver.
 - [~] **Morphing-filter / Helmholtz**: `helmholtz_loop` on the closed hole loop
       (arc-length, physical `r=0.10`) — works as the Sobolev smoother. TODO:
       verify mesh-independence (same shape at two resolutions, same physical `r`).
-- [ ] **Interior deformation** (gap #2) — **⚠ BLOCKING — DO THIS NEXT.** Interior
-      cloud is FIXED ⇒ degrading near-hole stencils + stale `adjl` + a HARD failure
-      (engulfing) once the boundary passes the initial margin. Needs an RBF morph
-      (∂pts_i/∂pts_b) carried into the gradient. **Larger optimization steps make
-      this worse, not better — they are NOT a substitute.**
+- [~] **Interior deformation** (gap #2) — **IN PROGRESS (2026-05-26), Option A, fix
+      applied but NOT yet validated.** Instead of a differentiable RBF morph we took
+      the user's steer ("keep it simple, use WTP"): **re-space the interior each step
+      with WTP's `SpacingEquilibriumForce`** (imported into the example, no WTP edits),
+      hole+outer as fixed repulsion sources, refresh `adjl`, gradient stays
+      **boundary-only** (drop the interior pullback — discrete stencil artifact, →0
+      with clean spacing; loop prints `‖gi‖/‖gb‖`). WTP `repel`/`discretize` can't be
+      called directly because **2D `isinside` is single-loop** (no holes); we use a
+      composite guard `inbox(p) && !inside_hole(p)`. First all-interior run clumped the
+      bulk (truncated-kNN attraction) → singular stencils → negative compliance / zero
+      gradient; **fix = band-limit relaxation to `4·dx` of the hole, freeze the bulk.**
+      **Larger steps make engulfing worse, not better — NOT a substitute.**
 - [~] **Constraint** (gap #5): hole area held by exact radial rescale each step
       (works). Projected-gradient form still optional.
 - [x] **Optimizer** (gap #4): hand-rolled adjoint-only descent (normalized step;
@@ -206,26 +213,50 @@ yet — 3D is deferred, see §"3D lift").
    b 0.20→0.230), compliance ↓2.5% over 20 iters @ dx=0.05. Artifacts:
    `plate_with_hole_evolution.gif`, `plate_with_hole_opt_summary.png`.
 
-**NEXT STEP — NON-NEGOTIABLE, must come before anything else: interior deformation
-(mesh motion).** The interior cloud is currently FIXED while the hole boundary
-moves. This is the blocking defect, not a polish item:
-- it injects *growing* numerical error — as the boundary nears the fixed interior,
-  near-hole spacing compresses into anisotropic, ill-conditioned RBF-FD stencils,
-  and the once-computed `adjl` becomes stale (wrong neighbours); AND
-- it **hard-fails** once the boundary passes the initial interior margin (~0.26 in
-  y): interior nodes end up *inside* the hole ⇒ stencils straddle the void ⇒
-  garbage solve. The target circle needs b≈0.283 > 0.26, so it WOULD engulf.
+**INTERIOR DEFORMATION (mesh motion) — IN PROGRESS (2026-05-26). Option A chosen;
+fix applied but the validating re-run was interrupted.** The interior cloud was
+FIXED while the hole moved — the blocking defect: growing ill-conditioned near-hole
+stencils + stale `adjl`, and a HARD failure (engulfing) once the boundary passes the
+initial interior margin (~0.26 in y); the target circle (b≈0.283) is past it.
+**Do NOT "converge" by bumping `max_move`/`n_iter`/`dx` — a larger step engulfs
+sooner.**
 
-⇒ **Do NOT "converge" by bumping `max_move`/`n_iter`/finer `dx` — a larger step
-just engulfs sooner. That is the opposite of the fix.** First carry the interior
-*with* the boundary: a smooth RBF morph (boundary displacement → interior),
-refresh `adjl`, and add the chain-rule term `Jᵀ_morph · Δpts_interior` to the
-gradient (the morph is a smooth function of the boundary, so it stays
-differentiable). Only *after* this is driving ellipse→circle meaningful.
+*Approach (user steer: "keep it simple, use WhatsThePoint"):* instead of a
+differentiable RBF morph, **re-space the interior each design step** with WTP's
+`SpacingEquilibriumForce`/`compute_force` (imported into `plate_with_hole_optimize.jl`,
+**no WTP edits**). Hole + outer nodes are fixed repulsion sources, so a growing hole
+pushes the interior shell outward; refresh `adjl` each iter. The shape gradient stays
+**boundary-only** — the interior chain-rule pullback `Jᵀ_morph·Δpts_interior` is
+*dropped*, not added: it is a discrete RBF-FD stencil artifact (→0 with clean spacing),
+distinct from the Hadamard boundary shape derivative. The loop prints `‖gi‖/‖gb‖`
+(≈8–14% early) to keep the dropped term honest. (The differentiable-morph route is the
+alternative we did NOT take.)
 
-**Only after the morph:** mesh-independent Helmholtz `r` (same shape at two
-resolutions); proper projected area constraint; then Stage 2 (stress objective +
-boundary-stress recovery); then the 3D lift.
+*Why not call WTP `repel`/`discretize` directly:* **WTP's 2D `isinside` is single-loop**
+(one winding test over all boundary points) ⇒ it can't represent a holed/multiply-
+connected domain, so its escaped-point filter can't leave a 2D hole empty. (3D
+`isinside` sums a Green's integral over surfaces ⇒ holes OK — why the 3D STL cloud
+worked.) So we borrow only the force law and guard with `inbox(p) && !inside_hole(p)`
+(the hole loop alone IS one valid ordered polygon).
+
+*Status:* first run with **all** interior nodes relaxing FAILED — iter 0–1 healthy
+(C 5.25e-5→4.46e-5), then from iter ~2 **negative compliance** (stiffness lost SPD),
+boundary gradient → exactly 0, shape froze. Root cause: moving every interior node +
+truncated 15-NN makes the bulk neighborhood asymmetric ⇒ the `u>1` attraction term
+nets an inward pull ⇒ bulk grid clumps ⇒ singular stencils. **Fix applied
+(uncommitted): band-limit the relaxation to interior nodes within `band_w=4·dx` of
+the hole; freeze the well-conditioned bulk (it anchors the band).** `relax_interior!`
+now iterates over `band`, not all `interior_idx`.
+
+**NEXT:** re-run `jlrun plate_with_hole/plate_with_hole_optimize.jl` (from `examples/`);
+confirm monotone compliance descent + b→circle (≈0.283), no negative compliance / zero
+gradient. If the band still destabilizes: switch it to repulsion-only
+(`InverseDistanceForce`) or lower `relax_α`. Knobs: `relax_α=0.08`, `relax_sweeps=200`,
+`band_w=4dx`, `n_iter=40`, `dx=0.05`, `max_move=0.007`.
+
+**Only after the interior re-spacing validates:** mesh-independent Helmholtz `r` (same
+shape at two resolutions); proper projected area constraint; then Stage 2 (stress
+objective + boundary-stress recovery); then the 3D lift.
 
 **Then:** Stage 2 (stress objective + boundary-stress recovery — recovery is
 biased near free surfaces, flagged), and the 3D lift (needs a 3D elasticity model;

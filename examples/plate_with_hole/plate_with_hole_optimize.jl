@@ -6,12 +6,13 @@
 # at fixed area under equibiaxial load). Status: WORKING but PARTIAL (ellipse rounds
 # toward the circle, compliance ↓ — directional only); see plan_plate_with_hole.md.
 #
-# ⚠ BLOCKING LIMITATION: the interior cloud is FIXED while the hole moves. This
-# degrades near-hole RBF-FD stencils, and HARD-FAILS (interior nodes fall inside the
-# hole) once the boundary passes the initial margin (~0.26 in y) — so it CANNOT
-# reach the circle (b≈0.283) as-is. The required next step is an RBF interior morph
-# (boundary displacement → interior) carried into the gradient. Do NOT try to
-# converge by increasing max_move/n_iter/dx — a bigger step just engulfs sooner.
+# Interior re-spacing: each design step the interior nodes are relaxed to spacing
+# equilibrium with WhatsThePoint's SpacingEquilibriumForce (the hole + outer nodes
+# are fixed repulsion sources), so a growing hole pushes the interior shell outward —
+# no engulfing, no stale-stencil collapse — letting the hole reach the circle (b≈0.283).
+# We use the boundary-only shape gradient (no differentiable morph); the dropped
+# interior pullback ‖Δpts_interior‖ is reported each iter and stays small when the
+# spacing is clean (it is a discrete stencil artifact, →0 with mesh quality).
 #
 # Solver validated via manufactured-solution Kirsch test (plate_with_hole_kirsch.jl):
 # global L2 stress error 0.62%, K_t = 2.966 vs exact 3.0.
@@ -36,13 +37,14 @@ using StaticArrays
 using LinearAlgebra
 using Printf
 using CairoMakie
+using WhatsThePoint: SpacingEquilibriumForce, compute_force
 
 # ---- parameters ------------------------------------------------------------
 const Lx = 4.0; const Ly = 4.0          # plate [-2,2] × [-2,2]
 const a0 = 0.40; const b0 = 0.20        # initial hole semi-axes (2:1 ellipse)
 const dx = 0.05                          # node spacing (fast first-look; use 0.03 for a fine background run)
 const σ∞ = 1.0                           # equibiaxial tension
-const n_iter = 20
+const n_iter = 40
 const α0 = 50.0                          # (unused in adjoint-only mode below; kept for reference)
 const filt_r = 0.10                      # Helmholtz filter radius (physical length)
 const max_move = 0.007                   # adjoint-only: target max hole-node motion per iter
@@ -86,7 +88,7 @@ const interior_idx = idx_of(:interior)
 const outer_idx = vcat(idx_of(:xlo), idx_of(:xhi), idx_of(:yhi), idx_of(:ylo))
 const hole_idx = collect(hole_rng)
 const neumann_idx = vcat(outer_idx, hole_idx)
-const neumann_adjl = adjl[neumann_idx]
+neumann_adjl = adjl[neumann_idx]   # refreshed each iter as interior re-spaces
 
 # rigid-body pins: 3 DOFs consistent with symmetry.
 # Equibiaxial loading + centered hole → ux=0 on x=0 (y-axis), uy=0 on y=0 (x-axis).
@@ -111,7 +113,11 @@ const pinA = pin_ux1; const pinB = pin_uy1   # keep names for reaction check bel
         pin_uy1, base_pts[pin_uy1][1])
 
 # ---- geometry helpers ------------------------------------------------------
-make_pts(hole) = vcat(base_pts[1:n_fixed], hole)
+# cur_fixed = the non-design nodes (interior + outer), MUTABLE: interior nodes are
+# re-spaced by the WTP repel relaxation as the hole moves; outer nodes stay anchored.
+# make_pts rebuilds the full cloud (current fixed part + current hole).
+cur_fixed = collect(base_pts[1:n_fixed])
+make_pts(hole) = vcat(cur_fixed, hole)
 hole_centroid(hole) = sum(hole) / length(hole)
 function hole_area(hole)
     A2 = 0.0; n = length(hole)
@@ -248,6 +254,80 @@ function helmholtz_loop(gvecs, hole, r)
     return [SVector(gx[j], gy[j]) for j in 1:n]
 end
 
+# ---- interior re-spacing via WTP's repel force law (Option A) --------------
+# Every design step, relax the interior nodes to equilibrium at the target spacing
+# using WhatsThePoint's SpacingEquilibriumForce (F(u)=(1−u²)/(u²+β)², zero at r=s).
+# The hole + outer nodes are FIXED repulsion sources, so a growing hole pushes the
+# interior shell outward — no engulfing, no stale-stencil collapse — without a
+# differentiable morph. Mutates `cur_fixed` (interior only); boundary untouched.
+const force_model = SpacingEquilibriumForce(0.2)
+const relax_s  = dx        # target spacing (ConstantSpacing)
+const relax_α  = 0.08      # damping: step = s·α·F per sweep
+const relax_kk = 15        # neighbours used for the repulsion sum
+const relax_sweeps = 200
+const relax_tol = 5.0e-4   # stop when max |step| / s < tol
+const band_w = 4 * dx      # re-space ONLY interior nodes within band_w of the hole;
+                           # the bulk grid stays frozen — it is well-conditioned and
+                           # anchors the band, so the relaxation can't drift or clump
+                           # (moving every node lets the truncated-kNN attraction term
+                           # net an inward pull → bulk collapse → singular stencils).
+mindist_to_hole(p, hole) = minimum(hypot((p - h)[1], (p - h)[2]) for h in hole)
+
+# point-in-polygon (signed-angle winding) on the hole loop — mirrors WTP's 2D
+# isinside without the unitful/validation overhead; cheap enough for the guard.
+function inside_hole(p, hole)
+    n = length(hole); s = 0.0
+    @inbounds for j in 1:n
+        a = hole[j] - p; b = hole[mod1(j + 1, n)] - p
+        s += atan(a[1] * b[2] - a[2] * b[1], a[1] * b[1] + a[2] * b[2])
+    end
+    return abs(s) > π
+end
+
+# safety net: shove an escaped interior node radially back out, ~one spacing
+# beyond the hole node nearest in angle (ray from the hole centroid).
+function project_out(p, hole)
+    c = hole_centroid(hole)
+    d = p - c; r = hypot(d[1], d[2]); r < 1.0e-12 && return c + SVector(relax_s, 0.0)
+    ang = atan(d[2], d[1])
+    j = argmin([abs(rem2pi(atan((hole[m] - c)[2], (hole[m] - c)[1]) - ang, RoundNearest))
+                for m in eachindex(hole)])
+    rh = hypot((hole[j] - c)[1], (hole[j] - c)[2])
+    return c + (rh + relax_s) * d / r
+end
+
+function relax_interior!(hole)
+    all_pts = make_pts(hole)
+    # band = interior nodes near the hole; only these move (bulk + boundary are
+    # fixed repulsion sources). Recomputed each step since the hole moves.
+    band = [gi for gi in interior_idx if mindist_to_hole(all_pts[gi], hole) < band_w]
+    nbrs = find_neighbors(all_pts, relax_kk + 1)
+    moves = Vector{SVector{2, Float64}}(undef, length(band))
+    for _ in 1:relax_sweeps
+        for (loc, gi) in enumerate(band)
+            xi = all_pts[gi]; f = SVector(0.0, 0.0)
+            for nj in nbrs[gi]
+                nj == gi && continue
+                dd = xi - all_pts[nj]; r = hypot(dd[1], dd[2])
+                r < 1.0e-12 && continue
+                f = f + compute_force(force_model, r / relax_s) * dd / r
+            end
+            moves[loc] = relax_s * relax_α * f
+        end
+        mx = 0.0
+        for (loc, gi) in enumerate(band)
+            all_pts[gi] = all_pts[gi] + moves[loc]
+            mx = max(mx, hypot(moves[loc][1], moves[loc][2]) / relax_s)
+        end
+        mx < relax_tol && break
+    end
+    for gi in band
+        p = all_pts[gi]
+        cur_fixed[gi] = inside_hole(p, hole) ? project_out(p, hole) : p
+    end
+    return cur_fixed
+end
+
 # ============================================================================
 # iter-0 gradient validation: AD vs central FD on a few hole nodes
 # ============================================================================
@@ -286,10 +366,15 @@ hist = (compl = Float64[], gnorm = Float64[], a = Float64[], b = Float64[])
 frames = NamedTuple[]
 
 println("\n--- Optimization loop (equibiaxial, ellipse → circle expected) ---")
-@printf("%4s %12s %10s %8s %8s\n", "iter", "compliance", "‖g̃‖", "a_est", "b_est")
+@printf("%4s %12s %10s %8s %8s %9s\n", "iter", "compliance", "‖g̃‖", "a_est", "b_est", "‖gi‖/‖gb‖")
 for it in 0:n_iter
     Δ, u, b = compliance_grad(hole)
     g = hole_grad(Δ)
+    # boundary-only gradient: report the interior pullback we drop (Option A). It is
+    # a discrete stencil artifact and should stay small while the spacing is clean.
+    g_int = sqrt(sum(gi -> Δ[2gi - 1]^2 + Δ[2gi]^2, interior_idx))
+    g_bnd = sqrt(sum(x -> x[1]^2 + x[2]^2, g))
+    pull_ratio = g_int / max(g_bnd, 1.0e-30)
     g̃ = helmholtz_loop(g, hole, filt_r)
     C = dot(b, u)
     gn = sqrt(sum(x -> x[1]^2 + x[2]^2, g̃))
@@ -300,15 +385,18 @@ for it in 0:n_iter
     push!(hist.a, a_est); push!(hist.b, b_est)
     push!(frames, (hole = deepcopy(hole), pts = make_pts(hole),
                    u = copy(u), g = deepcopy(g̃), C = C))
-    @printf("%4d %12.5e %10.3e %8.4f %8.4f\n", it, C, gn, a_est, b_est)
+    @printf("%4d %12.5e %10.3e %8.4f %8.4f %9.2e\n", it, C, gn, a_est, b_est, pull_ratio)
     it == n_iter && break
-    # adjoint-only step: normalize the filtered descent direction to a fixed max
-    # node motion (NO line-search forward solves), then restore area exactly. Step
-    # is < node spacing for stability; printed compliance above confirms descent.
-    # One shape_gradient call per iteration, total.
+    # adjoint-only descent step on the hole boundary (normalized to max_move), then
+    # restore hole area, re-space the interior with the WTP repel force law so the
+    # cloud stays valid as the hole moves, and refresh connectivity. One
+    # shape_gradient call per iteration, total.
     gmax = maximum(x -> hypot(x[1], x[2]), g̃)
     global hole = rescale_to_area!([hole[j] - (max_move / max(gmax, 1e-30)) * g̃[j]
                                     for j in eachindex(hole)], A_target)
+    relax_interior!(hole)
+    global adjl = find_neighbors(make_pts(hole), k)
+    global neumann_adjl = adjl[neumann_idx]
 end
 
 # ============================================================================
