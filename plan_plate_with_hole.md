@@ -193,73 +193,49 @@ z-invariant design, the 3D answer ≈ 2D plane stress — so the *physics* gain 
 2D is small; the payoff is exercising the STL→3D-solve→3D-surface-opt pipeline we
 ultimately need. Thicker plates / z-varying design make 3D physics matter.
 
-## CURRENT STATE — where a fresh session resumes (2026-05-24, latest)
-
-The **2D Stage-1 path is the active, working line** (we did NOT take the 3D fork
-yet — 3D is deferred, see §"3D lift").
+## CURRENT STATE — where a fresh session resumes (2026-05-28, final)
 
 **Done & validated:**
 1. **Solver** — Kirsch manufactured-solution test passes (K_t=2.966, interior L2
    stress 0.62%). `plate_with_hole_kirsch.jl`.
-2. **Hole normals** — switched radial-about-centroid → `polyline_normals` (Phase D
-   L2) in the forward (`build_layout`) AND the gradient (`normal_jacobians`). This
-   was the bug behind "gradients look small": radial normals were **37° wrong** on
-   the 2:1 ellipse, mis-modeling σ·n=0 and suppressing the sensitivity. After the
-   fix: normal error 0° (exact for a θ-sampled ellipse), AD≡FD (cos 1.000),
-   gradient ~15× larger. Confirmed in `normals_check.jl`.
-3. **Stage-1 optimizer** (`plate_with_hole_optimize.jl`) — equibiaxial compliance
-   minimization, **adjoint-only** (no FD, no line-search solves; 1 `shape_gradient`
-   per iter). RUNS and MOVES THE RIGHT WAY: ellipse → circle (a 0.40→0.387,
-   b 0.20→0.230), compliance ↓2.5% over 20 iters @ dx=0.05. Artifacts:
-   `plate_with_hole_evolution.gif`, `plate_with_hole_opt_summary.png`.
+2. **Hole normals** — polyline_normals (Phase D L2) fix validated: 37°→0° error,
+   AD≡FD (cos 1.000), gradient ~15× larger. `normals_check.jl`.
+3. **Problem well-posedness** — FD scan over aspect ratio confirms the circle IS
+   the compliance minimum at fixed area: C drops monotonically 5.09e-5 → 4.88e-5
+   as ρ=a/b goes 2.0→1.0. `probe_wellposed.jl`.
 
-**INTERIOR DEFORMATION (mesh motion) — IN PROGRESS (2026-05-26). Option A chosen;
-fix applied but the validating re-run was interrupted.** The interior cloud was
-FIXED while the hole moved — the blocking defect: growing ill-conditioned near-hole
-stencils + stale `adjl`, and a HARD failure (engulfing) once the boundary passes the
-initial interior margin (~0.26 in y); the target circle (b≈0.283) is past it.
-**Do NOT "converge" by bumping `max_move`/`n_iter`/`dx` — a larger step engulfs
-sooner.**
+**Nyquist noise — root cause identified (2026-05-28).** The per-node discrete-ℓ²
+boundary gradient is intrinsic Nyquist noise: alternating sign at every adjacent
+node (±7e-5 sawtooth), cos(2θ) circle mode at −1.1e-6 (400× below noise floor,
+wrong sign), high-frequency residual 21× larger than smooth signal. The Helmholtz
+filter damps the Nyquist mode but leaves a cos(4θ) square-plate artifact, not the
+circle-directing cos(2θ). Remeshing each iteration adds ~2% objective jumps,
+comparable to the entire 4% signal. `probe_area_mode.jl` + `docs/boundary_gradient_noise.md`.
 
-*Approach (user steer: "keep it simple, use WhatsThePoint"):* instead of a
-differentiable RBF morph, **re-space the interior each design step** with WTP's
-`SpacingEquilibriumForce`/`compute_force` (imported into `plate_with_hole_optimize.jl`,
-**no WTP edits**). Hole + outer nodes are fixed repulsion sources, so a growing hole
-pushes the interior shell outward; refresh `adjl` each iter. The shape gradient stays
-**boundary-only** — the interior chain-rule pullback `Jᵀ_morph·Δpts_interior` is
-*dropped*, not added: it is a discrete RBF-FD stencil artifact (→0 with clean spacing),
-distinct from the Hadamard boundary shape derivative. The loop prints `‖gi‖/‖gb‖`
-(≈8–14% early) to keep the dropped term honest. (The differentiable-morph route is the
-alternative we did NOT take.)
+**Solution — mode-projected gradient (2026-05-28).** Instead of 48 free hole nodes,
+parameterize the hole as an ellipse (a, b) at fixed area and contract the raw
+nodal gradient onto the ellipse modes:
+  dC/da = Σ_j g_j,x · cos(θ_j)       dC/db = Σ_j g_j,y · sin(θ_j)
+The noise integrates out. With 1 DOF (aspect ratio ρ=a/b), the optimizer converges
+cleanly to the circle in 14 iterations:
+  a: 0.400 → 0.282,  b: 0.200 → 0.282  ✓
+  C: 5.25e-5 → 4.95e-5  (−6%)
+`plate_with_hole_ellipse_opt.jl` is the working implementation.
 
-*Why not call WTP `repel`/`discretize` directly:* **WTP's 2D `isinside` is single-loop**
-(one winding test over all boundary points) ⇒ it can't represent a holed/multiply-
-connected domain, so its escaped-point filter can't leave a 2D hole empty. (3D
-`isinside` sums a Green's integral over surfaces ⇒ holes OK — why the 3D STL cloud
-worked.) So we borrow only the force law and guard with `inbox(p) && !inside_hole(p)`
-(the hole loop alone IS one valid ordered polygon).
+**Why the earlier approaches failed:**
+- Per-node gradients on fixed cloud: Nyquist noise dominates, wrong direction.
+- WTP relaxation: non-smooth, gradient inconsistency between iterations.
+- RBF interpolation of boundary displacement: 1D→2D interpolation ill-posed, negative compliance.
+- Laplace morphing: correct direction (a→0.392↓, b→0.243↑) but slow/noisy — the
+  morph preserves mesh quality but the per-node gradient still has Nyquist noise.
+- Remeshing each iteration: objective jumps ~2% from grid changes, swamping the 4% signal.
 
-*Status:* first run with **all** interior nodes relaxing FAILED — iter 0–1 healthy
-(C 5.25e-5→4.46e-5), then from iter ~2 **negative compliance** (stiffness lost SPD),
-boundary gradient → exactly 0, shape froze. Root cause: moving every interior node +
-truncated 15-NN makes the bulk neighborhood asymmetric ⇒ the `u>1` attraction term
-nets an inward pull ⇒ bulk grid clumps ⇒ singular stencils. **Fix applied
-(uncommitted): band-limit the relaxation to interior nodes within `band_w=4·dx` of
-the hole; freeze the well-conditioned bulk (it anchors the band).** `relax_interior!`
-now iterates over `band`, not all `interior_idx`.
+**Interior morphing:** Laplace equation ∇²(Δx)=0 retains its role as the correct
+mechanism for mesh motion when needed (3D, large deformations). For the plate-with-hole
+on a fixed cloud, no morphing was needed — the ellipse-mode steps are small enough.
 
-**NEXT:** re-run `jlrun plate_with_hole/plate_with_hole_optimize.jl` (from `examples/`);
-confirm monotone compliance descent + b→circle (≈0.283), no negative compliance / zero
-gradient. If the band still destabilizes: switch it to repulsion-only
-(`InverseDistanceForce`) or lower `relax_α`. Knobs: `relax_α=0.08`, `relax_sweeps=200`,
-`band_w=4dx`, `n_iter=40`, `dx=0.05`, `max_move=0.007`.
-
-**Only after the interior re-spacing validates:** mesh-independent Helmholtz `r` (same
-shape at two resolutions); proper projected area constraint; then Stage 2 (stress
-objective + boundary-stress recovery); then the 3D lift.
-
-**Then:** Stage 2 (stress objective + boundary-stress recovery — recovery is
-biased near free surfaces, flagged), and the 3D lift (needs a 3D elasticity model;
+**Next:** generalize to multiple Fourier modes (k=2,3,4) for non-elliptical shapes;
+mesh-independent Helmholtz verification; Stage 2 (stress objective); 3D lift.
 elasticity is 2D-only — see §"3D lift").
 
 **Perf note:** the adjoint (`shape_gradient`) ≈ 2 forward solves and is
