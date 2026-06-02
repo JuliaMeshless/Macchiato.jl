@@ -321,6 +321,237 @@ function extract_neumann_sensitivities_3d!(
 end
 
 # ============================================================================
+# Phase D L2 (3D): differentiable triangle-based vertex normals
+# ============================================================================
+# The 3D analogue of 2D's `polyline_normals`/`NormalJacobian`.  A boundary
+# vertex normal is the area-weighted average of the normals of its incident
+# triangles (the 1-ring of the surface mesh):
+#
+#     g_i = Σ_{f ∋ i} (p_b - p_a) × (p_c - p_a),   N_i = g_i / ‖g_i‖
+#
+# Each triangle's un-normalized cross product has magnitude 2·area, so the sum
+# is exactly the area weighting.  The face connectivity is FIXED across design
+# perturbations (the discrete-adjoint contract); only the vertex coordinates
+# move, so `∂N_i/∂pts` is sparse on the 1-ring vertices.
+
+"""
+    NormalJacobian3D
+
+Sparse Jacobian of an area-weighted vertex normal `N_i` at a Neumann vertex
+w.r.t. the vertices of the triangles incident to it (its 1-ring, including
+itself).  See the section header for the normal definition.  Mirrors the 2D
+`NormalJacobian`, but the column set is variable-length (the 1-ring) instead
+of a fixed `(prev, next)` pair.
+
+Fields:
+- `cols::Vector{Int}` — global indices (1..N) of the 1-ring vertices.
+- `blocks::Vector{SMatrix{3,3,Float64,9}}` — `blocks[k] = ∂N_i/∂p_{cols[k]}`.
+"""
+struct NormalJacobian3D
+    cols::Vector{Int}
+    blocks::Vector{SMatrix{3,3,Float64,9}}
+end
+
+# skew(v)·w = v × w  (column-major SMatrix literal)
+@inline _skew3(v) = SMatrix{3,3,Float64,9}(
+    0.0,   v[3], -v[2],
+   -v[3],  0.0,   v[1],
+    v[2], -v[1],  0.0,
+)
+
+"""
+    triangle_normals(pts_flat, faces, neumann_ids, vertex_faces)
+        -> (normals::Vector{SVector{3,Float64}},
+            jacobians::Vector{NormalJacobian3D})
+
+3D analogue of `polyline_normals`.  Compute area-weighted vertex normals and
+their sparse Jacobians at the Neumann vertices of a fixed triangle surface mesh.
+
+Arguments:
+- `pts_flat` — flat coordinate vector `[x1,y1,z1, x2,y2,z2, …]` (length `3N`).
+- `faces` — triangle connectivity, each a `(a,b,c)` triple of global vertex
+  indices (1..N) wound CCW as seen from OUTSIDE (so `(p_b-p_a)×(p_c-p_a)` points
+  outward).
+- `neumann_ids` — global indices of the Neumann vertices (length `n_neu`).
+- `vertex_faces[i_local]` — indices into `faces` of the triangles incident to
+  Neumann vertex `neumann_ids[i_local]`.
+
+Returns `(normals, jacobians)`, each of length `n_neu`.
+
+Per-triangle derivatives (`m = (p_b-p_a)×(p_c-p_a)`):
+
+    ∂m/∂p_a = skew(p_c - p_b),  ∂m/∂p_b = skew(p_a - p_c),  ∂m/∂p_c = skew(p_b - p_a)
+
+(`skew(v)·w = v×w`; their sum is zero ⇒ translation invariance).  Then
+`g = Σ_f m_f`, `N = g/‖g‖`, and the normalization pullback
+`∂N/∂g = (I − N Nᵀ)/‖g‖` gives `∂N/∂p_j = (∂N/∂g)·(∂g/∂p_j)`.
+"""
+function triangle_normals(
+    pts_flat::AbstractVector{Float64},
+    faces::AbstractVector{<:NTuple{3,Int}},
+    neumann_ids::AbstractVector{Int},
+    vertex_faces::AbstractVector{<:AbstractVector{Int}},
+)
+    n_neu = length(neumann_ids)
+    @assert length(vertex_faces) == n_neu
+    P(i) = SVector{3,Float64}(pts_flat[3i - 2], pts_flat[3i - 1], pts_flat[3i])
+
+    normals   = Vector{SVector{3,Float64}}(undef, n_neu)
+    jacobians = Vector{NormalJacobian3D}(undef, n_neu)
+
+    for i_local in 1:n_neu
+        g  = zero(SVector{3,Float64})
+        dg = Dict{Int, MMatrix{3,3,Float64,9}}()
+        acc!(j, B) = (haskey(dg, j) ? (dg[j] .+= B) :
+                      (dg[j] = MMatrix{3,3,Float64,9}(B)))
+        for fidx in vertex_faces[i_local]
+            a, b, c = faces[fidx]
+            pa, pb, pc = P(a), P(b), P(c)
+            g += cross(pb - pa, pc - pa)
+            acc!(a, _skew3(pc - pb))
+            acc!(b, _skew3(pa - pc))
+            acc!(c, _skew3(pb - pa))
+        end
+        gn = norm(g)
+        gn > 0.0 || error("triangle_normals: degenerate normal at Neumann $i_local")
+        N  = g / gn
+        Pn = (SMatrix{3,3,Float64,9}(I) - N * N') / gn      # ∂N/∂g
+        cols   = collect(keys(dg))
+        blocks = Vector{SMatrix{3,3,Float64,9}}(undef, length(cols))
+        for (k, j) in enumerate(cols)
+            blocks[k] = Pn * SMatrix{3,3,Float64,9}(dg[j])
+        end
+        normals[i_local]   = N
+        jacobians[i_local] = NormalJacobian3D(cols, blocks)
+    end
+    return normals, jacobians
+end
+
+"""
+    update_traction_coeffs_3d!(layout::TractionLayout3D, normals, λ, μ)
+
+Rebuild `layout.coeffs` in place from a fresh set of per-Neumann-point normals.
+Mirrors the coefficient assignment in `build_traction_layout_3d` exactly (same
+`(eq, stencil, cb)` entry ordering) but touches no other field.  Use each
+iteration when normals are live (Phase D Level 2, 3D).  Analogue of the 2D
+`update_traction_coeffs!`.
+"""
+function update_traction_coeffs_3d!(
+    layout::TractionLayout3D,
+    normals::AbstractVector{<:AbstractVector{Float64}},
+    λ::Real,
+    μ::Real,
+)
+    M = layout.M
+    @assert M == 3
+    n_neu = length(layout.rows) ÷ 3
+    @assert length(normals) == n_neu
+
+    @inbounds for i_local in 1:n_neu
+        nx, ny, nz = normals[i_local][1], normals[i_local][2], normals[i_local][3]
+        for eq in 1:3
+            r    = 3 * (i_local - 1) + eq
+            ptr0 = layout.col_ptr[r]
+            ptr1 = layout.col_ptr[r + 1] - 1
+            for p in ptr0:ptr1
+                cb = ((p - ptr0) % 3) + 1
+                c_dx, c_dy, c_dz = _traction_coeff_3d(eq, cb, nx, ny, nz, λ, μ)
+                base = (p - 1) * M
+                layout.coeffs[base + 1] = c_dx
+                layout.coeffs[base + 2] = c_dy
+                layout.coeffs[base + 3] = c_dz
+            end
+        end
+    end
+    return nothing
+end
+
+"""
+    extract_normal_sensitivities_3d!(
+        Δpts, layout, η, u, W_dx, W_dy, W_dz, normal_jacobians, λ, μ;
+        active = nothing,
+    )
+
+Step 3 (n-side, 3D) — accumulate `-ηᵀ·(∂A/∂n · ∂n/∂pts)·u` into `Δpts`.
+3D analogue of `extract_normal_sensitivities!`.
+
+For each Neumann vertex, all three equation rows (x,y,z) share the same normal
+`n_i`.  We form `Sₙ = ∂L/∂n_i` (a 3-vector) by contracting `Δa = -η[g]·u[a_col]`
+against the analytic `∂coeff/∂n` of each Neumann-row entry (the traction
+coefficients are linear in `n`, so `∂coeff/∂n_d = _traction_coeff_3d(eq, cb, e_d, …)`,
+derived from the same routine the forward uses — never hardcoded), then push it
+through the sparse Jacobian: `Δp_j += (∂N_i/∂p_j)ᵀ · Sₙ`.
+
+`active`, if provided, is the 3N per-DOF mask (Dirichlet rows ⇒ false).
+"""
+function extract_normal_sensitivities_3d!(
+    Δpts::AbstractVector{Float64},
+    layout::TractionLayout3D,
+    η::AbstractVector{Float64},
+    u::AbstractVector{Float64},
+    W_dx::SparseMatrixCSC{Float64, Int},
+    W_dy::SparseMatrixCSC{Float64, Int},
+    W_dz::SparseMatrixCSC{Float64, Int},
+    normal_jacobians::AbstractVector{NormalJacobian3D},
+    λ::Real,
+    μ::Real;
+    active::Union{Nothing, AbstractVector{Bool}} = nothing,
+)
+    M = layout.M
+    @assert M == 3
+    n_neu = length(normal_jacobians)
+    @assert length(layout.rows) == 3 * n_neu
+
+    @inbounds for i_local in 1:n_neu
+        wr  = layout.weight_rows[3 * (i_local - 1) + 1]   # = i_local
+        Sn1 = 0.0; Sn2 = 0.0; Sn3 = 0.0
+        any_active = false
+
+        for eq in 1:3
+            r = 3 * (i_local - 1) + eq
+            g = layout.rows[r]
+            (active === nothing || active[g]) || continue
+            any_active = true
+            ηg = η[g]
+
+            # ∂coeff/∂n_d for this (eq, cb) — coeff is linear in n, so the
+            # derivative is the coeff evaluated at the unit normal e_d.
+            ptr0 = layout.col_ptr[r]
+            ptr1 = layout.col_ptr[r + 1] - 1
+            # Cache the 3 (cb) × 3 (d) derivative triples once per row.
+            for p in ptr0:ptr1
+                cb    = ((p - ptr0) % 3) + 1
+                a_col = layout.a_cols[p]
+                w_col = layout.w_cols[p]
+                ix = _find_nzval(W_dx, wr, w_col); wx = ix > 0 ? W_dx.nzval[ix] : 0.0
+                iy = _find_nzval(W_dy, wr, w_col); wy = iy > 0 ? W_dy.nzval[iy] : 0.0
+                iz = _find_nzval(W_dz, wr, w_col); wz = iz > 0 ? W_dz.nzval[iz] : 0.0
+                up = u[a_col]
+                base_contrib = -ηg * up
+
+                cx1, cy1, cz1 = _traction_coeff_3d(eq, cb, 1.0, 0.0, 0.0, λ, μ)
+                cx2, cy2, cz2 = _traction_coeff_3d(eq, cb, 0.0, 1.0, 0.0, λ, μ)
+                cx3, cy3, cz3 = _traction_coeff_3d(eq, cb, 0.0, 0.0, 1.0, λ, μ)
+                Sn1 += base_contrib * (cx1 * wx + cy1 * wy + cz1 * wz)
+                Sn2 += base_contrib * (cx2 * wx + cy2 * wy + cz2 * wz)
+                Sn3 += base_contrib * (cx3 * wx + cy3 * wy + cz3 * wz)
+            end
+        end
+        any_active || continue
+
+        nj = normal_jacobians[i_local]
+        for k in eachindex(nj.cols)
+            j = nj.cols[k]
+            B = nj.blocks[k]                     # ∂N_i/∂p_j  (3×3)
+            Δpts[3j - 2] += B[1, 1] * Sn1 + B[2, 1] * Sn2 + B[3, 1] * Sn3
+            Δpts[3j - 1] += B[1, 2] * Sn1 + B[2, 2] * Sn2 + B[3, 2] * Sn3
+            Δpts[3j]     += B[1, 3] * Sn1 + B[2, 3] * Sn2 + B[3, 3] * Sn3
+        end
+    end
+    return nothing
+end
+
+# ============================================================================
 # shape_gradient_3d — interior + optional Neumann (frozen normals).
 # ============================================================================
 
@@ -379,6 +610,7 @@ function shape_gradient_3d(
     traction_layout::Union{Nothing, TractionLayout3D} = nothing,
     neumann_ids::Union{Nothing, Vector{Int}} = nothing,
     neumann_adjl::Union{Nothing, Vector{Vector{Int}}} = nothing,
+    normal_jacobians::Union{Nothing, AbstractVector{NormalJacobian3D}} = nothing,
 )
     has_neumann = traction_layout !== nothing
     μ, λ = lame_parameters_3d(model)
@@ -443,6 +675,16 @@ function shape_gradient_3d(
                                     pts, neumann_pts, neumann_adjl, basis, Partial(1, 2); eval_offset = neumann_ids)
         _propagate_weight_gradient!(Δpts, ΔW_dz, W_dz, cache_dz,
                                     pts, neumann_pts, neumann_adjl, basis, Partial(1, 3); eval_offset = neumann_ids)
+    end
+
+    # --- Step 4c: Phase D L2 (3D) — differentiable normals -------------------
+    # -ηᵀ·(∂A/∂n · ∂n/∂pts)·u, distributed via the sparse NormalJacobian3Ds.
+    # No-op unless the caller supplied normal Jacobians (and refreshed the
+    # layout's coeffs to the live normals via `update_traction_coeffs_3d!`).
+    if has_neumann && normal_jacobians !== nothing
+        extract_normal_sensitivities_3d!(Δpts, traction_layout, η, u,
+                                         W_dx, W_dy, W_dz, normal_jacobians, λ, μ;
+                                         active = active)
     end
 
     return (u = u, Δpts = Δpts, η = η)

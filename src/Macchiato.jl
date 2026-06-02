@@ -141,6 +141,8 @@ export shape_gradient_3d
 export extract_weight_sensitivities_elasticity_3d!
 export TractionLayout3D, build_traction_layout_3d, apply_traction_3d!
 export extract_neumann_sensitivities_3d!
+export NormalJacobian3D, triangle_normals
+export update_traction_coeffs_3d!, extract_normal_sensitivities_3d!
 
 # Design space
 export AbstractDesignSpace, FourierModes

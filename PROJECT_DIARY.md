@@ -6,6 +6,65 @@ Full detail: `RBF_FD_shape_optimization.tex` (the story),
 
 ---
 
+## 2026-06-02 (latest) — 3D differentiable normals (Phase-D-L2 analogue) validated
+
+**State.** The 3D traction adjoint no longer needs frozen normals. Added the 3D
+analogue of 2D's `polyline_normals`/`NormalJacobian`: **area-weighted triangle
+vertex normals** with a closed-form sparse Jacobian, threaded into
+`shape_gradient_3d` via a new `normal_jacobians` kwarg (default `nothing` ⇒
+frozen-normals path unchanged; the frozen traction test still validates at
+median 1.000000 — no regression). FD-validated two ways
+(`test_shape_gradient_3d_normals.jl`): (A) the triangle-normal Jacobian vs
+central FD, worst `2.6e-10`; (B) the full compliance gradient with normals
+*moving* under the design perturbation, median `|AD|/|FD| = 0.999999`, 69/69
+within 5%.
+
+### What was added (`src/optimization/manual_adjoint_3d.jl`)
+- `NormalJacobian3D` — sparse `∂N_i/∂pts` over the 1-ring (variable-length
+  `cols` + 3×3 `blocks`), vs 2D's fixed `(prev,next)` pair.
+- `triangle_normals(pts_flat, faces, neumann_ids, vertex_faces)` — vertex normal
+  `N_i = g_i/‖g_i‖`, `g_i = Σ_{f∋i}(p_b-p_a)×(p_c-p_a)` (the un-normalized cross
+  is `2·area`, so the sum is area-weighted). Per-triangle
+  `∂m/∂p_a = skew(p_c-p_b)`, `∂m/∂p_b = skew(p_a-p_c)`, `∂m/∂p_c = skew(p_b-p_a)`
+  (sum zero ⇒ translation-invariant); normalization pullback `(I-NNᵀ)/‖g‖`.
+- `update_traction_coeffs_3d!` — refresh `layout.coeffs` to live normals
+  (3D analogue of `update_traction_coeffs!`).
+- `extract_normal_sensitivities_3d!` — the n-side term `-ηᵀ(∂A/∂n·∂n/∂pts)u`:
+  `Sₙ = ∂L/∂n_i` contracted via the **same `_traction_coeff_3d`** the forward
+  uses (coeff is linear in n ⇒ `∂coeff/∂n_d = _traction_coeff_3d(eq,cb,e_d,…)`,
+  never hardcoded), then `Δp_j += (∂N_i/∂p_j)ᵀ Sₙ`.
+
+### Lessons / notes (durable)
+- **The boundary triangle mesh is part of the discrete problem, not differentiated
+  through.** Connectivity (`faces`, `vertex_faces`) is built ONCE and held fixed;
+  only vertex coordinates move. Same contract as the 2D boundary loop and as
+  remeshing (morph within an interval, re-anchor between).
+- **Edge/corner vertex normals blend incident faces** (e.g. a box edge gives
+  `(0,-1,1)/√2`) — the 3D analogue of the 2D length-weighted corner normal.
+  Harmless for *gradient validation* (AD matches FD of the same discrete problem
+  regardless of physics); for a real optimization the corner-normal-freeze trick
+  from 2D (override + zero its Jacobian) carries over if a sharp feature misaligns
+  the traction BC.
+- **`WTP.discretize` preserves the input boundary points exactly** (verified: same
+  set, same count), so a structured per-face grid can be re-triangulated from the
+  returned cloud — no need for the volume fill and the surface mesh to agree on
+  ordering; match by coordinate.
+- **Reused, didn't reimplement:** the normal-derivative coeffs come straight out
+  of `_traction_coeff_3d` evaluated at unit normals; `_propagate_weight_gradient!`,
+  `_find_nzval`, the layout, and the whole forward/adjoint chain are untouched.
+
+### Next steps (3D, priority order) — unchanged except step 1 now DONE
+1. ~~Differentiable 3D normals~~ **DONE (this entry).**
+2. **3D design space** — surface/spherical harmonics or Biancolini RBF control
+   points as a new `AbstractDesignSpace`; contract the nodal gradient onto it as
+   `FourierModes.contract_gradient` does in 2D.
+3. **Wire the two-front loop in 3D** — `LaplaceExtension` is dimension-agnostic
+   (add the `zz` term); reuse the `Indicator` registry.
+4. *(Cleanup)* Meshes `Box`→mesh→`PointBoundary(mesh)` path so the surface mesh
+   comes from WTP/Meshes instead of the test's hand-built per-face triangulation.
+
+---
+
 ## 2026-06-02 (later) — framework extracted; 3D elasticity adjoint validated
 
 **State.** The 2D two-front framework is extracted into `src/` (`AbstractDesignSpace`
