@@ -1,0 +1,1860 @@
+% =============================================================================
+%   Discrete adjoints for RBF-FD shape optimization in Macchiato.jl
+%   Theory and implementation of the manual gradient pipeline
+%
+%   Compile with:  pdflatex report_phase_D_L2_helmholtz   (twice for refs)
+%   Or:            latexmk -pdf report_phase_D_L2_helmholtz.tex
+%   Or paste into Overleaf — all packages are standard.
+% =============================================================================
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,bm}
+\usepackage{graphicx}
+\graphicspath{{docs/}}    % look here when compiling from the repo root
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{enumitem}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!50!black,
+  citecolor=blue!50!black,
+  urlcolor=blue!50!black,
+}
+
+\lstdefinelanguage{Julia}{
+  morekeywords={function,end,if,else,elseif,for,while,return,break,continue,
+    struct,mutable,abstract,type,module,using,import,export,const,let,do,
+    begin,finally,try,catch,throw,global,local,macro,quote,
+    true,false,nothing,missing,in,isa,where,as,is,outer,inline},
+  sensitive=true,
+  morecomment=[l]{\#},
+  morecomment=[n]{\#=}{=\#},
+  morestring=[b]",
+  morestring=[b]',
+  morestring=[s]{"""}{"""},
+}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  language=Julia,
+  commentstyle=\color{gray},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  numbersep=8pt,
+  frame=single,
+  xleftmargin=2em,
+}
+
+\newcommand{\mat}[1]{\mathbf{#1}}
+\newcommand{\vect}[1]{\boldsymbol{#1}}
+\newcommand{\pts}{\vect{p}}
+\newcommand{\norm}[1]{\left\lVert#1\right\rVert}
+\newcommand{\inner}[2]{\langle #1,\,#2\rangle}
+\newcommand{\reals}{\mathbb{R}}
+\newcommand{\dd}{\,\mathrm{d}}
+\newcommand{\D}{\mathcal{D}}
+\newcommand{\Loss}{\mathcal{L}}
+\newcommand{\TODO}[1]{\textcolor{red}{[TODO: #1]}}
+
+\title{
+  \textbf{Discrete adjoints for RBF-FD shape optimization in
+  \texttt{Macchiato.jl}}\\[0.6em]
+  \large Theory and implementation of the manual gradient pipeline
+}
+\author{Davide Miotti}
+\date{2026-06-02 (working document)}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We document the full discrete adjoint pipeline implemented in
+\texttt{Macchiato.jl} for shape optimization on RBF-FD meshless
+discretizations of elasticity. Starting from a continuous
+shape-optimization problem on a parameterized domain, we develop a
+five-step manual adjoint that decomposes the sensitivity calculation
+into a forward elasticity solve caching RBF stencils, a single adjoint
+solve, extraction of sensitivities at the level of weight-matrix
+entries, a pure-Julia backward pass through the RBF stencil
+computations, and the assembly of explicit external contributions. Each
+step has closed-form analytic content and is validated to machine
+precision against fifth-order central finite differences. We give
+detailed derivations for each ingredient: the interior elasticity
+rows for plane stress, the Neumann row family with traction BCs, the
+shape-dependent dead-load contribution (Phase D Level 1), the
+differentiable polyline normal model (Phase D Level 2), and the
+Helmholtz-PDE sensitivity filter on the boundary loop. A 2D cantilever
+benchmark illustrates the pipeline end-to-end. A plate-with-hole study
+then motivates reorganizing the optimizer around a Fourier design
+parameterization and an actively re-meshed cloud: the boundary gradient
+noise is traced to the geometry sensitivity of the RBF-FD weights
+($\partial\mat W/\partial\pts$), frequency filtering is shown unable to
+cure it, and a clean-DOF design space with a two-front (morph plus
+re-anchored re-mesh) cloud controller takes its place. We close by mapping the
+open extensions --- generalization beyond linear elasticity,
+integration with the geometry kernel in
+\texttt{WhatsThePoint.jl}, scale-up, and the path to the longer-term
+multi-physics framework --- against established state-of-the-art
+positioning.
+\end{abstract}
+
+\paragraph{Status of this report.}
+This is a working technical document, written to support both
+ongoing development and a future engineering-oriented publication.
+The cantilever example used for illustration is under active
+development at the time of writing: in particular, an artefact in
+the tip-shrinkage gradient was found to have been masked by a
+previous corner-freeze convention, and is being repaired. The
+\emph{numerical} compliance figures cited in
+Section~\ref{sec:cantilever} should therefore be regarded as
+illustrative snapshots; the qualitative behaviour they convey
+(regularization effect, role of differentiable normals) is robust
+and is what we use them to demonstrate. Note also that the gradient
+filter of Section~\ref{sec:filter}, presented there as the
+regularization cure, is \emph{superseded} by Section~\ref{sec:plate}:
+the plate-with-hole study shows frequency filtering cannot separate the
+broadband weight-sensitivity artifact from the signal, and the cure is
+the design-space-plus-re-meshing architecture developed there.
+
+\tableofcontents
+\bigskip
+
+\section{Introduction}
+\label{sec:intro}
+
+Shape optimization treats the shape of a physical domain as a design
+variable and asks for the geometry that extremizes a physical
+objective subject to physical constraints. Computing the gradient of
+the objective with respect to the design — the \emph{sensitivity} —
+is the central computational task, and the dominant strategy for
+problems with many design degrees of freedom is the \emph{adjoint
+method}: a single auxiliary linear solve (the ``adjoint'') replaces
+many directional forward solves that direct differentiation would
+require.
+
+\texttt{Macchiato.jl} implements this strategy for radial-basis-function
+finite-difference (RBF-FD) discretizations. RBF-FD is a meshless
+method: the discretization is a point cloud rather than a connected
+mesh, and the differential operators (Laplacian, divergence, mixed
+partial, etc.) are realized as sparse weight matrices built by local
+RBF stencil fitting. The meshless choice has structural advantages for
+shape optimization — discretization smoothly tracks geometry
+deformation, mesh tangling is not a concept, topology change is
+absorbed naturally — but it puts a premium on \emph{differentiability
+of the discretization itself}: the weight matrices, the boundary
+normals, the per-row coefficient blocks must all be differentiable
+functions of the point positions, and the adjoint must thread the
+gradient cleanly through every dependence.
+
+The pipeline reported here is a \emph{manual} discrete adjoint: we
+write each derivative analytically rather than rely on automatic
+differentiation through the whole computation. The motivation is
+twofold. First, AD through the full forward solve incurs significant
+LLVM compilation cost in our Julia setup; an earlier attempt to do
+this through Mooncake was abandoned after observing five-minute
+compile times even at $N=25$ points. Second, and more importantly,
+the analytic form makes each component inspectable, validateable
+against finite differences to machine precision, and reusable across
+physics: the same Step~2 adjoint solve, the same Step~4 backward pass
+through the RBF stencils, the same Step~3 coefficient-extraction
+pattern serve every PDE we will eventually plug into the framework.
+
+This document presents the full chain. Section~\ref{sec:problem} fixes
+notation. Section~\ref{sec:discretization} specifies the RBF-FD
+discretization of plane-stress linear elasticity, including the
+interior assembly, the Dirichlet rows, and the four-coefficient
+Neumann row family. Section~\ref{sec:adjoint-theory} derives the
+discrete adjoint from first principles, exposing the
+$\partial\mat A/\partial\pts$ and $\partial\vect b/\partial\pts$
+decompositions that drive every later step.
+Section~\ref{sec:five-steps} walks the five-step pipeline in detail,
+with the elasticity coefficient extraction in Step~3 worked out
+explicitly. Section~\ref{sec:boundary-diff} treats the differentiable
+Neumann data (Phase D Levels 1 and 2): shape-dependent traction
+values and shape-dependent boundary normals.
+Section~\ref{sec:filter} treats sensitivity filtering on the boundary
+loop, both the simple 3-point average and the Helmholtz-PDE filter.
+Section~\ref{sec:verification} describes the verification methodology.
+Section~\ref{sec:cantilever} runs the pipeline on a 2D cantilever
+example. Section~\ref{sec:plate} reorganizes the optimizer around a Fourier
+design space and active re-meshing for the plate-with-hole problem.
+Section~\ref{sec:generalization} maps the extensions ---
+to other elliptic PDEs, to nonlinear systems, to multi-physics, and
+to 3D. Section~\ref{sec:sota} positions the work relative to the
+state of the art. Section~\ref{sec:openwork} lists open work.
+
+\section{Continuous problem statement}
+\label{sec:problem}
+
+\subsection{Domain and design parameterization}
+
+Let $\Omega(\vect l) \subset \reals^d$ ($d \in \{2,3\}$) be a bounded
+domain whose shape is determined by a design vector
+$\vect l \in \reals^{n_l}$. The boundary
+$\partial\Omega = \Gamma_D \cup \Gamma_N$ partitions into disjoint
+parts where Dirichlet and Neumann data are prescribed. The shape
+dependence enters through any of three layers, which we keep separate
+throughout this document because they enter the gradient through
+distinct paths:
+
+\begin{enumerate}[label=(\roman*)]
+  \item \emph{Boundary-node positions} $\pts_b(\vect l)$ --- the
+        discrete-level identity of the boundary.
+  \item \emph{Interior-node positions} $\pts_i(\vect l)$ --- generated
+        from $\pts_b$ by a node-distribution policy (see
+        Section~\ref{sec:openwork}).
+  \item \emph{Boundary normals and traction data}
+        $\vect n(\vect l)$, $\vect t(\vect l)$ --- explicit functions
+        of the boundary geometry whenever the loading is
+        shape-coupled (e.g.\ parabolic shear on a free end whose
+        length is a design parameter, or follower pressure).
+\end{enumerate}
+
+Throughout the body of this report we lump the layered design
+parameterization into a single flat point-coordinate vector
+$\pts \in \reals^{d N}$ (the concatenation of all node coordinates),
+and ask for sensitivities with respect to $\pts$. The
+$\pts \mapsto \vect l$ step is handled by the geometry kernel in
+\texttt{WhatsThePoint.jl} and is, by deliberate design, kept outside
+the PDE side of the gradient.
+
+\subsection{Linear elasticity}
+
+The strong form, for plane-stress isotropic linear elasticity in 2D
+with Lamé parameters $(\lambda^\star, \mu)$:
+\begin{align}
+  \nabla \!\cdot\! \vect\sigma(\vect u) \;&=\; \vect 0
+    \quad &&\text{in } \Omega, \\
+  \vect u \;&=\; \vect u_D
+    \quad &&\text{on } \Gamma_D, \\
+  \vect\sigma(\vect u)\!\cdot\!\vect n \;&=\; \vect t
+    \quad &&\text{on } \Gamma_N,
+\end{align}
+with the constitutive law
+$\vect\sigma(\vect u) = \lambda^\star(\nabla\!\cdot\!\vect u)\,\mat I
+  + \mu(\nabla\vect u + \nabla\vect u^\top)$ and outward unit normal
+$\vect n$. The displacement $\vect u: \Omega \to \reals^2$ is the
+state.
+
+\subsection{The shape-optimization problem}
+
+Given an objective functional $\Loss(\vect u, \pts)$ and an optional
+geometric constraint $V(\pts) = V_0$ (typically area or volume), the
+shape-optimization problem is
+\begin{equation}
+  \min_{\pts}\; \Loss\big(\vect u(\pts),\, \pts\big)
+  \quad \text{s.t.}\quad
+  \begin{cases}
+    \nabla\!\cdot\!\vect\sigma(\vect u) = \vect 0
+      & \text{in } \Omega(\pts), \\
+    \vect u = \vect u_D & \text{on } \Gamma_D, \\
+    \vect\sigma\!\cdot\!\vect n = \vect t & \text{on } \Gamma_N, \\
+    V(\pts) = V_0.
+  \end{cases}
+  \label{eq:shape-opt}
+\end{equation}
+For the illustrative problem of Section~\ref{sec:cantilever} we use the
+compliance loss
+$\Loss(\vect u, \pts) = \vect b(\pts)^\top \vect u$ with the area
+constraint applied as a two-sided quadratic penalty
+$\rho_{\text{pen}}\big(V(\pts) - V_0\big)^2$ added to the objective.
+The treatment of the constraint is otherwise orthogonal to the
+adjoint machinery developed here.
+
+\section{RBF-FD discretization of elasticity}
+\label{sec:discretization}
+
+\subsection{Stencils and weight matrices}
+
+We sample the domain with $N$ collocation points
+$\{\pts_i\}_{i=1}^N \subset \overline\Omega$ and, for each one, build
+a local neighborhood (``stencil'') of the $k$ nearest neighbors.
+On each stencil we fit a polyharmonic-spline radial basis
+$\phi(r) = r^m$ (we use $m=3$) augmented by polynomials up to degree
+$p$ (we use $p=3$), and we solve a small saddle-point system that
+returns the coefficients of any linear differential operator
+$\mathcal L$ acting on the stencil basis. The resulting weights form
+a row of the sparse \emph{weight matrix}
+$\mat W^{\mathcal L} \in \reals^{N \times N}$: for each operator we
+need (second partials $\partial_{xx}, \partial_{yy}, \partial_{xy}$
+for elasticity interior assembly; first partials $\partial_x,
+\partial_y$ for Neumann traction assembly), the same stencil layout
+produces a different set of weights, but the sparsity pattern is
+shared across operators on the same stencil.
+
+The action $\mat W^{\mathcal L}$ on a discrete field
+$\vect v \in \reals^N$ approximates $\mathcal L v$ at each sample
+point:
+\begin{equation}
+  (\mat W^{\mathcal L} \vect v)_i
+  \;\approx\;
+  (\mathcal L v)(\pts_i),
+  \qquad i = 1,\ldots,N.
+\end{equation}
+Two facts will be central to the adjoint construction: \emph{(i)}
+$\mat W^{\mathcal L}$ is a smooth function of all $\pts_j$ in the
+stencil of row $i$, hence of $\pts$ globally; \emph{(ii)} the
+backward pass $\partial\mat W^{\mathcal L}/\partial\pts$ for given
+gradient $\Delta\mat W^{\mathcal L}$ is implemented as a pure-Julia
+routine \texttt{\_pullback\_weights!} in
+\texttt{RadialBasisFunctions.jl} that reuses the saddle-point
+factorization cached during the forward weight build, costing only
+$O(k^3)$ per row.
+
+\subsection{Block assembly of plane-stress elasticity}
+
+The displacement state is interleaved as
+$\vect u = (u_1,\ldots,u_N,\,v_1,\ldots,v_N)^\top \in \reals^{2N}$.
+The Navier equations $\nabla\!\cdot\!\vect\sigma = \vect 0$ in plane
+stress become, after expanding the constitutive law,
+\begin{align}
+  c_1 \partial_{xx} u + c_2 \partial_{yy} u + c_3 \partial_{xy} v
+    \;&=\; 0, \\
+  c_3 \partial_{xy} u + c_2 \partial_{xx} v + c_1 \partial_{yy} v
+    \;&=\; 0,
+\end{align}
+with $c_1 = \lambda^\star + 2\mu$, $c_2 = \mu$, $c_3 = \lambda^\star + \mu$.
+Substituting the discrete operators gives the $2N \times 2N$ block
+matrix
+\begin{equation}
+  \mat A_{\text{int}}
+  = \begin{bmatrix}
+    c_1 \mat W^{\partial_{xx}} + c_2 \mat W^{\partial_{yy}}
+    & c_3 \mat W^{\partial_{xy}} \\[2pt]
+    c_3 \mat W^{\partial_{xy}}
+    & c_2 \mat W^{\partial_{xx}} + c_1 \mat W^{\partial_{yy}}
+  \end{bmatrix}.
+  \label{eq:A-int}
+\end{equation}
+This block is applied at all interior rows. Boundary rows
+(Dirichlet, Neumann) overwrite the corresponding rows of
+$\mat A_{\text{int}}$ after assembly.
+
+\subsection{Dirichlet rows}
+
+For each Dirichlet point with global index $i \in \Gamma_D$, the
+$x$-equation row $i$ and the $y$-equation row $i+N$ are overwritten:
+\begin{equation}
+  \mat A[i,:] = \vect e_i^\top, \quad
+  \mat A[i{+}N,:] = \vect e_{i+N}^\top, \quad
+  b_i = u_{D,i}^x,\quad b_{i+N} = u_{D,i}^y.
+  \label{eq:dirichlet}
+\end{equation}
+These rows do not depend on $\pts$ at all, so they contribute zero
+to $\partial\mat A/\partial\pts$ and $\partial\vect b/\partial\pts$.
+
+\subsection{Neumann (traction) rows}
+\label{sec:neumann-row}
+
+For each Neumann point with local index
+$i_{\text{loc}} \in \{1,\ldots,n_{\text{neu}}\}$ and global index
+$g = \text{neumann\_ids}[i_{\text{loc}}]$, with outward unit normal
+$\vect n = (n_x, n_y)$, stencil $\mathcal S$, and prescribed traction
+$\vect t = (t_x, t_y)$, the discrete equations
+$\vect\sigma\!\cdot\!\vect n = \vect t$ become, after expanding the
+constitutive law and applying $\mat W^{\partial_x},
+\mat W^{\partial_y}$ on the stencil:
+\begin{align}
+  \mat A[g,\,j]
+    \;&=\; n_x(\lambda^\star{+}2\mu) \mat W^{\partial_x}[i_{\text{loc}},j]
+        + n_y\mu\, \mat W^{\partial_y}[i_{\text{loc}},j], \notag\\
+  \mat A[g,\,j{+}N]
+    \;&=\; n_y\mu\, \mat W^{\partial_x}[i_{\text{loc}},j]
+        + n_x \lambda^\star \mat W^{\partial_y}[i_{\text{loc}},j], \notag\\
+  \mat A[g{+}N,\,j]
+    \;&=\; n_y \lambda^\star \mat W^{\partial_x}[i_{\text{loc}},j]
+        + n_x\mu\, \mat W^{\partial_y}[i_{\text{loc}},j], \notag\\
+  \mat A[g{+}N,\,j{+}N]
+    \;&=\; n_x\mu\, \mat W^{\partial_x}[i_{\text{loc}},j]
+        + n_y(\lambda^\star{+}2\mu) \mat W^{\partial_y}[i_{\text{loc}},j],
+  \label{eq:neumann-row}
+\end{align}
+for each $j \in \mathcal S$, with
+$b_g = t_x$ and $b_{g+N} = t_y$. The pattern is: each Neumann row
+entry is a linear combination of one or more weight-matrix entries,
+with coefficients that depend on $(n_x, n_y, \lambda^\star, \mu)$.
+We package this in a \texttt{TractionLayout} struct, storing for
+each entry the pair $(c_x, c_y)$ that multiplies
+$\big(\mat W^{\partial_x}[i_{\text{loc}}, j],
+\mat W^{\partial_y}[i_{\text{loc}}, j]\big)$.
+
+\subsection{The full system}
+
+After applying~\eqref{eq:A-int}, \eqref{eq:dirichlet},
+and~\eqref{eq:neumann-row}, the assembled system is
+\begin{equation}
+  \mat A(\pts)\, \vect u \;=\; \vect b(\pts),
+  \label{eq:system}
+\end{equation}
+solved as a single LU factorization for the forward pass. Both
+$\mat A$ and $\vect b$ depend on $\pts$:
+\begin{itemize}[leftmargin=2em]
+  \item $\mat A$ via the interior weights
+        $\mat W^{\partial_{xx}}, \mat W^{\partial_{yy}},
+        \mat W^{\partial_{xy}}$ (always);
+  \item $\mat A$ via the Neumann weights
+        $\mat W^{\partial_x}, \mat W^{\partial_y}$ (whenever
+        $\Gamma_N$ is non-empty);
+  \item $\mat A$ via the boundary normals $\vect n$ (whenever the
+        normals are computed from the geometry rather than
+        prescribed --- Phase D Level 2);
+  \item $\vect b$ via the traction values $\vect t$ (whenever the
+        loading is shape-coupled --- Phase D Level 1);
+  \item $\vect b$ via interior body forces (none in the elasticity
+        examples here, but the framework is set up for it).
+\end{itemize}
+The Dirichlet rows of $\mat A$ and $\vect b$ are independent of
+$\pts$ by construction.
+
+\section{The discrete adjoint: derivation}
+\label{sec:adjoint-theory}
+
+\subsection{Total derivative of the loss}
+
+The loss has the structure
+\begin{equation}
+  \Loss(\vect u, \pts)
+  = \Loss_{\text{state}}(\vect u, \pts) + \Loss_{\text{geom}}(\pts),
+\end{equation}
+where $\Loss_{\text{state}}$ depends on the state $\vect u$ and
+optionally on $\pts$ directly, and $\Loss_{\text{geom}}$ depends on
+$\pts$ alone (e.g.\ the area penalty). The total derivative with
+respect to $\pts$ is
+\begin{equation}
+  \frac{\dd\Loss}{\dd\pts}
+  \;=\;
+  \underbrace{\frac{\partial\Loss}{\partial\vect u}\,
+    \frac{\dd\vect u}{\dd\pts}}_{\text{state-mediated}}
+  \;+\;
+  \underbrace{\frac{\partial\Loss}{\partial\pts}}_{\text{explicit}}.
+  \label{eq:total-deriv}
+\end{equation}
+The first term is what the adjoint method computes efficiently. The
+second is assembled explicitly in Step~5
+(Section~\ref{sec:step5-explicit}).
+
+\subsection{Sensitivity of the state via the implicit function theorem}
+
+Differentiating the linear system~\eqref{eq:system} with respect to
+$\pts$:
+\begin{equation}
+  \frac{\partial\mat A}{\partial\pts}\,\vect u
+  + \mat A \frac{\dd\vect u}{\dd\pts}
+  \;=\; \frac{\partial\vect b}{\partial\pts},
+\end{equation}
+so
+\begin{equation}
+  \frac{\dd\vect u}{\dd\pts}
+  \;=\;
+  \mat A^{-1}\Big(\frac{\partial\vect b}{\partial\pts}
+                  - \frac{\partial\mat A}{\partial\pts}\,\vect u\Big).
+  \label{eq:du-dp}
+\end{equation}
+Substituting back into~\eqref{eq:total-deriv}:
+\begin{equation}
+  \frac{\dd\Loss}{\dd\pts}
+  \;=\;
+  \frac{\partial\Loss}{\partial\vect u}\, \mat A^{-1}
+    \Big(\frac{\partial\vect b}{\partial\pts}
+        - \frac{\partial\mat A}{\partial\pts}\,\vect u\Big)
+  + \frac{\partial\Loss}{\partial\pts}.
+\end{equation}
+
+\subsection{The adjoint variable}
+
+Naively this requires one linear solve per coordinate ---
+$O(d N)$ solves --- because
+$\partial\vect b/\partial\pts$ and $\partial\mat A/\partial\pts$
+have a column per coordinate. The adjoint trick is to take the
+left contraction first. Define
+\begin{equation}
+  \boxed{\;\vect\eta
+    \;\equiv\; \mat A^{-\top}\,
+      \left(\tfrac{\partial\Loss}{\partial\vect u}\right)^{\!\!\top}\;,}
+  \qquad
+  \text{equivalently } \mat A^\top \vect\eta
+    = (\partial\Loss/\partial\vect u)^\top,
+  \label{eq:adjoint}
+\end{equation}
+which costs a single linear solve. Then
+$(\partial\Loss/\partial\vect u)\,\mat A^{-1}
+= \vect\eta^\top$, and
+\begin{equation}
+  \boxed{\;
+  \frac{\dd\Loss}{\dd\pts}
+  \;=\;
+  \vect\eta^\top \frac{\partial\vect b}{\partial\pts}
+  - \vect\eta^\top \frac{\partial\mat A}{\partial\pts}\,\vect u
+  + \frac{\partial\Loss}{\partial\pts}.
+  \;}
+  \label{eq:dLdp}
+\end{equation}
+This is the central identity. Every contribution to the gradient is
+some piece of $\partial\mat A/\partial\pts$ or
+$\partial\vect b/\partial\pts$ contracted against $\vect\eta$ and
+$\vect u$, plus the explicit term.
+
+\subsection{Decomposition of \texorpdfstring{$\partial\mat A/\partial\pts$}{dA/dp}}
+
+The assembled $\mat A$ depends on $\pts$ through several intermediate
+quantities. We unpack the chain rule, organizing the result by which
+component of the assembly responds:
+\begin{equation}
+  \frac{\partial\mat A}{\partial\pts}
+  \;=\;
+  \sum_{\mathcal L \in \{\partial_{xx}, \partial_{yy},
+       \partial_{xy}, \partial_x, \partial_y\}}
+       \frac{\partial\mat A}{\partial \mat W^{\mathcal L}}
+       \frac{\partial \mat W^{\mathcal L}}{\partial \pts}
+  \;+\;
+  \frac{\partial\mat A}{\partial\vect n}
+  \frac{\partial\vect n}{\partial\pts}.
+  \label{eq:dAdp-decomp}
+\end{equation}
+The first sum (over weight matrices) is the part that ``every PDE
+has'': it captures how the operators change as the points move.
+The second term (over normals) is specific to BCs that
+re-orient under deformation; it is the Phase D Level 2
+contribution and is zero whenever the normals are frozen.
+
+\subsection{Decomposition of \texorpdfstring{$\partial\vect b/\partial\pts$}{db/dp}}
+
+Symmetrically, $\vect b$ depends on $\pts$ through traction values
+on Neumann rows and (in principle) through body forces on interior
+rows:
+\begin{equation}
+  \frac{\partial\vect b}{\partial\pts}
+  \;=\;
+  \frac{\partial\vect b}{\partial\vect t}
+  \frac{\partial\vect t}{\partial\pts}
+  \;+\;
+  \frac{\partial\vect b}{\partial\vect f}
+  \frac{\partial\vect f}{\partial\pts}.
+  \label{eq:dbdp-decomp}
+\end{equation}
+The first term is Phase D Level 1 (shape-dependent dead loads).
+The second is identically zero in our cantilever example
+(body-force-free) but the framework accommodates it.
+
+\subsection{The five computational steps}
+
+Combining~\eqref{eq:dLdp} with the decompositions~\eqref{eq:dAdp-decomp}
+and~\eqref{eq:dbdp-decomp} yields the explicit form
+\begin{equation}
+  \begin{split}
+  \frac{\dd\Loss}{\dd\pts}
+  \;=\;\;&
+  \underbrace{
+    \vect\eta^\top \frac{\partial\vect b}{\partial\vect t}
+    \frac{\partial\vect t}{\partial\pts}
+    \;+\;
+    \vect\eta^\top \frac{\partial\vect b}{\partial\vect f}
+    \frac{\partial\vect f}{\partial\pts}
+  }_{\text{Step 5b: }\partial\vect b/\partial\pts}
+  \\
+  &\;\;-\;\;
+  \underbrace{
+    \sum_{\mathcal L}
+    \vect\eta^\top \frac{\partial\mat A}{\partial\mat W^{\mathcal L}}
+    \frac{\partial\mat W^{\mathcal L}}{\partial\pts}\,\vect u
+  }_{\text{Steps 3+4: } \partial\mat W/\partial\pts}
+  \;\;-\;\;
+  \underbrace{
+    \vect\eta^\top \frac{\partial\mat A}{\partial\vect n}
+    \frac{\partial\vect n}{\partial\pts}\,\vect u
+  }_{\text{Step 5c: } \partial\vect n/\partial\pts}
+  \;\;+\;\;
+  \underbrace{
+    \frac{\partial\Loss}{\partial\pts}.
+  }_{\text{Step 5a: explicit}}
+  \end{split}
+  \label{eq:five-pieces}
+\end{equation}
+This decomposes into the five computational steps that the
+implementation organizes:
+\begin{enumerate}
+  \item \textbf{Forward solve}: $\vect u = \mat A^{-1}\vect b$,
+        caching weight matrices and their RBF stencil factorizations.
+  \item \textbf{Adjoint solve}: $\mat A^\top \vect\eta
+        = (\partial\Loss/\partial\vect u)^\top$, single linear solve.
+  \item \textbf{Extract $\Delta\mat W$}: convert
+        $-\vect\eta^\top (\partial\mat A/\partial\mat W^{\mathcal L})
+        \vect u$ into a per-entry $\Delta\mat W^{\mathcal L}$ for each
+        operator, treating sparsity and per-row coefficients
+        analytically.
+  \item \textbf{Backward through RBF stencils}: convert each
+        $\Delta\mat W^{\mathcal L}$ into a contribution to
+        $\Delta\pts$ by calling
+        \texttt{\_pullback\_weights!}.
+  \item \textbf{External contributions}: add the explicit
+        $\partial\Loss/\partial\pts$ (Step 5a), the
+        $\partial\vect b/\partial\pts$ piece (Step 5b), and the
+        Phase D Level 2 $\partial\vect n/\partial\pts$ piece
+        (Step 5c).
+\end{enumerate}
+We now detail each step.
+
+\section{The five-step pipeline in detail}
+\label{sec:five-steps}
+
+\subsection{Step 1 --- forward solve and caching}
+
+Given $\pts$, build the five RBF weight matrices needed for elasticity
+($\mat W^{\partial_{xx}}, \mat W^{\partial_{yy}},
+\mat W^{\partial_{xy}}$ on all points; $\mat W^{\partial_x},
+\mat W^{\partial_y}$ on the Neumann sub-cloud). For each weight
+matrix, also retain the per-row \emph{cache} returned by
+\texttt{\_build\_weights\_and\_cache} ---
+this is the saddle-point factorization used to produce the row, and
+it is what \texttt{\_pullback\_weights!} reuses for the backward pass.
+
+Assemble $\mat A$ by combining the interior block~\eqref{eq:A-int}
+with Dirichlet identity rows~\eqref{eq:dirichlet} and Neumann
+rows~\eqref{eq:neumann-row}. Assemble $\vect b$ from prescribed
+Dirichlet values, traction values $\vect t$, and (if present) body
+forces.
+
+Factor $\mat A$ once (LU) and solve $\vect u = \mat A^{-1}\vect b$.
+The same factorization will be reused for Step 2.
+
+\subsection{Step 2 --- adjoint solve}
+
+Form $(\partial\Loss/\partial\vect u)^\top$ analytically (cheap for
+the typical losses --- $2\vect u$ for $\Loss = \norm{\vect u}^2$,
+$\vect b$ for compliance $\Loss = \vect b^\top \vect u$, etc.). Solve
+$\mat A^\top \vect\eta = (\partial\Loss/\partial\vect u)^\top$ using
+the cached factorization of $\mat A$. Cost: one back-substitution.
+
+For compliance specifically, $\vect\eta = \mat A^{-\top} \vect b
+= \vect u$ if $\mat A$ is symmetric --- the so-called
+\emph{self-adjoint} case. Our $\mat A$ is symmetric for the standard
+elasticity row family (it can be made so by symmetrizing the
+Neumann rows), but we run the explicit adjoint solve anyway to
+avoid relying on this property when the formulation is extended.
+
+\subsection{Step 3 --- extract \texorpdfstring{$\Delta\mat W$ from $\Delta\mat A$}{Delta W from Delta A}}
+\label{sec:step3}
+
+This is the most code-dense step. The goal is to translate
+\begin{equation}
+  \Delta\mat A
+  \;=\; -\vect\eta\,\vect u^\top
+  \quad \in \reals^{2N \times 2N}
+\end{equation}
+into per-operator sensitivities $\Delta\mat W^{\mathcal L}
+\in \reals^{N \times N}$ that capture
+$-\vect\eta^\top(\partial\mat A/\partial\mat W^{\mathcal L})\vect u$
+in a single expression per nonzero entry. The decomposition is
+done analytically using the elasticity coefficient structure
+in~\eqref{eq:A-int} (interior) and~\eqref{eq:neumann-row} (Neumann).
+
+\subsubsection{Interior rows}
+
+Each interior row family is governed by~\eqref{eq:A-int}. For a pair
+of points $(i, j)$ with $j$ in the stencil of $i$, the four
+$2\times 2$ block entries are
+\begin{align}
+  \mat A[i,j]      &= c_1 \mat W^{\partial_{xx}}_{ij} + c_2 \mat W^{\partial_{yy}}_{ij},
+  & \mat A[i, j{+}N]   &= c_3 \mat W^{\partial_{xy}}_{ij}, \\
+  \mat A[i{+}N, j] &= c_3 \mat W^{\partial_{xy}}_{ij},
+  & \mat A[i{+}N, j{+}N] &= c_2 \mat W^{\partial_{xx}}_{ij} + c_1 \mat W^{\partial_{yy}}_{ij}.
+\end{align}
+Setting $t_{11} = -\eta_i u_j$, $t_{22} = -\eta_{i+N} u_{j+N}$,
+$t_{12} = -\eta_i u_{j+N}$, $t_{21} = -\eta_{i+N} u_j$ (the four
+$2{\times}2$ entries of $\Delta\mat A[i,j;\, i+N, j+N]$), the
+back-projection onto the operators is
+\begin{equation}
+  \boxed{\;
+  \begin{aligned}
+    \Delta\mat W^{\partial_{xx}}_{ij} \;&=\; c_1 t_{11} + c_2 t_{22}, \\
+    \Delta\mat W^{\partial_{yy}}_{ij} \;&=\; c_2 t_{11} + c_1 t_{22}, \\
+    \Delta\mat W^{\partial_{xy}}_{ij} \;&=\; c_3 (t_{12} + t_{21}).
+  \end{aligned}
+  \;}
+  \label{eq:interior-extract}
+\end{equation}
+This is the \texttt{extract\_weight\_sensitivities\_elasticity!}
+routine in \texttt{src/optimization/manual\_adjoint.jl}. It walks
+the shared sparsity pattern of the three weight matrices once and
+populates all three $\Delta\mat W$ in a single pass.
+
+\paragraph{Per-DOF active mask.}
+At rows that are overwritten with Dirichlet identity (where
+$\partial\mat A/\partial\mat W = 0$ for that row), the
+contribution must be gated to zero so we do not accidentally pick
+up the identity-row sensitivities. We carry an
+\texttt{active::Vector\{Bool\}} of length $2N$ and apply the
+gating per-DOF:
+\begin{equation}
+  t_{ab} \;=\; \begin{cases}
+    \text{(formula above)} & \text{if active}[i\,(+N\,\text{if}\,a{=}2)] \\
+    0 & \text{otherwise}.
+  \end{cases}
+\end{equation}
+The per-DOF granularity (not per-point) matters: a corner can be
+Dirichlet in $x$ but Neumann in $y$, and the mask correctly
+suppresses only the Dirichlet half.
+
+\paragraph{Skipping Neumann rows in the interior loop.}
+The interior block~\eqref{eq:A-int} is not the equation actually
+imposed on Neumann rows after overwriting in~\eqref{eq:neumann-row}.
+The Step 3 loop therefore restricts the interior extraction to
+rows where the interior assembly is in effect (i.e.\ rows not in
+$\Gamma_D$ and not in $\Gamma_N$), via an
+\texttt{interior\_rows::BitVector} parameter.
+
+\subsubsection{Neumann rows}
+\label{sec:step3-neumann}
+
+For each Neumann point with local index $i_{\text{loc}}$ and global
+index $g$, the Neumann row family~\eqref{eq:neumann-row} writes each
+$\mat A[g,\,\cdot]$ and $\mat A[g{+}N,\,\cdot]$ entry as a linear
+combination of $\mat W^{\partial_x}[i_{\text{loc}},\,\cdot]$ and
+$\mat W^{\partial_y}[i_{\text{loc}},\,\cdot]$ with coefficients
+that depend on $(n_x, n_y, \lambda^\star, \mu)$. Storing these
+coefficients in a flat array \texttt{coeffs}, the
+\texttt{TractionLayout} struct catalogues, for each entry, its
+$(c_x, c_y)$ pair and the $(w_{\text{col}})$ index in the weight
+matrices. Given the Step 3 base assignment $\Delta a = -\eta_g u_c$,
+the back-projection onto the weight matrices is simply
+\begin{equation}
+  \boxed{\;
+  \Delta\mat W^{\partial_x}_{i_{\text{loc}},\, w_{\text{col}}}
+    \mathrel{+}= c_x \Delta a, \qquad
+  \Delta\mat W^{\partial_y}_{i_{\text{loc}},\, w_{\text{col}}}
+    \mathrel{+}= c_y \Delta a.
+  \;}
+\end{equation}
+This is \texttt{extract\_neumann\_sensitivities!}. It is gated by
+the same \texttt{active} mask and accumulates additively into the
+$\Delta\mat W$ already populated by the interior extraction.
+
+\subsection{Step 4 --- backward through the RBF stencils}
+\label{sec:step4}
+
+Given $\Delta\mat W^{\mathcal L}$ for each operator, we need
+$\Delta\pts$ contributions such that
+$\partial\mat W^{\mathcal L}/\partial\pts \cdot \Delta\pts^\top
+= \Delta\mat W^{\mathcal L}$ in the standard pullback sense. This
+is provided by \texttt{\_pullback\_weights!} in
+\texttt{RadialBasisFunctions.jl}, which we call once per operator.
+The routine reuses the saddle-point factorization cached in Step 1
+and runs purely as Julia linear algebra --- no automatic
+differentiation framework is involved.
+
+For each operator we call
+\begin{equation}
+  \Delta\pts \;\mathrel{+}=\;
+  \texttt{\_pullback\_weights!}\big(
+    \Delta\mat W^{\mathcal L},\;
+    \mat W^{\mathcal L},\;
+    \text{cache},\;
+    \pts,\;
+    \text{eval\_pts},\;
+    \text{adjl},\;
+    \text{basis},\;
+    \mathcal L
+  \big),
+\end{equation}
+where \texttt{eval\_pts} is the full point cloud for the interior
+operators and the Neumann sub-cloud for the Neumann operators
+(with an \texttt{eval\_offset} array to map back to global indices
+for the Neumann case). The cost per operator is
+$O(N k^3)$ for the per-row cache replay, dominated by the cube of
+stencil size.
+
+\subsection{Step 5 --- external contributions}
+
+The three pieces collected in Step 5 are independent of the
+$\Delta\mat W$ pipeline and are added directly to $\Delta\pts$.
+
+\subsubsection{Step 5a --- the explicit
+\texorpdfstring{$\partial\Loss/\partial\pts$}{dL/dp}}
+\label{sec:step5-explicit}
+
+The loss may depend on $\pts$ directly through geometric quantities.
+The canonical case is the area penalty
+$\Loss_{\text{geom}}(\pts) = \rho_{\text{pen}}(V(\pts) - V_0)^2$.
+With the shoelace formula on the boundary loop,
+$\partial V/\partial \pts_i$ is sparse (nonzero only on boundary
+points) and analytic. This term is added in the example via the
+helper \texttt{polygon\_area\_grad!}.
+
+\subsubsection{Step 5b ---
+\texorpdfstring{$\partial\vect b/\partial\pts$ (Phase D Level 1)}
+{db/dp (Phase D L1)}}
+\label{sec:step5-load}
+
+When the traction $\vect t$ depends on $\pts$ --- the
+\emph{dead-load} case --- the contribution
+$\vect\eta^\top\,\partial\vect b/\partial\pts$ is non-zero. The
+dependence can take two qualitatively different forms, and the
+machinery is set up to handle both:
+\begin{description}[leftmargin=2em,style=nextline]
+  \item[\textbf{Direct local dependence.}]
+    The traction at Neumann point $g$ is a function only of $\pts_g$
+    itself: $\vect t_g = \vect t(\pts_g)$. A typical case is a
+    profile prescribed by location, e.g.\ a parabolic shear
+    $t_y(y) = P(D^2 - y^2)/(2I)$ depending on the local $y$-coord.
+    The Jacobian
+    $\mat J^{(i_{\text{loc}})} \equiv \partial\vect t_g/\partial\pts_g$
+    is a single $2\times 2$ matrix per Neumann point.
+  \item[\textbf{Indirect non-local dependence.}]
+    The traction at Neumann point $g$ depends not only on $\pts_g$
+    but on the coordinates of \emph{other} boundary points through
+    an intermediate geometric quantity. For example, in the
+    cantilever the same parabolic-shear formula with a
+    physically-meaningful effective half-depth
+    $D_{\text{eff}} = (y_{\text{top corner}} - y_{\text{bot corner}})/2$
+    induces dependence of every right-edge Neumann traction on the
+    two corner $y$-coordinates via
+    $\partial \vect t/\partial D_{\text{eff}}
+     \cdot \partial D_{\text{eff}}/\partial \pts_{\text{corner}}$.
+    The Jacobian
+    $\mat J^{(i_{\text{loc}}, q)} \equiv \partial\vect t_g/\partial\pts_q$
+    is now in general non-zero for several $q \ne g$.
+\end{description}
+In both cases the gradient contribution is the same chain-rule
+product; the only difference is how many destinations the gradient
+flows to:
+\begin{equation}
+  \boxed{\;
+  \Delta\pts_q \;\mathrel{+}=\;
+  \begin{pmatrix} \eta_g \\ \eta_{g+N} \end{pmatrix}^{\!\top}\!
+  \mat J^{(i_{\text{loc}}, q)},
+  \qquad
+  \mat J^{(i_{\text{loc}}, q)}_{a,b}
+    = \frac{\partial t_a}{\partial p_{q,b}}.\;}
+  \label{eq:l1-eta-side}
+\end{equation}
+The direct case is handled by
+\texttt{extract\_load\_sensitivities!} called with a per-Neumann-point
+$2\times 2$ Jacobian. The indirect case is handled by a thin
+companion routine that, for each Neumann point whose traction
+depends on a non-local quantity $Q(\pts)$, contracts
+$(\partial t/\partial Q)$ with $\eta_g, \eta_{g+N}$ and distributes
+the result through the (typically sparse) Jacobian
+$\partial Q/\partial\pts$. The $D_{\text{eff}}$ case above is one
+example; a follower pressure
+$\vect t = -p\,\vect n$ would be another, with the gradient
+flowing through both the polyline-normal Jacobian
+of Section~\ref{sec:l2} and a $\partial p/\partial\pts$ if the
+pressure itself is shape-coupled.
+
+\paragraph{Why this is not the only $b$-side contribution.}
+The compliance loss $\Loss = \vect b^\top \vect u$ depends on
+$\vect b$ \emph{explicitly}: $\partial\Loss/\partial\vect b
+= \vect u^\top$. The total $b$-side sensitivity is therefore
+\begin{equation}
+  \frac{\dd\Loss}{\dd\pts}\Big|_b
+  \;=\;
+  \vect\eta^\top \frac{\partial\vect b}{\partial\pts}
+  \;+\;
+  \frac{\partial\Loss}{\partial\vect b}\,
+  \frac{\partial\vect b}{\partial\pts}
+  \;=\;
+  (\vect\eta + \vect u)^\top \frac{\partial\vect b}{\partial\pts}
+\end{equation}
+for compliance. The first term is the $\vect\eta$-side contribution
+and is computed inside \texttt{shape\_gradient} when the traction
+Jacobian is supplied. The second is the $\vect u$-side
+contribution and must be added by the caller, by a \emph{second}
+call to the same load-sensitivity routine with $\vect u$ in place
+of $\vect\eta$. Missing the second term introduces a $\sim 40\%$
+FD error on a compliance loss --- a hazard explicitly flagged in
+\texttt{CLAUDE.md}.
+
+\paragraph{A note on the adjoint output.}
+For losses with non-trivial $\partial\Loss/\partial\vect b$, the
+caller needs $\vect\eta$ \emph{and} $\vect u$ available outside
+\texttt{shape\_gradient} so it can run the second
+load-sensitivity contraction. The pipeline therefore returns
+$\vect\eta$ alongside $\vect u$ as part of the
+\texttt{shape\_gradient} result, avoiding a redundant adjoint
+solve at the caller.
+
+\subsubsection{Step 5c --- \texorpdfstring{$\partial\vect n/\partial\pts$}{dn/dp}
+(Phase D Level 2)}
+\label{sec:step5-normals}
+
+This is the term that closes the differentiability of the
+Neumann assembly when the normals are shape-dependent. We give
+it a dedicated section (Section~\ref{sec:l2}) because the
+derivation is substantial.
+
+\section{Differentiable Neumann data}
+\label{sec:boundary-diff}
+
+\subsection{Phase D Level 1 --- shape-dependent traction values}
+
+The case where $\vect t$ depends on $\pts$ was covered in
+Section~\ref{sec:step5-load}. The implementation surface is small ---
+a kwarg \texttt{traction\_jacobians} on \texttt{shape\_gradient},
+plus the helper \texttt{extract\_load\_sensitivities!} ---
+because the analytic content (the per-point $2\times 2$
+$\partial\vect t/\partial\pts_g$ matrix) is supplied by the
+caller, and the framework just does the contraction with
+$\vect\eta$ (and, if needed, with $\vect u$). The framework is
+backward-compatible: omitting \texttt{traction\_jacobians} reduces
+to the frozen-load case used by earlier phases.
+
+\subsection{Phase D Level 2 --- differentiable normals}
+\label{sec:l2}
+
+\subsubsection{Motivation}
+
+The normals $\vect n$ enter the Neumann row coefficients
+in~\eqref{eq:neumann-row}. If $\vect n$ is frozen at a reference
+value, $\partial\mat A/\partial\vect n \cdot \partial\vect n/\partial\pts
+= 0$ and the Neumann assembly contributes to the gradient only
+through $\partial\mat W^{\partial_x}/\partial\pts$ and
+$\partial\mat W^{\partial_y}/\partial\pts$. This is sufficient
+when boundary points are constrained to move along their reference
+edge (so their normals do not rotate), but fails for any geometry
+where boundary points can move freely --- in particular, for
+corner DOFs and for free-form boundaries.
+
+\subsubsection{Chord-formula vertex normal}
+
+Let $\mathcal P = (P_1, P_2, \ldots, P_M)$ be the CCW-ordered closed
+polyline of boundary vertices, with cyclic indexing. For Neumann
+point $i_{\text{loc}}$ at position $k$ in $\mathcal P$ we define
+\begin{equation}
+  \vect n_{i_{\text{loc}}}(\pts)
+  \;=\;
+  \mat R(-\pi/2)\,
+  \frac{\pts_{P_{k+1}} - \pts_{P_{k-1}}}{\norm{\pts_{P_{k+1}} - \pts_{P_{k-1}}}},
+  \qquad
+  \mat R(-\pi/2) = \begin{pmatrix} 0 & 1 \\ -1 & 0 \end{pmatrix}.
+  \label{eq:chord-normal}
+\end{equation}
+At an edge midpoint where $P_{k\pm 1}$ are collinear with $P_k$
+this reduces to the canonical edge normal; at a polygon corner it
+yields a length-weighted bisector, biased toward the longer of the
+two adjacent edges. We discuss the corner subtlety in
+Section~\ref{sec:corner-fix}.
+
+\subsubsection{Closed-form sparse Jacobian}
+
+With $\vect d \equiv \pts_{P_{k+1}}-\pts_{P_{k-1}}$,
+$\ell = \norm{\vect d}$, and unit tangent
+$\vect t = \vect d/\ell = (t_x, t_y)$, direct differentiation
+of~\eqref{eq:chord-normal} gives
+\begin{equation}
+  \frac{\partial\vect n}{\partial\vect d}
+  \;=\;
+  \frac{1}{\ell}
+  \begin{pmatrix}
+    -t_x t_y & \phantom{-}t_x^2 \\
+    -t_y^2  & \phantom{-}t_x t_y
+  \end{pmatrix},
+  \qquad
+  \frac{\partial\vect d}{\partial \pts_{P_{k+1}}} = +\mat I, \quad
+  \frac{\partial\vect d}{\partial \pts_{P_{k-1}}} = -\mat I.
+  \label{eq:chord-jac}
+\end{equation}
+The Jacobian of $\vect n_{i_{\text{loc}}}$ with respect to all
+boundary coordinates is sparse with nonzeros at exactly two
+vertices, $P_{k-1}$ and $P_{k+1}$. We package this in a
+\texttt{NormalJacobian} struct storing the four $\reals^2$ blocks
+$\partial n_a/\partial \pts_{P_{k\pm 1}}$ for $a \in \{x, y\}$.
+A standalone unit test
+(\texttt{examples/test\_polyline\_normals.jl}) verifies
+\eqref{eq:chord-jac} against \texttt{FiniteDifferences.central\_fdm(5,1)}
+with worst-case relative error $3.9\times 10^{-12}$ on a perturbed
+rectangle.
+
+\subsubsection{Adjoint contribution from \texorpdfstring{$\partial\vect n/\partial\pts$}{dn/dp}}
+
+Returning to~\eqref{eq:five-pieces}, the L2 contribution is
+$- \vect\eta^\top (\partial\mat A/\partial\vect n)
+   (\partial\vect n/\partial\pts) \vect u$. Each Neumann row $g$
+contributes
+\begin{equation}
+  -\eta_g \sum_c
+   \frac{\partial\mat A[g,c]}{\partial\vect n}
+   \frac{\partial\vect n_{i_{\text{loc}}}}{\partial\pts_q}\,
+   u_c.
+\end{equation}
+Because each Neumann row entry~\eqref{eq:neumann-row} is a linear
+function of $(n_x, n_y)$, the partial derivatives
+$\partial\mat A[g,c]/\partial n_a$ are constants drawn from
+$\{0, \lambda^\star, \mu, \lambda^\star{+}2\mu\}$ multiplied by
+either $\mat W^{\partial_x}_{i_{\text{loc}},c'}$ or
+$\mat W^{\partial_y}_{i_{\text{loc}},c'}$. Pre-contracting over
+$c$ yields scalar coefficients $r^{(g)}_a$:
+\begin{equation}
+  r^{(g)}_a
+  \;\equiv\;
+  \sum_{p \in \text{entries}(g)}
+    \frac{\partial \alpha_p}{\partial n_a}\,
+    \mat W^{\mathcal L_p}[i_{\text{loc}}, w_p]\, u_{c_p},
+  \qquad a \in \{x, y\}.
+  \label{eq:row-contraction}
+\end{equation}
+The L2 contribution to $\Delta\pts_q$ is then
+\begin{equation}
+  \boxed{\;
+  \Delta\pts_q \;\mathrel{+}=\;
+  -\!\!\!\sum_{a \in \{x,y\}}
+   \big(\eta_g\, r^{(g)}_a + \eta_{g+N}\, r^{(g+N)}_a\big)\,
+   \frac{\partial n_a}{\partial \pts_q},
+   \;}
+  \label{eq:l2-distribute}
+\end{equation}
+nonzero only for $q \in \{P_{k-1}, P_{k+1}\}$ via the sparse
+\texttt{NormalJacobian}. This is the routine
+\texttt{extract\_normal\_sensitivities!}. It is invoked from
+\texttt{shape\_gradient} when the caller supplies the
+\texttt{normal\_jacobians} kwarg; default \texttt{nothing}
+preserves the original frozen-normal behavior.
+
+\subsubsection{The corner pathology}
+\label{sec:corner-fix}
+
+For a 90$^\circ$ corner with adjacent edge segments of lengths
+$\Delta x \ne \Delta y$, the chord normal~\eqref{eq:chord-normal}
+is \emph{not} the angular bisector of the two adjacent edge
+normals. At the cantilever's top-right corner with
+$\Delta x = 1.0, \Delta y = 0.5$, the chord formula gives
+$\vect n = (1, 2)/\sqrt 5 \approx (0.447, 0.894)$, biased toward
+the top-edge normal. Imposing $\vect\sigma\!\cdot\!\vect n = \vect 0$
+at the corner with this normal gives the linear combination
+$\sigma_{xx} + 2\sigma_{xy} = 0$ and $\sigma_{xy} + 2\sigma_{yy} = 0$,
+which is misaligned with the beam-natural condition
+$\sigma_{xx} = 0$ at the free end.
+
+In the cantilever example we resolve this pragmatically by
+overriding the corner normal to the canonical $(1,0)$ and zeroing
+the corresponding \texttt{NormalJacobian} entries. The corner
+\emph{coordinates} remain free design variables; the L2
+sensitivity still flows through the corner because the corner
+appears as one of the $(P_{k-1}, P_{k+1})$ neighbors of its
+adjacent edge midpoints, and those midpoints' chord normals rotate
+when the corner moves. The general handling of corners ---
+selecting between the chord formula, the angular bisector, or a
+physics-aware convention --- belongs in the geometry kernel and is
+discussed in Section~\ref{sec:openwork}.
+
+\section{Sensitivity filtering on the boundary loop}
+\label{sec:filter}
+
+\subsection{Why filter at all?}
+
+The raw discrete gradient
+$\Delta\pts^{\text{raw}} \equiv \dd\Loss/\dd\pts$ produced by Steps
+1--5 is the exact gradient of the discrete loss function. It is
+also typically contaminated, in RBF-FD discretizations, by a
+\emph{Nyquist-mode} noise component: along each smooth edge of the
+boundary, the gradient values at adjacent boundary nodes can have
+large alternating-sign differences. This is not a bug --- the FD
+validation passes to $10^{-7}$ --- but it is an artefact of the
+local RBF stencil truncation. Without filtering, gradient descent
+amplifies this mode at every iteration and the design quickly
+diverges into a checkerboard pattern.
+
+\subsection{The 3-point Nyquist filter}
+
+The simplest mitigation is a single-pass 3-point average along the
+CCW boundary loop:
+\begin{equation}
+  g_k^{\text{smooth}}
+  \;=\; \alpha\, g_{k-1} + (1 - 2\alpha)\, g_k + \alpha\, g_{k+1},
+  \qquad \alpha = \tfrac{1}{4}.
+\end{equation}
+The transfer function for a periodic sinusoid of wavenumber
+$\omega$ per segment is
+\begin{equation}
+  H_3(\omega) \;=\; 1 - 4\alpha\sin^2(\omega/2)
+  \;=\; \cos^2(\omega/2)\quad\text{at }\alpha=\tfrac14.
+\end{equation}
+This is a strict zero at $\omega = \pi$ (Nyquist mode killed) but
+leaves intermediate frequencies largely intact:
+$H_3(\pi/2) = \tfrac12$, $H_3(\pi/4) \approx 0.85$. The optimizer
+can therefore still pump energy into modes around half-Nyquist and
+below.
+
+\subsection{The Helmholtz-PDE filter}
+
+To suppress medium-wavelength modes we solve, instead, an elliptic
+PDE on the closed boundary loop:
+\begin{equation}
+  (\mat I - r^2\,\nabla^2_{\text{loop}})\, \vect g^{\text{smooth}}
+  \;=\; \vect g^{\text{raw}},
+  \label{eq:helmholtz}
+\end{equation}
+where $\nabla^2_{\text{loop}}$ is the standard 1D periodic Laplacian
+on the loop, stencil $[-1, 2, -1]$ at each vertex with its cyclic
+neighbors. The parameter $r$ has units of boundary segments and
+sets the length scale of attenuation. Frozen boundary entries are
+imposed as identity rows in the system so the gradient is
+attenuated as it approaches a clamped (Dirichlet) region.
+
+The Fourier-mode multiplier is
+\begin{equation}
+  H_H(\omega; r) \;=\; \frac{1}{1 + 4r^2\sin^2(\omega/2)}.
+  \label{eq:hh-transfer}
+\end{equation}
+Selected values:
+
+\begin{table}[h]
+\centering
+\caption{Filter transfer at representative wavenumbers.
+$H_3$ is the 3-point average; $H_H(\cdot;r)$ is the Helmholtz
+filter~\eqref{eq:hh-transfer}.}
+\label{tab:filter-transfer}
+\begin{tabular}{lccc}
+\toprule
+$\omega$ & $H_3$ & $H_H(r=1)$ & $H_H(r=2)$ \\
+\midrule
+$0$           (DC)            & 1.00 & 1.00 & 1.00 \\
+$\pi/4$       (period 8)      & 0.85 & 0.62 & 0.29 \\
+$\pi/2$       (period 4)      & 0.50 & 0.33 & 0.09 \\
+$\pi$         (Nyquist)       & 0.00 & 0.20 & 0.06 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Implementation}
+
+The discrete system is a cyclic tridiagonal of size
+$M$ (number of boundary loop vertices); for $M \sim 24$ a dense
+$M \times M$ solve is microseconds. The implementation in
+\texttt{examples/shape\_optimization\_phase3\_cantilever.jl} is:
+\begin{lstlisting}[caption={Helmholtz boundary filter --- discrete cyclic Laplacian with frozen-entry rows.}]
+function helmholtz_filter_along_boundary!(out, in_, loop, free_mask; r=1.0)
+    out .= in_
+    n_loop = length(loop)
+    A = zeros(n_loop, n_loop)
+    rhs = zeros(n_loop)
+    for k in 1:n_loop
+        i_curr = loop[k]
+        rhs[k] = in_[2 * i_curr]
+        if free_mask[2 * i_curr]
+            k_prev = mod1(k - 1, n_loop); k_next = mod1(k + 1, n_loop)
+            A[k, k_prev] = -r*r;  A[k, k] = 1 + 2*r*r;  A[k, k_next] = -r*r
+        else
+            A[k, k] = 1.0  # identity row, frozen entry passes through
+        end
+    end
+    f = A \ rhs
+    for k in 1:n_loop
+        i_curr = loop[k]
+        free_mask[2 * i_curr] || continue
+        out[2 * i_curr] = f[k]
+    end
+    return out
+end
+\end{lstlisting}
+For larger boundary loops the dense solve would be replaced by a
+sparse cyclic-tridiagonal solver
+(Thomas algorithm + Sherman--Morrison), which is $O(M)$.
+
+\section{Verification methodology}
+\label{sec:verification}
+
+The discrete-adjoint pipeline is checked at every phase by
+comparing the analytic gradient to a fifth-order central
+finite-difference reference. The validation is built into each of
+the standalone Phase A and Phase B examples and into the
+illustrative Phase 3 cantilever:
+\begin{equation}
+  \text{rel\_err}(\pts)
+  \;\equiv\;
+  \frac{\norm{\nabla_{\pts}\Loss\,\big|_{\text{AD}}
+              - \nabla_{\pts}\Loss\,\big|_{\text{FD}}}_2}{\norm{\nabla_{\pts}\Loss\,\big|_{\text{FD}}}_2},
+\end{equation}
+with the FD reference computed by
+\texttt{FiniteDifferences.central\_fdm(5,1)}. The targets are
+machine precision: rel\_err $\sim 10^{-11}$ for Dirichlet-only
+problems (Phase A), $\sim 10^{-7}$ for problems with traction BCs
+(Phase B and beyond --- the lower precision is due to FD truncation
+error on the larger relevant scale, not to the AD pipeline).
+
+For the cantilever in Section~\ref{sec:cantilever} we additionally
+probe two qualitative properties:
+\begin{itemize}[leftmargin=2em]
+  \item \textbf{Top/bottom symmetry.}\;
+        The cantilever geometry and loading are symmetric under
+        $y \to -y$. We match top-edge nodes to their bottom-edge
+        mirrors by $x$-coordinate and compute
+        $\max_i \lvert g_y(\text{top}_i) + g_y(\text{bot}_i)\rvert$.
+        On the reference geometry this is $\sim 10^{-8}$, i.e.\
+        symmetric to floating-point rounding.
+  \item \textbf{Spectral content of the raw gradient.}\;
+        We project the iter-0 gradient onto the alternating-sign
+        mode $\phi_\pi$ of the boundary loop and check its weight.
+        Globally this is essentially zero ($\sim 10^{-9}$); on
+        each individual edge, however, the raw gradient is
+        strongly Nyquist-aligned, by an amount the 3-point filter
+        is designed to suppress.
+\end{itemize}
+Together these three diagnostics --- finite differences, symmetry,
+and spectral content --- are sufficient to distinguish a true
+implementation error (which would fail finite-differences) from a
+regularization issue (which would fail spectral content but pass
+finite differences) from a discretization symmetry break (which
+would fail symmetry alone).
+
+\section{Illustrative example: the cantilever}
+\label{sec:cantilever}
+
+\subsection{Setup}
+
+We illustrate the pipeline end-to-end on a 2D cantilever. Domain
+$[0, L] \times [-D, D]$ with $L = 8.0$, $D = 1.0$, modulus
+$E = 10^7$, Poisson ratio $\nu = 0.3$, RBF basis $\phi(r) = r^3$
+with augmenting polynomial degree 3 and stencil size $k = 35$.
+We discretize with a 9$\times$5 regular grid ($N = 45$). The
+loading is a parabolic shear traction on the right edge,
+$t_y(y) = P(D^2 - y^2)/(2I)$ with $P = 10^3$, $I = 2D^3/3$, zero
+on top and bottom. The left edge is clamped.
+
+The loss is compliance plus a two-sided area penalty:
+\begin{equation}
+  \Loss(\pts) = \vect b(\pts)^\top \vect u(\pts)
+    \;+\; \rho_{\text{pen}}\big(V(\pts) - V_0\big)^2,
+  \qquad \rho_{\text{pen}} = 10^3.
+\end{equation}
+Design variables are the $y$-coordinates of the Neumann-boundary
+points; the optimizer is plain gradient descent with Armijo
+backtracking; the iteration budget is 40.
+
+\subsection{End-to-end workflow}
+
+At each iteration:
+\begin{enumerate}
+  \item Refresh the live traction values and (when L2 is active)
+        the live polyline normals on \texttt{traction\_layout}.
+  \item Compute the analytic gradient via \texttt{shape\_gradient}
+        (Steps 1--4 + the Phase D L1 $\vect\eta$-side b-contribution).
+  \item Add the $\vect u$-side Phase D L1 contribution
+        (\texttt{extract\_load\_sensitivities!} with $\vect u$).
+  \item Add the area-penalty gradient (Step 5a).
+  \item Apply the sensitivity filter on the boundary loop, then
+        mask to the free DOFs.
+  \item Armijo backtracking line search; update $\pts$.
+\end{enumerate}
+
+\subsection{Snapshot results}
+
+Numerical results are reported here as a snapshot of the
+pipeline's qualitative behavior during active development. The
+\emph{absolute} compliance figures may shift as the cantilever
+example is refined --- in particular, an artefact in the
+tip-shrinkage gradient sign was masked by an earlier corner-freeze
+convention and is being repaired at the time of writing. The
+\emph{qualitative} contrasts between configurations (effect of L2
+on the corner DOF, effect of filter choice on the boundary
+smoothness) are robust and survive that refinement.
+
+\begin{table}[h]
+\centering
+\caption{Snapshot of three configurations on the cantilever
+benchmark, 40 iterations each. All configurations pass the
+finite-difference validation at iter 0 to
+$\text{rel\_err} \sim 10^{-7}$.}
+\label{tab:results}
+\begin{tabular}{lrr}
+\toprule
+Configuration & $\Delta C / C_0$ & boundary appearance \\
+\midrule
+(A) corners frozen, 3-point filter           & $-47.6\%$ & mild waviness \\
+(B) corners free, 3-point filter             & $-52.1\%$ & visible long-wavelength undulation \\
+(C) corners free, Helmholtz $r{=}1$ filter   & $-46.6\%$ & visibly smooth \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{phase3_corners_frozen.png}
+\caption{Configuration (A): corners frozen, 3-point filter.}
+\label{fig:A}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{phase3_l2_3point.png}
+\caption{Configuration (B): corners free (Phase D L2 active),
+3-point filter. The optimizer extracts additional compliance
+reduction by exploiting medium-wavelength modes the 3-point filter
+leaves unattenuated, producing visible boundary undulations.}
+\label{fig:B}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{phase3_l2_helmholtz_r1.png}
+\caption{Configuration (C): corners free, Helmholtz $r{=}1$ filter.
+The boundary is now visibly smooth. The compliance reduction is
+slightly lower than (B) because the optimizer is restricted to the
+smooth design subspace; this is the honest optimum under physical
+regularization rather than the apparent optimum that exploits
+discretization noise.}
+\label{fig:C}
+\end{figure}
+
+\subsection{What the three configurations demonstrate}
+
+Despite the noted ongoing refinement of the cantilever example, the
+contrast between (A)--(C) carries information that is robust:
+
+\begin{enumerate}[label=(\arabic*)]
+  \item Going from (A) to (B) demonstrates that the Phase D L2
+        machinery is doing real algorithmic work: unfreezing the
+        corner DOFs gives the optimizer more design freedom, and
+        the gradient through the chord-formula normals is correct
+        (FD-validated).
+  \item Going from (B) to (C) demonstrates that the 3-point
+        filter is insufficient for shape regularization in the
+        presence of richer design freedom: the optimizer exploits
+        unfiltered modes, and the Helmholtz filter is necessary to
+        recover a smooth-design optimum.
+  \item Configuration (C) is the appropriate baseline against
+        which to compare future algorithmic improvements (adaptive
+        $r$, augmented-Lagrangian area constraint, modern
+        optimizer): the regularization is honest and the
+        compliance number is not inflated by noise exploitation.
+\end{enumerate}
+
+\section{The plate with a hole: from gradient filtering to a
+design-space and re-meshing architecture}
+\label{sec:plate}
+
+The cantilever validated the adjoint but left a question the filter of
+Section~\ref{sec:filter} only papered over: \emph{why} does the raw per-node
+gradient need filtering at all, and is filtering the right cure? The
+plate-with-hole problem --- a square plate in biaxial tension with an elliptical
+hole, optimized toward the circular hole that minimizes compliance --- answered
+both, and in doing so reorganized the optimizer around a design parameterization
+and an actively re-meshed cloud. This section records that turn; the granular
+record is the companion log \texttt{boundary\_gradient\_noise.md}.
+
+\subsection{The symptom and the diagnosis:
+\texorpdfstring{$\partial\mat W/\partial\pts$}{dW/dp}}
+\label{sec:plate-noise}
+
+On grids fine enough to resolve the hole, the per-node $\ell^2$ shape gradient is
+dominated by a near-Nyquist sawtooth: the gradient spectrum \emph{rises} toward
+the highest representable boundary mode, so a near-Nyquist wiggle carries
+$\sim\!40\times$ the gradient of the circle-seeking $\cos 2\theta$ mode. The
+gradient is not wrong --- it is finite-difference validated mode by mode to
+$10^{-6}$, the near-Nyquist modes included --- it is genuinely \emph{rough}.
+
+Fixed-cloud probes localized the mechanism. With the PDE removed and replaced by
+smooth analytic fields $f,\eta$, the surrogate $S = \eta^\top\mat W f$
+differentiated with respect to a boundary node's radial position still produces a
+broadband, Nyquist-rich $\partial S/\partial r_j$. The roughness is therefore the
+\emph{geometry sensitivity of the RBF-FD differentiation weights themselves},
+$\partial\mat W/\partial\pts$, independent of the physics (it reproduces on a
+thermal Laplace problem). It grows with the operator's derivative order (the
+$q{=}2$ elasticity/Laplacian operators are $\sim\!46\times$ worse than the $q{=}1$
+Neumann rows, because the pull-back of a second-order operator probes the third
+derivative of the $r^3$ kernel), worsens with kernel order (a conditioning
+effect), and sharpens under refinement. Crucially it is \emph{broadband} and
+overlaps the physical signal in frequency.
+
+\subsection{Why filtering is the wrong cure}
+
+The broadband overlap is decisive: \emph{no frequency-domain filter on the
+gradient can separate the artifact from the signal}, because they share
+frequencies. A Helmholtz/Sobolev/Tikhonov smoother does lower the high-to-low
+energy ratio, but a faithfulness check --- the cosine of the smoothed gradient
+against the true low-mode gradient --- shows it corrupts the very signal it is
+meant to preserve. The filter of Section~\ref{sec:filter} is accordingly demoted
+from ``the cure'' to ``a mild conditioner usable only atop a structurally smooth
+design space.''
+
+The structural cure removes the rough degrees of freedom \emph{by construction}.
+We stop treating the boundary nodes as the design and parameterize the hole
+radius by a truncated Fourier series
+\begin{equation}
+  r(\theta) = r_0 + \sum_{m\in\mathcal M}\big(a_m\cos m\theta + b_m\sin m\theta\big),
+  \label{eq:fourier-hole}
+\end{equation}
+with the area held fixed by solving for $r_0$. The noisy nodal gradient is
+\emph{contracted} onto the design modes by the exact chain rule,
+$\partial C/\partial a_m = \sum_j g_{\mathrm{rad},j}\cos m\theta_j$, which
+integrates the per-node noise out. This is a Hilbertian (Riesz) gradient in a
+finite-dimensional smooth design space; the adjoint of
+Sections~\ref{sec:adjoint-theory}--\ref{sec:five-steps} is untouched --- only the
+final contraction $\mat J^\top\vect g$ is new.
+
+\subsection{The clean-DOF budget and its auto-calibration}
+
+A design space helps only if its modes sit \emph{below the artifact floor}. The
+admissible mode count is set by the cloud, not by hand. The artifact decorrelates
+at the stencil radius $\rho$ (the largest neighbour distance in a stencil), so a
+boundary mode is trustworthy only if its half-wavelength spans at least one
+stencil radius --- a stencil-Nyquist criterion
+$m \le \lfloor \pi r/\rho \rfloor$. The Sobolev length of the residual
+conditioner is likewise tied to the cloud, $\ell_{\mathrm{sob}} = \rho/r$. Both
+knobs are derived, not tuned:
+
+\begin{center}
+\begin{tabular}{lll}
+\hline
+knob & formula & value ($\mathrm{d}x{=}0.05$, $k{=}35$) \\
+\hline
+stencil radius $\rho$ & $\max$ neighbour distance & $0.30 = 6\,\mathrm{d}x$ \\
+mode cap $m_{\mathrm{cap}}$ & $\lfloor \pi r/\rho \rfloor$ & $2$ \\
+Sobolev length & $\rho/r$ & $1.06$ \\
+\hline
+\end{tabular}
+\end{center}
+
+At this resolution the clean-DOF budget is a single mode --- the ellipse mode.
+Hand-set richer truncations ($m{=}2{:}4$) are unstable: the optimizer random-walks
+the under-resolved $m{=}3,4$ channels up until a boundary wiggle breaks a stencil.
+The calibrated cap closes them by construction; unlocking higher modes requires
+refinement (smaller $\rho/r$), a resolution/cost trade rather than a tuning knob.
+
+\subsection{Three failure modes, and why they need different cures}
+\label{sec:plate-three}
+
+With the gradient exact and the design space clean, the binding obstacle changed
+identity. Three distinct failures, conflated in the earlier work, must be kept
+apart:
+
+\begin{description}
+\item[(A) Descent-direction noise.] The $\partial\mat W/\partial\pts$ roughness
+  above. Intrinsic to the discrete gradient --- present on a \emph{fresh} cloud at
+  iteration zero --- and cured only by the design-space contraction.
+\item[(B) Cloud degradation.] As nodes move, a cloud frozen at an old geometry
+  ill-conditions: frozen stencils stretch, frozen adjacency goes stale. A
+  stale-cloud artifact.
+\item[(C) Objective bias.] A cloud fitted to a \emph{stale} geometry has its
+  discrete-compliance optimum displaced from the true one --- on the plate,
+  $a_2^\star\approx\pm0.07$ rather than the true circle $a_2=0$, the sign
+  bracketed between a frozen interior ($+0.078$) and a Laplace-morphed interior
+  ($-0.065$). The shallow optimum (compliance varies $\sim\!2\%$ across the range)
+  amplifies the $O(h^p)$ objective error into an $O(0.07)$ design error. Also a
+  stale-cloud artifact.
+\end{description}
+
+That (C) is a stale-cloud artifact and not intrinsic was settled by a fresh-cloud
+test: at the true circle, a cloud freshly generated for that geometry has
+$\partial C/\partial a_2 \approx 5\times10^{-8}$, three orders below the driving
+gradient --- the circle \emph{is} the discrete optimum of an appropriately
+re-initialized cloud. Averaged over independent fresh clouds the residual $m{=}2$
+gradient maps to $a_2^\star\approx0.008$, a tenfold debiasing.
+
+A practical corollary closes a tempting shortcut: the old per-node route could
+\emph{not} have been rescued by periodic re-initialization alone. Re-meshing cures
+(B) and (C) but not (A); on a fresh cloud the per-node gradient is still
+Nyquist-dominated, so the boundary roughens immediately. Re-meshing helps the
+per-node route only if it \emph{smooths} the boundary --- which is the
+parameterization in disguise. (A) and (B,~C) need different cures; the
+parameterization is not optional.
+
+\subsection{The two-front architecture}
+\label{sec:plate-twofront}
+
+The cures compose into a single loop with two cooperating fronts on the cloud,
+the design space handling (A):
+
+\paragraph{Front 1 --- morph (within a re-mesh interval).} The interior is slaved
+to the boundary by a smooth, differentiable Laplace extension,
+$\Delta\pts_{\mathrm{int}} = \mat M\,\Delta\pts_{\mathrm{bnd}}$ with
+$\mat M = -\mat L_{ii}^{-1}\mat L_{ib}$, factorized once per anchor. The adjoint
+flows through it by the transpose,
+$\hat{\vect g}_{\mathrm{bnd}} = \vect g_{\mathrm{bnd}} + \mat M^\top
+\vect g_{\mathrm{int}}$; omitting this term makes the boundary-only gradient
+$O(1)$ wrong once the interior moves. Fixed stencils within the interval keep the
+objective smooth.
+
+\paragraph{Front 2 --- re-anchored re-mesh (between intervals).} When a quality
+indicator trips, a fresh high-quality cloud is generated for the current design
+and the morph re-anchored to it (reference reset, operator refactorized). Each
+re-mesh reads as a \emph{re-initialization}, not a perturbed continuation --- this
+is what removes (B) and (C). Re-meshing is not precluded by the discrete adjoint;
+it is precluded only if one differentiates \emph{through} the re-mesh or demands
+exact stationarity of a single fixed discrete objective. We do neither --- we
+differentiate the smooth morph within an interval and re-anchor between intervals.
+
+Because the discrete compliance \emph{value} jumps at each re-mesh (by an amount
+bounded by the discretization accuracy --- noise, not signal), descent is on the
+gradient, $\lVert\mat J^\top\vect g\rVert\to0$, never gated on $C$. A
+gradient-decaying ``settling'' step was tried and rejected: under a stale morph it
+lingers in the distorted regime and corrupts the gradient.
+
+\subsection{Closed-loop cloud quality: which indicators matter}
+\label{sec:plate-indicators}
+
+Front~2 is triggered by a registry of cloud-quality indicators, each a cheap
+scalar measured every iteration, individually toggleable with its own threshold;
+only enabled indicators trigger a re-mesh. On the ellipse$\to$circle deformation:
+
+\begin{center}
+\begin{tabular}{lll}
+\hline
+indicator & measures & verdict \\
+\hline
+\texttt{morph\_drift} & max interior displacement $/\,\mathrm{d}x$ & active trigger; conservative \\
+\texttt{stencil\_growth} & frozen-stencil radius $/$ anchor radius & principled but slack ($\le1.09$) \\
+\texttt{min\_gap} & closest interior--hole $/\,\mathrm{d}x$ & dormant \\
+\texttt{spacing\_cv} & interior nearest-neighbour CV & dormant \\
+\texttt{boundary\_cv} & hole-node spacing CV & dormant \\
+\texttt{min\_sep} & global minimum separation $/\,\mathrm{d}x$ & dormant \\
+\hline
+\end{tabular}
+\end{center}
+
+The smooth Laplace morph is gentle: a $0.58\,\mathrm{d}x$ node drift stretches the
+worst stencil by only $\sim\!9\%$. The displacement proxy \texttt{morph\_drift}
+fires first and is therefore conservative; \texttt{stencil\_growth}, tied directly
+to operator validity, is the more principled trigger and would let intervals run
+longer. The remaining indicators are insurance for harsher regimes (a growing
+hole would wake \texttt{min\_gap}; a strongly non-circular target,
+\texttt{boundary\_cv}). \texttt{stencil\_growth} captures ``old neighbours
+separate'' but not ``non-neighbours approach'' (adjacency-membership staleness),
+which needs a current $k$-NN query and was negligible here.
+
+\subsection{Result}
+
+The two-front loop converges to the circle: $a_2:0.0986\to0.0154$ (true $0$),
+$r_0:0.2741\to0.2826$ (true $0.2828$), compliance
+$5.18\times10^{-5}\to4.88\times10^{-5}$, with two \texttt{morph\_drift}-triggered
+re-meshes over sixty iterations. It lands at the true optimum, not at either
+stale-cloud bias ($+0.078$ or $-0.065$): the design space removes the noise, the
+re-anchoring removes the bias, and the morph keeps the cloud differentiable in
+between.
+
+\section{Generalization}
+\label{sec:generalization}
+
+The five-step pipeline is structured so that each step is
+PDE-agnostic except where the PDE explicitly enters. We summarize
+what changes when the PDE does.
+
+\subsection{Scalar elliptic PDEs}
+
+For scalar problems (heat equation, Poisson, electrostatics,
+magnetostatics) the system is $N \times N$, not $2N \times 2N$.
+Steps 1, 2, 4 are essentially unchanged. Step 3 simplifies: the
+coefficient extraction in~\eqref{eq:interior-extract} reduces from
+the four-coefficient family to a single per-operator constant.
+The Neumann row family becomes $\partial u/\partial \vect n = g$
+or $\alpha u + \beta \partial u/\partial\vect n = g$ (Robin), with
+a one-coefficient analogue of~\eqref{eq:neumann-row}.
+
+\subsection{Nonlinear PDEs (Newton iteration)}
+
+For nonlinear $\vect F(\vect u, \pts) = \vect 0$ solved by Newton,
+the adjoint is built at the \emph{converged} Jacobian:
+\begin{equation}
+  \mat J(\vect u^\star)^\top \vect\eta
+  \;=\; \big(\partial\Loss/\partial\vect u\big)^\top
+  \quad \text{at the converged iterate } \vect u^\star.
+\end{equation}
+Steps 1, 2, 4 carry over identically. Step 3 changes: the
+coefficient extraction now has solution-dependent coefficients
+(the Jacobian entries involve $\vect u^\star$ itself), and the
+$\partial\mat F/\partial\pts$ contracts both with state and with
+the operator weight matrices. The detailed treatment for
+incompressible Navier--Stokes is sketched in
+\texttt{plan\_manual\_adjoint.md}.
+
+\subsection{Time-dependent PDEs}
+
+Transient problems require a backward-in-time sweep of the
+adjoint:
+\begin{equation}
+  -\frac{\dd\vect\eta}{\dd t}
+  \;+\; \mat J^\top \vect\eta
+  \;=\; \big(\partial\Loss/\partial\vect u\big)^\top
+  \quad \text{from } t=T \text{ back to } t=0.
+\end{equation}
+The architectural cost is checkpointing (memory for storing
+forward states at intermediate times) but the per-step structure
+is the same as the steady case.
+
+\subsection{Multi-physics coupling}
+
+Coupling several physics on the same point cloud --- the
+fundamental advantage of the meshless approach for this project
+--- is block-structural in the algebra: the joint $\mat A$ has
+diagonal blocks for each physics and off-diagonal blocks for
+couplings, all built from the same RBF stencils. The Step 3
+coefficient extraction generalizes to per-block coefficient
+families. The Step 4 backward through the weight matrices is
+unchanged. Strongly-coupled problems with a coupled forward
+Newton solve fall under the nonlinear-PDE case above.
+
+\subsection{3D}
+
+The five-step pipeline is dimension-agnostic in its
+\emph{structure}; only the per-operator content changes. In 3D:
+\begin{itemize}[leftmargin=2em]
+  \item the interior weight matrix family grows to
+        $\{\partial_{xx}, \partial_{yy}, \partial_{zz},
+        \partial_{xy}, \partial_{yz}, \partial_{xz}\}$;
+  \item the Neumann row family in~\eqref{eq:neumann-row}
+        becomes a $3 \times 3$ analogue (with 3 normal
+        components and 3 stress components);
+  \item the polyline normal in~\eqref{eq:chord-normal} is
+        replaced by a triangle-based vertex-normal-average
+        (sparse on the three vertices of each STL face), with
+        the analogous closed-form Jacobian;
+  \item the boundary-loop Helmholtz filter is replaced by a
+        Laplacian on the discrete surface mesh.
+\end{itemize}
+None of these changes requires new mathematical content. The
+content is the same; the bookkeeping is more.
+
+\section{Position relative to the state of the art}
+\label{sec:sota}
+
+\subsection{Reference points}
+
+The mature reference points for shape optimization in
+contemporary engineering practice are FEM-based commercial codes
+(Tosca, OptiStruct, NX Topology, ANSYS Mechanical Topology),
+density-based topology optimization via SIMP/RAMP
+(Bendsøe \& Sigmund, codified in the 88-line MATLAB code of
+Andreassen et al.\ 2011), CAD-parameterized shape optimization
+(ESP, Vorpal, OpenFOAM's continuous-adjoint solvers), and the
+level-set / phase-field methods of Wang et al.\ 2003 onward. The
+workhorse optimizer is the Method of Moving Asymptotes
+(Svanberg), with IPOPT, L-BFGS-B, and SQP rounding out the
+toolbox. Helmholtz-PDE sensitivity filtering for SIMP was
+introduced by Lazarov \& Sigmund (Int.\ J.\ Numer.\ Methods Eng.,
+2011) --- essentially the filter we use here, applied to a 1D
+boundary loop rather than to the design density field.
+
+\subsection{Honest comparison}
+
+The present work is best described as \emph{methodologically
+sound on a niche discretization, not yet operationally
+competitive}. Table~\ref{tab:sota} compares dimensions where the
+gap is most evident.
+
+\begin{table}[h]
+\centering
+\caption{Honest comparison of the present pipeline against the
+state of the art.}
+\label{tab:sota}
+\renewcommand{\arraystretch}{1.3}
+\begin{tabular}{p{0.30\textwidth}p{0.30\textwidth}p{0.32\textwidth}}
+\toprule
+Dimension & State of the art & This work \\
+\midrule
+PDE discretization & FEM at $10^6$ DOFs; AMR; multi-physics
+  & RBF-FD at $N \sim 45$ in the example; single physics
+    (lin.\ elasticity); 2D \\
+Adjoint correctness check & FD at small scale, otherwise
+checkpointed AD
+  & Central order-5 FD vs analytic at every config; $\sim 10^{-7}$ \\
+Boundary normal differentiability & implicit through CAD/FEM mesh
+  & Explicit chord formula with sparse closed-form Jacobian
+    (Section~\ref{sec:l2}) \\
+Sensitivity filter & Helmholtz PDE on the design field
+(Lazarov--Sigmund 2011) or radial average; arc-length / surface
+  & Helmholtz PDE on the 1D boundary loop, uniform segments
+    (Section~\ref{sec:filter}) \\
+Optimizer & MMA, IPOPT, L-BFGS-B, SLP, SQP
+  & Steepest descent with Armijo backtracking \\
+Constraint handling & Augmented Lagrangian, projected gradient,
+SQP
+  & Quadratic penalty with hand-tuned $\rho_{\text{pen}}$ \\
+Geometry kernel & CAD/NURBS/splines or STL-vertex direct,
+auto-meshing
+  & Boundary points are the design (no kernel yet); STL absent \\
+Mesh quality under deformation & Re-mesh / ALE / FFD
+  & Not needed (meshless) \\
+Multi-material / topology change & SIMP density field, level set
+  & Out of scope of this report; meshless naturally permits it \\
+Scale (DOFs) & $10^4$ to $10^7$, 3D
+  & $\sim 10^2$, 2D \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Where the work might claim novelty}
+
+A defensible claim would be along the lines of: \emph{a complete
+manual-adjoint shape-optimization pipeline for RBF-FD linear
+elasticity, with closed-form analytic sensitivities at the
+weight-matrix and normal levels and a Helmholtz boundary-loop
+sensitivity filter, validated to $10^{-7}$ against finite
+differences and structured for clean extension to multi-physics
+on the same point cloud}. RBF-FD has been used extensively for
+forward PDE solving (Bayona, Flyer, Fornberg and collaborators),
+but its application to shape optimization with analytic discrete
+adjoints is sparse in the literature; most existing RBF-FD
+shape-opt work relies on black-box AD or continuous-adjoint
+formulations that ignore discretization error. The deliberate
+separation of geometry (\texttt{WhatsThePoint.jl}) from PDE
+machinery (\texttt{Macchiato.jl}) is also unusual and
+well-motivated for meshless contexts.
+
+This is a methodologically clean starting point in an
+under-explored corner of the field. It is not state-of-the-art
+performance, scale, or feature coverage; we will return to the
+gap in Section~\ref{sec:openwork}.
+
+\section{Open work}
+\label{sec:openwork}
+
+\subsection{Within the elasticity pipeline}
+
+\paragraph{Stronger optimizer.}
+Steepest descent with Armijo converges slowly on anisotropic
+Hessians. The natural next step is L-BFGS-B for the
+box-constrained version of the problem and MMA for the full
+multi-constraint version. Both are wrapper-level work --- the
+adjoint pipeline is unchanged.
+
+\paragraph{Augmented Lagrangian for the area constraint.}
+The current quadratic penalty produces a sawtooth in
+$\norm{\nabla\Loss}$ as $V(\pts)$ oscillates around $V_0$ across
+line-search trials. An augmented Lagrangian, with multiplier
+updated between outer iterations, eliminates this artefact.
+
+\paragraph{Adaptive Helmholtz $r$.}
+The current value $r = 1$ is hand-tuned. A standard recipe in
+topology optimization is to start with a large $r$ (aggressive
+smoothing during the early shape-finding phase) and reduce it
+toward zero as the design stabilizes. Implementing this is
+straightforward; the right schedule is empirical.
+
+\paragraph{Arc-length-weighted boundary Laplacian.}
+The current Helmholtz filter treats the boundary loop as a
+uniform 1D mesh, slightly over-smoothing longer segments
+relative to shorter ones. A geometric Laplacian with arc-length
+weights would be more rigorous; at the cantilever scale the
+visual impact is small.
+
+\paragraph{Grid resolution study.}
+$N = 45$ is too coarse to express a clean Michell taper. A scale
+test at $N \gtrsim 100$ would clarify whether the regularized
+optimum converges to a clean tapered beam as the grid refines.
+
+\subsection{Within the cantilever example}
+
+\paragraph{Tip-shrinkage gradient artefact.}
+The cantilever example is currently being repaired: the
+gradient driving tip-shrinkage was found to have an incorrect
+sign component, which had been masked by an earlier corner-freeze
+convention. The repair is purely at the example level (loss
+definition / boundary parameterization) and does not affect the
+adjoint pipeline. Once landed, the quantitative numbers in
+Section~\ref{sec:cantilever} will be re-validated.
+
+\paragraph{Reference textbook problem.}
+We rely on FD-vs-AD consistency as the validation criterion. A
+problem with an analytic solution (Schade plate, thin-walled
+pressure vessel, Lamé's problem) would let us check the
+discretization itself --- not just the adjoint.
+
+\subsection{Toward engineering geometries}
+
+\paragraph{Geometry kernel.}
+Today the boundary points \emph{are} the design variables. For
+real STL-driven geometries the differentiable chain
+$\vect l \to \mathcal G_{\text{STL}} \to \pts_b$ is needed, with
+$\vect l$ either (i) STL vertices direct, (ii) spline / NURBS
+control points, or (iii) FFD lattice control points. This is the
+single gating item between the present R\&D state and engineering
+applicability.
+
+\paragraph{STL-side primitives in \texttt{WhatsThePoint.jl}.}
+The cross-repo separation places STL operations, point cloud
+generation, and triangle-based vertex normals on the WTP side.
+Once the geometry kernel choice is made, the WTP work is: STL
+vertex perturbation, triangle-normal derivation with the analogue
+of~\eqref{eq:chord-jac}, STL-to-pointcloud sampling with
+Jacobian, optional spline-to-STL retessellation.
+
+\paragraph{Boundary-to-interior deformation.}
+When boundary points move, interior collocation points must
+follow to maintain point-cloud quality. An RBF-interpolation
+approach that reuses the existing \texttt{\_pullback\_weights!}
+machinery is the natural choice and was already sketched in
+\texttt{plan\_shape\_optimization\_pipeline.md}.
+
+\paragraph{Scale-up.}
+Forward and adjoint solves at $N \sim 10^4$--$10^5$ require
+iterative or preconditioned linear solvers tuned for RBF-FD
+elasticity. No off-the-shelf preconditioner exists; building one
+is a research-grade subproblem.
+
+\subsection{Beyond elasticity}
+
+\paragraph{Other physics, same pipeline.}
+The five-step pipeline as derived in Section~\ref{sec:five-steps}
+is reusable for any PDE that fits the
+$\mat A(\pts)\vect u = \vect b(\pts)$ template, with adapted
+coefficient extraction in Step 3. Heat conduction, electrostatics,
+magnetostatics, and incompressible Stokes are direct extensions;
+incompressible Navier--Stokes requires the Newton-converged
+Jacobian variant (Section~\ref{sec:generalization}).
+
+\paragraph{Multi-physics shape optimization.}
+The architectural advantage of meshless is that the same point
+cloud supports all of these physics with the same weight matrix
+family. Coupling is block-structural; the adjoint of the coupled
+system is built by the same Step 2 solve, with the joint right-
+hand side from each physics' contribution to the loss. The
+strategic motivation for the framework, articulated in
+\texttt{Vision.md}, is precisely this multi-physics tractability.
+
+\section{Conclusion}
+
+We have presented the complete discrete adjoint pipeline
+implemented in \texttt{Macchiato.jl} for RBF-FD shape optimization
+of plane-stress linear elasticity. Starting from the continuous
+shape-optimization problem, we derived the five-step decomposition
+in which the sensitivity calculation reduces to: a forward solve
+that caches the RBF stencils; a single adjoint solve; an analytic
+back-projection from $\Delta\mat A = -\vect\eta\vect u^\top$ onto
+per-operator sensitivities $\Delta\mat W^{\mathcal L}$ via the
+elasticity coefficient structure (interior) and the Neumann
+coefficient family (boundary); a pure-Julia backward pass through
+the RBF stencils via \texttt{\_pullback\_weights!}; and a closed
+set of explicit external contributions covering the area
+constraint, the shape-dependent traction values (Phase D
+Level 1), and the differentiable polyline normals (Phase D
+Level 2). The whole chain is validated to $\sim 10^{-7}$ relative
+error against fifth-order central finite differences.
+
+The cantilever motivated a sensitivity filter on the boundary loop,
+but the plate-with-hole study of Section~\ref{sec:plate} showed that
+frequency filtering is the wrong cure: the boundary gradient noise is
+the geometry sensitivity of the RBF-FD weights,
+$\partial\mat W/\partial\pts$, which is broadband and overlaps the
+signal, so no gradient filter separates them faithfully. The cure is
+structural --- a clean-DOF Fourier design space (calibrated to the
+stencil-resolved mode budget) that removes the rough degrees of freedom
+by construction, an actively re-anchored re-mesh that removes the
+stale-cloud objective bias, and a differentiable Laplace morph that
+keeps the cloud smooth in between. On the plate the resulting two-front
+optimizer converges to the true circular optimum, landing at neither
+stale-cloud bias; the filter survives only as a mild conditioner atop
+the smooth design space.
+
+The framework is structured for clean extension to other physics
+on the same point cloud, to three dimensions with vertex-normal
+gradients on STL triangles, and to multi-physics shape
+optimization --- the strategic target of the broader project.
+Each ingredient is in place; what remains is engineering
+extension rather than mathematical invention. The path from this
+working document to a publishable paper runs through the geometry
+kernel decision and a representative engineering test case;
+those are the next milestones, and the present pipeline is the
+foundation they will rest on.
+
+\end{document}
