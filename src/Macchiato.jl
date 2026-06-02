@@ -118,6 +118,9 @@ include("solve.jl")
 #################### Optimization / AD ####################
 include("optimization/solve_ift.jl")
 include("optimization/manual_adjoint.jl")
+include("optimization/design_space.jl")
+include("optimization/morph_extension.jl")
+include("optimization/indicators.jl")
 export apply_dirichlet!
 export active_dofs, build_dirichlet_info
 export extract_weight_sensitivities_elasticity!, allocate_weight_gradients
@@ -128,6 +131,22 @@ export extract_neumann_sensitivities!
 export extract_load_sensitivities!
 export NormalJacobian, polyline_normals
 export update_traction_coeffs!, extract_normal_sensitivities!
+
+# Design space
+export AbstractDesignSpace, FourierModes
+export boundary_points, radius_at, r0_for_area
+export contract_gradient, sob_weight
+export calibrate_fourier, fit_start_fourier
+
+# Extension (morph)
+export AbstractExtension, LaplaceExtension, build_laplace_extension
+export morph, morph_transpose
+
+# Indicator registry
+export Indicator, trips, assess
+export measure_morph_drift, measure_min_gap
+export measure_spacing_cv, measure_boundary_cv
+export measure_min_sep, measure_stencil_growth
 
 #################### Operators ####################
 abstract type AbstractOperator end

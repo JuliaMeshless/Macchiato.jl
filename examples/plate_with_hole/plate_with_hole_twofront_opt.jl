@@ -57,14 +57,7 @@ basis   = PHS(3; poly_deg = 3)
 # Indicator thresholds are first guesses — the whole point is to watch the log
 # and prune.  `trip_when` is the side of the threshold that means "cloud is bad".
 # Each measure returns a scalar from (morphed points, cloud state).
-Base.@kwdef struct Indicator
-    name::Symbol
-    measure::Function          # (pts, state) -> Float64
-    threshold::Float64
-    trip_when::Symbol          # :above or :below
-    enabled::Bool = true
-end
-trips(ind::Indicator, v) = ind.trip_when === :above ? v > ind.threshold : v < ind.threshold
+# (Indicator struct imported from Macchiato)
 
 # ============================================================================
 # Geometry helpers (background lattice, outer frame, Fourier hole).
@@ -77,19 +70,9 @@ const xs_grid = (-Lx/2 + dx):dx:(Lx/2 - dx/2)
 const ys_grid = (-Ly/2 + dx):dx:(Ly/2 - dx/2)
 const A_target = π * a0 * b0
 
-# Design = Fourier radius coefficients.  modes/sob_r are calibrated below.
-struct Design
-    r0::Float64
-    a::Vector{Float64}
-    b::Vector{Float64}
-end
-radius_at(d::Design, θ, modes) =
-    d.r0 + sum(d.a[i]*cos(m*θ) + d.b[i]*sin(m*θ) for (i, m) in enumerate(modes); init = 0.0)
-hole_points(d::Design, modes) =
-    [(r = radius_at(d, θ, modes); SVector(r*cos(θ), r*sin(θ))) for θ in θvals]
-
-# Hold the hole area fixed by solving for r₀ given the oscillatory coefficients.
-r0_for_area(a, b) = sqrt(max(0.0, (A_target - (π/2)*(sum(abs2, a) + sum(abs2, b))) / π))
+# Design = FourierModes from Macchiato.  modes/sob_r are calibrated below.
+# radius_at, boundary_points, r0_for_area, contract_gradient, sob_weight
+# are all imported from the framework.  θvals, nθ, A_target are problem constants.
 
 flat(v) = reduce(vcat, [[p[1], p[2]] for p in v])
 
@@ -127,9 +110,8 @@ struct CloudState
     ref_radius::Vector{Float64}          # per-node stencil radius AT ANCHOR (drift baseline)
     ref_interior::Vector{SVector{2,Float64}}
     ref_hole::Vector{SVector{2,Float64}}
-    ref_design::Design
-    morph_fact                            # lu(L_int)
-    L_int_bnd                             # Laplacian interior←boundary block
+    morph::LaplaceExtension               # FRONT 1: Laplace morph (from framework)
+    dx::Float64                           # background lattice spacing (for indicator measures)
     dirichlet_dofs::Vector{Int}
     active::BitVector
     interior_rows::BitVector
@@ -139,9 +121,9 @@ end
 # "Quality-controlled" here = a clean Cartesian interior freshly culled to the
 # CURRENT hole, uniform boundary nodes, structured frame.  (A relaxation/
 # resample step could slot in here later without changing anything downstream.)
-function anchor(design::Design, modes)
-    hole = hole_points(design, modes)
-    inside(p) = hypot(p[1], p[2]) < margin * radius_at(design, atan(p[2], p[1]), modes)
+function anchor(design::FourierModes)
+    hole = boundary_points(design, θvals)
+    inside(p) = hypot(p[1], p[2]) < margin * radius_at(design, atan(p[2], p[1]))
     interior = SVector{2,Float64}[]
     for x in xs_grid, y in ys_grid
         p = SVector(x, y); inside(p) || push!(interior, p)
@@ -166,46 +148,24 @@ function anchor(design::Design, modes)
     interior_rows = let r = falses(N); foreach(i -> r[i] = true, interior_idx); r end
 
     # Factorize the Laplace morph operator on THIS cloud (the re-anchor).
-    Wxx = _build_weights(Partial(2,1), pts, pts, adjl, basis)
-    Wyy = _build_weights(Partial(2,2), pts, pts, adjl, basis)
-    Wlap = Wxx + Wyy
-    L_int     = Wlap[interior_idx, interior_idx] + 1e-8*I
-    L_int_bnd = Wlap[interior_idx, boundary_idx]
+    ext = build_laplace_extension(pts, adjl, basis, interior_idx, boundary_idx,
+                                  pts[interior_idx], hole, n_outer, nθ)
 
     return CloudState(pts, N, n_int, n_outer, interior_idx, outer_idx, hole_idx,
                       boundary_idx, neumann_idx, otag, adjl, ref_radius,
-                      pts[interior_idx], hole, design, lu(L_int), L_int_bnd,
+                      pts[interior_idx], hole, ext, dx,
                       dirichlet_dofs, active, interior_rows)
 end
 
 # FRONT 1: morph the interior to follow `design`, extending from the anchored
 # reference by the TOTAL boundary displacement (so distortion never accumulates
 # within an interval).  Returns the current point cloud.
-function morph_cloud(st::CloudState, design::Design, modes)
-    hole = hole_points(design, modes)
-    Δhx = vcat(zeros(st.n_outer), [hole[j][1] - st.ref_hole[j][1] for j in 1:nθ])
-    Δhy = vcat(zeros(st.n_outer), [hole[j][2] - st.ref_hole[j][2] for j in 1:nθ])
-    Δix = st.morph_fact \ (-st.L_int_bnd * Δhx)
-    Δiy = st.morph_fact \ (-st.L_int_bnd * Δhy)
-    pts = copy(st.pts)
-    @inbounds for (kk, i) in enumerate(st.interior_idx)
-        pts[i] = st.ref_interior[kk] + SVector(Δix[kk], Δiy[kk])
-    end
-    @inbounds for (kk, i) in enumerate(st.hole_idx); pts[i] = hole[kk]; end
-    return pts
-end
+morph_cloud(st::CloudState, design::FourierModes) =
+    morph(st.morph, boundary_points(design, θvals))
 
 # Transpose of the morph: carry the interior nodal gradient onto the boundary.
-#   interior slaved by  Δx_int = M Δx_bnd,  M = -L_int⁻¹ L_int,bnd
-#   ⇒ design gradient at the hole = g_hole + (Mᵀ g_int)|_hole.
-function morph_transpose(st::CloudState, g_all)
-    gix = [g_all[i][1] for i in st.interior_idx]
-    giy = [g_all[i][2] for i in st.interior_idx]
-    cbx = -(st.L_int_bnd' * (st.morph_fact' \ gix))   # length n_boundary
-    cby = -(st.L_int_bnd' * (st.morph_fact' \ giy))
-    return [SVector(g_all[st.hole_idx[j]][1] + cbx[st.n_outer + j],
-                    g_all[st.hole_idx[j]][2] + cby[st.n_outer + j]) for j in 1:nθ]
-end
+morph_transpose(st::CloudState, g_all) =
+    Macchiato.morph_transpose(st.morph, g_all, st.hole_idx)
 
 # ============================================================================
 # Forward solve + discrete adjoint (exact nodal gradient at every node).
@@ -245,122 +205,60 @@ end
 # ============================================================================
 # Contract the nodal gradient onto the area-constrained Fourier design modes.
 # ============================================================================
-sob_weight(m, sob_r) = (1.0 + (sob_r*m)^2)^SOB_P
-
-function design_gradient(g_all, pts, st::CloudState, design::Design, modes)
+function design_gradient(g_all, pts, st::CloudState, design::FourierModes)
     ĝ_hole = morph_transpose(st, g_all)                    # FRONT-1 transpose
     hole = pts[st.hole_idx]
-    g_rad = [(ĝ_hole[j][1]*hole[j][1] + ĝ_hole[j][2]*hole[j][2]) / hypot(hole[j]...) for j in 1:nθ]
-    dC_dr0 = sum(g_rad)
-    dC_da = [sum(g_rad[j]*cos(m*θvals[j]) for j in 1:nθ) for m in modes]
-    dC_db = [sum(g_rad[j]*sin(m*θvals[j]) for j in 1:nθ) for m in modes]
-    # project out the area direction: r₀ = r₀(a,b) ⇒ dr₀/da_k = -a_k/(2r₀)
-    f = dC_dr0 / (2*design.r0)
-    return dC_da .- f .* design.a, dC_db .- f .* design.b
+    return contract_gradient(design, ĝ_hole, hole, θvals)
 end
 
 # ============================================================================
-# Quality indicators (closed-loop control).  Each is cheap and self-contained.
+# Quality indicators — imported from Macchiato (Indicator, trips, assess,
+# measure_morph_drift, measure_min_gap, measure_spacing_cv, measure_boundary_cv,
+# measure_min_sep, measure_stencil_growth).
 # ============================================================================
-nn_dist(pts, adjl, i) = minimum(hypot(pts[i][1]-pts[j][1], pts[i][2]-pts[j][2])
-                                for j in adjl[i] if j != i)
-
-# How far the morph has dragged the interior from the anchored reference (/dx).
-measure_morph_drift(pts, st) =
-    maximum(hypot(pts[st.interior_idx[k]][1] - st.ref_interior[k][1],
-                  pts[st.interior_idx[k]][2] - st.ref_interior[k][2]) for k in 1:st.n_int) / dx
-
-# Closest interior↔hole approach (/dx) — collision guard.
-measure_min_gap(pts, st) =
-    minimum(hypot(pts[i][1]-pts[j][1], pts[i][2]-pts[j][2])
-            for i in st.interior_idx, j in st.hole_idx) / dx
-
-# Interior spacing uniformity (coefficient of variation of nearest-neighbour gap).
-function measure_spacing_cv(pts, st)
-    d = [nn_dist(pts, st.adjl, i) for i in st.interior_idx]
-    return std(d) / mean(d)
-end
-
-# Boundary-node bunching (CV of consecutive hole-node spacing).
-function measure_boundary_cv(pts, st)
-    s = [hypot(pts[st.hole_idx[mod1(j+1,nθ)]][1] - pts[st.hole_idx[j]][1],
-               pts[st.hole_idx[mod1(j+1,nθ)]][2] - pts[st.hole_idx[j]][2]) for j in 1:nθ]
-    return std(s) / mean(s)
-end
-
-# Global minimum node separation (/dx) — conditioning proxy (near-collisions
-# ill-condition the local saddle systems).
-measure_min_sep(pts, st) =
-    minimum(nn_dist(pts, st.adjl, i) for i in 1:st.N) / dx
-
-# Worst-case stencil stretch: current frozen-stencil radius ÷ its radius at anchor.
-# As the morph drifts nodes, frozen neighbours separate (radius grows) and the
-# fixed adjacency goes geometrically stale — the operator's actual support no
-# longer matches what the weights assume.  More directly tied to operator validity
-# than absolute drift (a uniform translation grows no stencil).
-measure_stencil_growth(pts, st) =
-    maximum(maximum(hypot(pts[i][1]-pts[j][1], pts[i][2]-pts[j][2])
-                    for j in st.adjl[i] if j != i) / st.ref_radius[i] for i in 1:st.N)
-
-# Measure every enabled indicator; return (named values, tripped names).
-function assess(inds, pts, st)
-    vals = Pair{Symbol,Float64}[]; tripped = Symbol[]
-    for ind in inds
-        ind.enabled || continue
-        v = ind.measure(pts, st)
-        push!(vals, ind.name => v)
-        trips(ind, v) && push!(tripped, ind.name)
-    end
-    return vals, tripped
-end
 
 # ============================================================================
 # Calibration — derive the design modes and Sobolev length from cloud geometry.
 # ============================================================================
 function calibrate()
-    st0 = anchor(Design(r_ref, Float64[], Float64[]), 2:1)   # circle bootstrap, no modes
-    ρ = maximum(hypot(st0.pts[i][1]-st0.pts[j][1], st0.pts[i][2]-st0.pts[j][2])
-                for i in 1:st0.N for j in st0.adjl[i])
-    m_cap = max(2, floor(Int, π * r_ref / ρ))                # stencil-Nyquist cap
-    sob_r = ρ / r_ref                                        # Sobolev length = ρ
-    return 2:m_cap, sob_r, ρ
+    # Bootstrap: anchor a circle (zero oscillatory coefficients, empty modes)
+    ds0 = FourierModes(r_ref, Float64[], Float64[], Int[], NaN, SOB_P)
+    st0 = anchor(ds0)
+    ds, ρ = calibrate_fourier(st0.pts, st0.adjl, r_ref; SOB_P = SOB_P)
+    return ds.modes, ds.sob_r, ρ
 end
 
 # Fit the starting ellipse onto the design modes.
 function fit_start(modes)
-    rvals = [hypot(a0*cos(t), b0*sin(t)) for t in θvals]
-    r0fit = mean(rvals)
-    a = [(2/nθ)*sum((rvals[j]-r0fit)*cos(m*θvals[j]) for j in 1:nθ) for m in modes]
-    b = [(2/nθ)*sum((rvals[j]-r0fit)*sin(m*θvals[j]) for j in 1:nθ) for m in modes]
-    return Design(r0_for_area(a, b), a, b)
+    return fit_start_fourier(a0, b0, θvals, nθ, modes, A_target)
 end
 
 # ============================================================================
 # The closed-loop two-front optimizer.
 # ============================================================================
-function optimize(design::Design, modes, sob_r, indicators)
-    st = anchor(design, modes)                               # FRONT 2: initial anchor
+function optimize(design::FourierModes, indicators)
+    st = anchor(design)                                     # FRONT 2: initial anchor
     log = NamedTuple[]
     @printf("%4s %12s %8s %9s  %-26s %s\n", "it", "C", "r₀", "a₂", "indicators", "event")
     println("-"^96)
     for it in 1:MAX_ITER
-        pts = morph_cloud(st, design, modes)                # FRONT 1
+        pts = morph_cloud(st, design)                       # FRONT 1
         vals, tripped = assess(indicators, pts, st)
         event = ""
         if !isempty(tripped)                                # FRONT 2: re-anchor
-            st   = anchor(design, modes)
-            pts  = morph_cloud(st, design, modes)           # == fresh cloud, zero morph
+            st   = anchor(design)
+            pts  = morph_cloud(st, design)                  # == fresh cloud, zero morph
             vals, _ = assess(indicators, pts, st)
             event = "REMESH ⟵ " * join(string.(tripped), ",")
         end
 
         C, g_all = solve_adjoint(pts, st)
-        dCa, dCb = design_gradient(g_all, pts, st, design, modes)
+        dCa, dCb = design_gradient(g_all, pts, st, design)
 
         # Sobolev-preconditioned, fixed normalized descent (max radial step = STEP_FRAC·r₀).
-        da = [-dCa[i]/sob_weight(m, sob_r) for (i, m) in enumerate(modes)]
-        db = [-dCb[i]/sob_weight(m, sob_r) for (i, m) in enumerate(modes)]
-        δr = [sum(da[i]*cos(m*θvals[j]) + db[i]*sin(m*θvals[j]) for (i, m) in enumerate(modes)) for j in 1:nθ]
+        da = [-dCa[i]/sob_weight(m, design.sob_r, design.SOB_P) for (i, m) in enumerate(design.modes)]
+        db = [-dCb[i]/sob_weight(m, design.sob_r, design.SOB_P) for (i, m) in enumerate(design.modes)]
+        δr = [sum(da[i]*cos(m*θvals[j]) + db[i]*sin(m*θvals[j]) for (i, m) in enumerate(design.modes)) for j in 1:nθ]
         maxδ = maximum(abs, δr)
         maxδ < 1e-14 && (println("  Converged (‖g‖≈0)."); break)
         s = STEP_FRAC * design.r0 / maxδ
@@ -372,7 +270,8 @@ function optimize(design::Design, modes, sob_r, indicators)
 
         a = design.a .+ s .* da
         b = design.b .+ s .* db
-        design = Design(r0_for_area(a, b), a, b)
+        design = FourierModes(r0_for_area(A_target, a, b), a, b,
+                              design.modes, design.sob_r, design.SOB_P)
     end
     return design, st, log
 end
@@ -396,7 +295,9 @@ indicators = [
 println("indicators enabled: ", join(string.(getfield.(filter(i->i.enabled, indicators), :name)), ", "), "\n")
 
 start = fit_start(modes)
-final, st_final, log = optimize(start, modes, sob_r, indicators)
+# fit_start_fourier returns a FourierModes with NaN sob_r; patch in calibrated value.
+start = FourierModes(start.r0, start.a, start.b, start.modes, sob_r, SOB_P)
+final, st_final, log = optimize(start, indicators)
 
 r_circle = sqrt(A_target / π)
 n_remesh = count(e -> e.remeshed, log)
@@ -412,8 +313,8 @@ println("\n--- Final design ---")
 fig = Figure(size = (1500, 900))
 
 ax1 = Axis(fig[1,1]; title = "Hole shapes", aspect = DataAspect(), xlabel = "x", ylabel = "y")
-hs = hole_points(start, modes); lines!(ax1, vcat(getindex.(hs,1), hs[1][1]), vcat(getindex.(hs,2), hs[1][2]); color=:red, linewidth=2, label="start")
-hf = hole_points(final, modes); lines!(ax1, vcat(getindex.(hf,1), hf[1][1]), vcat(getindex.(hf,2), hf[1][2]); color=:green, linewidth=2, label="final")
+hs = boundary_points(start, θvals); lines!(ax1, vcat(getindex.(hs,1), hs[1][1]), vcat(getindex.(hs,2), hs[1][2]); color=:red, linewidth=2, label="start")
+hf = boundary_points(final, θvals); lines!(ax1, vcat(getindex.(hf,1), hf[1][1]), vcat(getindex.(hf,2), hf[1][2]); color=:green, linewidth=2, label="final")
 ts = range(0, 2π; length=200); lines!(ax1, r_circle.*cos.(ts), r_circle.*sin.(ts); color=:blue, linestyle=:dash, label="circle")
 axislegend(ax1; position=:rb)
 
