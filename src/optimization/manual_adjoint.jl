@@ -739,7 +739,7 @@ function _propagate_weight_gradient!(
     eval_offset::Union{Nothing,Vector{Int}} = nothing,
 )
     TD = Float64
-    dim = 2
+    dim = length(first(pts))      # 2 or 3 — inferred, not hardcoded
     N = length(pts)
     M = length(eval_pts)
 
@@ -748,25 +748,22 @@ function _propagate_weight_gradient!(
 
     _pullback_weights!(Δdata, Δeval, ΔW.nzval, W, cache, pts, eval_pts, adjl, basis, op)
 
-    # Accumulate Δdata → Δpts_flat (all N data points)
-    @inbounds for i in 1:N
-        Δpts_flat[2i - 1] += Δdata[i][1]
-        Δpts_flat[2i]     += Δdata[i][2]
+    # Accumulate Δdata → Δpts_flat (all N data points). Flat layout is
+    # interleaved by dim: Δpts_flat[dim*(i-1)+c].
+    @inbounds for i in 1:N, c in 1:dim
+        Δpts_flat[dim * (i - 1) + c] += Δdata[i][c]
     end
 
     # Accumulate Δeval → Δpts_flat
     if eval_offset !== nothing
         # Subset case: eval_pts correspond to specific global indices
-        @inbounds for i_local in 1:M
-            i_global = eval_offset[i_local]
-            Δpts_flat[2i_global - 1] += Δeval[i_local][1]
-            Δpts_flat[2i_global]     += Δeval[i_local][2]
+        @inbounds for i_local in 1:M, c in 1:dim
+            Δpts_flat[dim * (eval_offset[i_local] - 1) + c] += Δeval[i_local][c]
         end
     else
         # Full case: eval_pts === pts, add both contributions
-        @inbounds for i in 1:N
-            Δpts_flat[2i - 1] += Δeval[i][1]
-            Δpts_flat[2i]     += Δeval[i][2]
+        @inbounds for i in 1:N, c in 1:dim
+            Δpts_flat[dim * (i - 1) + c] += Δeval[i][c]
         end
     end
 

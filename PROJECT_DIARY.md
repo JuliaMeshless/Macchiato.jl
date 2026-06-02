@@ -6,6 +6,71 @@ Full detail: `RBF_FD_shape_optimization.tex` (the story),
 
 ---
 
+## 2026-06-02 (later) — framework extracted; 3D elasticity adjoint validated
+
+**State.** The 2D two-front framework is extracted into `src/` (`AbstractDesignSpace`
++ `FourierModes`, `AbstractExtension` + `LaplaceExtension`, the `Indicator` registry +
+six measures); the plate example now consumes it and `shape_gradient` is unchanged.
+3D is underway: `LinearElasticity3D` (Navier–Cauchy, full Lamé), the 6-operator
+block assembly, and `shape_gradient_3d` — **adjoint FD-validated for both
+interior-only Dirichlet** (`test_shape_gradient_3d.jl`, median 1.0000) **and
+mixed Dirichlet + traction with frozen normals** (`test_shape_gradient_3d_traction.jl`,
+median 1.0000, the Phase-B analogue). The 3D traction-row family is the 3×3
+analogue of 2D's (`TractionLayout3D` / `build_traction_layout_3d` /
+`apply_traction_3d!` / `extract_neumann_sensitivities_3d!`).
+
+### Found + fixed: an RBF.jl eval-point pullback bug (3D first-derivatives)
+The traction validation initially failed *only* at Neumann-node self-coordinates
+(`AD ≫ FD`, FD stable across step sizes ⇒ real bug, not FD noise). Localized with
+a normals-free, elasticity-free test (`S = ΔW:W(x)`, FD vs pullback): `Δdata`
+exact, `Δeval` wrong. Root cause in **`RadialBasisFunctions.jl-1`
+`_backward_partial_poly_3d!`**: it **hardcoded** the monomial ordering
+`[1,x,y,z,xy,xz,yz,x²,…]`, but the real 3D `MonomialBasis` order is
+`multiexponents(4, deg)` = `x³,x²y,x²z,x²,xy²,xyz,xy,…`. The forward uses the real
+order (so it was exact); only this first-order-partial eval-backward indexed the
+wrong monomials. (The 2nd-partial/mixed-partial eval-backwards were already
+generic via `multiexponents`, which is why the interior test passed.) Fixed by
+rewriting it generically, mirroring the 2D version. **Lesson:** never hardcode the
+monomial ordering — derive it from the basis. A normals-free `S=ΔW:W(x)` probe is
+the fastest way to separate a weight-pullback bug from a physics/normals bug.
+
+Also unified `_propagate_weight_gradient!` to infer `dim` from the points (removed
+the duplicate `_propagate_weight_gradient_3d!`).
+
+### Lessons (3D-specific, the durable ones)
+- **`poly_deg=3` is mandatory in 3D too — and a regular Cartesian lattice breaks it.**
+  A structured grid is polynomial-unisolvency-degenerate at `poly_deg=3` (C(6,3)=20
+  monomials go linearly dependent), so the local RBF saddle systems go singular and
+  `_build_weights` *throws*. `poly_deg=2` builds but is garbage (O(1) operator errors,
+  cond(A)~1e10). Cure: an **irregular cloud**. Use **WhatsThePoint** to fill the volume
+  (SlakKosec) — unisolvent by construction, better-conditioned, and it's the same path
+  as STL→cloud. (A hand-jitter ≥0.2·dx also works but WTP is the right tool.)
+- **Every boundary node needs a real BC.** Applying the interior PDE at an
+  unconstrained boundary node (`interior_rows=true` there, no Dirichlet/Neumann) makes
+  A near-singular ⇒ `η=A⁻ᵀ(∂L/∂u)` explodes and AD/FD diverges by ~1e10. That was a
+  *test* bug, not an adjoint bug: on a well-posed all-Dirichlet problem the adjoint is
+  exact. Validate the adjoint only on a well-posed forward problem.
+- **The 3D pipeline mirrors 2D exactly.** 6 second-derivative operators (xx,yy,zz,
+  xy,xz,yz) instead of 3; `MixedPartial(d1,d2)` and its `_pullback_weights!` are
+  dimension-generic and machine-precision in 3D. No new math — just more bookkeeping.
+
+### Next steps (3D, priority order)
+1. **Differentiable 3D normals** — `shape_gradient_3d` traction is validated with
+   *frozen* normals (Phase-B analogue). For moving boundaries add the 3D L2 analogue:
+   triangle-based vertex normals (the 2D polyline-normal analogue) + their closed-form
+   Jacobian, threading an `extract_normal_sensitivities_3d!` term. (This is what the
+   "normal terms" worry was about — real, but a separate piece from the eval-pullback bug.)
+2. **3D design space** — surface/spherical harmonics *or* Biancolini RBF control points
+   (natural for STL), as a new `AbstractDesignSpace` subtype; contract the nodal gradient
+   onto it exactly as `FourierModes.contract_gradient` does in 2D.
+3. **Wire the two-front loop in 3D** — `LaplaceExtension` is already dimension-agnostic
+   (just add the `zz` term in the morph Laplacian); reuse the `Indicator` registry.
+4. *(Cleanup)* the 3D validation test hand-builds box-face surface points; consider a
+   Meshes `Box`→mesh→`PointBoundary(mesh)` path. Low priority — the volume fill (the
+   part that matters) already uses WTP `discretize`.
+
+---
+
 ## 2026-06-02 — plate-with-hole closed; two-front optimizer works
 
 **State.** Plate-with-hole (2D plane-stress, biaxial load, elliptical hole →

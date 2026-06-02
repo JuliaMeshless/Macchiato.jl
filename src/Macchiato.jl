@@ -80,7 +80,10 @@ include("models/energy.jl")
 export SolidEnergy
 
 include("models/mechanics.jl")
+include("models/mechanics_3d.jl")
 export LinearElasticity, lame_parameters
+export LinearElasticity3D, lame_parameters_3d
+export assemble_elasticity_3d_from_weights
 
 """
     _num_vars(model::AbstractModel, dim) -> Int
@@ -118,6 +121,7 @@ include("solve.jl")
 #################### Optimization / AD ####################
 include("optimization/solve_ift.jl")
 include("optimization/manual_adjoint.jl")
+include("optimization/manual_adjoint_3d.jl")
 include("optimization/design_space.jl")
 include("optimization/morph_extension.jl")
 include("optimization/indicators.jl")
@@ -131,6 +135,12 @@ export extract_neumann_sensitivities!
 export extract_load_sensitivities!
 export NormalJacobian, polyline_normals
 export update_traction_coeffs!, extract_normal_sensitivities!
+
+# 3D adjoint
+export shape_gradient_3d
+export extract_weight_sensitivities_elasticity_3d!
+export TractionLayout3D, build_traction_layout_3d, apply_traction_3d!
+export extract_neumann_sensitivities_3d!
 
 # Design space
 export AbstractDesignSpace, FourierModes
