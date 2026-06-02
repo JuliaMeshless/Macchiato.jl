@@ -11,7 +11,7 @@
 \usepackage[margin=1in]{geometry}
 \usepackage{amsmath,amssymb,amsthm,bm}
 \usepackage{graphicx}
-\graphicspath{{docs/}}    % look here when compiling from the repo root
+\graphicspath{{docs/}{figures/}}    % look here when compiling from the repo root
 \usepackage{booktabs}
 \usepackage{array}
 \usepackage{caption}
@@ -158,18 +158,23 @@ normals, the per-row coefficient blocks must all be differentiable
 functions of the point positions, and the adjoint must thread the
 gradient cleanly through every dependence.
 
-The pipeline reported here is a \emph{manual} discrete adjoint: we
-write each derivative analytically rather than rely on automatic
-differentiation through the whole computation. The motivation is
-twofold. First, AD through the full forward solve incurs significant
-LLVM compilation cost in our Julia setup; an earlier attempt to do
-this through Mooncake was abandoned after observing five-minute
-compile times even at $N=25$ points. Second, and more importantly,
-the analytic form makes each component inspectable, validateable
-against finite differences to machine precision, and reusable across
-physics: the same Step~2 adjoint solve, the same Step~4 backward pass
-through the RBF stencils, the same Step~3 coefficient-extraction
-pattern serve every PDE we will eventually plug into the framework.
+The pipeline reported here is a discrete adjoint whose chain rule is
+\emph{orchestrated by hand} --- but this must be stated precisely, because the
+differentiation of the RBF basis is \emph{not} done by hand. The RBF-FD weight
+matrices are built by \texttt{RadialBasisFunctions.jl}, which differentiates the
+basis functions automatically to apply each differential operator; we never write a
+basis derivative ourselves. What is manual is the \emph{shape adjoint}: the chain
+rule that carries the loss sensitivity back through the assembled discrete system to
+the node coordinates --- the five-step pull-back of Section~\ref{sec:five-steps} ---
+is written explicitly rather than obtained by tracing a reverse-mode AD engine
+through the whole forward solve. The motivation is twofold. First, AD-tracing the
+full solve (the UMFPACK factorization and the local RBF saddle solves) incurs heavy
+LLVM compile cost: an earlier Mooncake attempt was abandoned at five-minute compiles
+even at $N=25$ points (Section~\ref{sec:diffstrategy} discusses how custom pull-backs
+would recover a clean AD-native API without that cost). Second, the explicit form
+makes each component inspectable, FD-validatable to machine precision, and reusable
+across physics: the same Step~2 adjoint solve, Step~4 stencil pull-back, and Step~3
+coefficient-extraction pattern serve every PDE.
 
 This document presents the full chain. Section~\ref{sec:problem} fixes
 notation. Section~\ref{sec:discretization} specifies the RBF-FD
@@ -190,10 +195,57 @@ Section~\ref{sec:verification} describes the verification methodology.
 Section~\ref{sec:cantilever} runs the pipeline on a 2D cantilever
 example. Section~\ref{sec:plate} reorganizes the optimizer around a Fourier
 design space and active re-meshing for the plate-with-hole problem.
+Section~\ref{sec:diffstrategy} discusses the differentiation strategy: the
+manual analytic pull-backs and the path to an AD-native \texttt{gradient} API.
 Section~\ref{sec:generalization} maps the extensions ---
 to other elliptic PDEs, to nonlinear systems, to multi-physics, and
 to 3D. Section~\ref{sec:sota} positions the work relative to the
 state of the art. Section~\ref{sec:openwork} lists open work.
+
+\section{The method in outline}
+\label{sec:outline}
+
+Before specializing to elasticity, we state the approach in PDE-agnostic terms.
+Shape optimization here is a loop over a \emph{smooth, low-dimensional design}
+$\vect l$ (Fourier or surface-harmonic modes, or CAD / RBF control points); the PDE
+is solved on a point cloud that discretizes the design's geometry, and the gradient
+is taken by a discrete adjoint and then \emph{contracted} onto the design.
+
+\begin{footnotesize}
+\begin{verbatim}
+  l --geometry--> pts --RBF-FD assemble--> (A,b) --solve--> u --loss--> L
+  ^                                                                     |
+  |                                                                     v
+  +-- step <-- contract (dpts/dl)^T <-- discrete adjoint: dL/dpts <-----+
+                                        (one forward + one adjoint solve)
+
+  the cloud is kept healthy by TWO FRONTS:
+    Front 1 (within a step):  morph the interior to follow the boundary
+                              (smooth, differentiable; adjoint via transpose)
+    Front 2 (between steps):  remesh + re-anchor when a quality indicator trips
+\end{verbatim}
+\end{footnotesize}
+
+The four ingredients, and where each is treated:
+\begin{enumerate}[label=(\arabic*)]
+  \item \emph{Design space} $\vect l \mapsto \pts$ --- a smooth parameterization
+        whose contraction~\eqref{eq:design-contraction} removes the mesh-scale
+        gradient noise (Section~\ref{sec:plate}). PDE-independent.
+  \item \emph{Forward solve} --- the PDE discretized by RBF-FD on the cloud
+        (Section~\ref{sec:discretization}, for elasticity).
+  \item \emph{Discrete adjoint} $\partial\Loss/\partial\pts$ --- one adjoint solve
+        plus an analytic back-projection through the RBF stencils
+        (Sections~\ref{sec:adjoint-theory}--\ref{sec:five-steps}). This is the only
+        PDE-specific machinery; everything else is reused across physics.
+  \item \emph{Two-front cloud control} --- morph and re-anchored remesh keep the
+        discretization healthy and the discrete optimum unbiased
+        (Section~\ref{sec:plate-twofront}). PDE-independent.
+\end{enumerate}
+
+Sections~\ref{sec:problem}--\ref{sec:boundary-diff} fill in ingredients (2)--(3) for
+linear elasticity; Section~\ref{sec:plate} demonstrates (1) and (4) on the
+plate-with-hole problem; Section~\ref{sec:diffstrategy} discusses how the whole
+chain could be exposed behind a single \texttt{gradient} call.
 
 \section{Continuous problem statement}
 \label{sec:problem}
@@ -222,13 +274,33 @@ distinct paths:
         length is a design parameter, or follower pressure).
 \end{enumerate}
 
-Throughout the body of this report we lump the layered design
-parameterization into a single flat point-coordinate vector
-$\pts \in \reals^{d N}$ (the concatenation of all node coordinates),
-and ask for sensitivities with respect to $\pts$. The
-$\pts \mapsto \vect l$ step is handled by the geometry kernel in
-\texttt{WhatsThePoint.jl} and is, by deliberate design, kept outside
-the PDE side of the gradient.
+It is essential to keep two layers distinct, because conflating them is the
+central pitfall of meshless shape optimization (diagnosed in
+Section~\ref{sec:plate}): the \emph{design} is the low-dimensional, smooth shape
+parameterization $\vect l$ --- a few Fourier or surface-harmonic modes, or CAD /
+RBF control points --- while the point cloud $\pts(\vect l) \in \reals^{dN}$ is
+merely its \emph{discretization}. The adjoint developed in
+Sections~\ref{sec:adjoint-theory}--\ref{sec:five-steps} delivers the
+discretization-level sensitivity $\partial\Loss/\partial\pts$; this is an
+\emph{intermediate} quantity. The usable gradient is its contraction onto the
+design,
+\begin{equation}
+  \frac{\partial\Loss}{\partial\vect l}
+   = \Big(\frac{\partial\pts}{\partial\vect l}\Big)^{\!\top}
+     \frac{\partial\Loss}{\partial\pts},
+  \label{eq:design-contraction}
+\end{equation}
+where $\partial\pts/\partial\vect l$ is the (cheap) parameterization Jacobian.
+\textbf{Treating the node positions themselves as the design --- descending
+directly on $\partial\Loss/\partial\pts$ --- fails}: that gradient is dominated by
+a mesh-scale noise mode (Section~\ref{sec:plate-noise}), and the contraction
+\eqref{eq:design-contraction} onto a smooth low-dimensional $\vect l$ is precisely
+what removes it. We therefore carry $\partial\Loss/\partial\pts$ through the body of
+the report as the \emph{core primitive} --- it is PDE-specific and is where all the
+analytic work lives --- with the understanding that the design-space contraction is
+applied on top and is what makes the optimizer converge. The geometry map
+$\vect l \mapsto \pts$ is provided by the kernel in \texttt{WhatsThePoint.jl} and is
+kept outside the PDE side of the gradient.
 
 \subsection{Linear elasticity}
 
@@ -1048,22 +1120,23 @@ selecting between the chord formula, the angular bisector, or a
 physics-aware convention --- belongs in the geometry kernel and is
 discussed in Section~\ref{sec:openwork}.
 
-\section{Sensitivity filtering on the boundary loop}
+\section{Sensitivity filtering on the boundary loop (superseded)}
 \label{sec:filter}
 
-\subsection{Why filter at all?}
+\emph{This section records the regularization first used --- in the cantilever
+example (Section~\ref{sec:cantilever}) --- and later superseded.}
+Section~\ref{sec:plate} shows that filtering the gradient is the \emph{wrong} cure
+for RBF-FD boundary noise: the noise is broadband and overlaps the signal, so no
+boundary filter separates them faithfully; the structural cure is the design-space
+contraction~\eqref{eq:design-contraction}. The filter definitions are kept here
+because the cantilever results reference them.
 
-The raw discrete gradient
-$\Delta\pts^{\text{raw}} \equiv \dd\Loss/\dd\pts$ produced by Steps
-1--5 is the exact gradient of the discrete loss function. It is
-also typically contaminated, in RBF-FD discretizations, by a
-\emph{Nyquist-mode} noise component: along each smooth edge of the
-boundary, the gradient values at adjacent boundary nodes can have
-large alternating-sign differences. This is not a bug --- the FD
-validation passes to $10^{-7}$ --- but it is an artefact of the
-local RBF stencil truncation. Without filtering, gradient descent
-amplifies this mode at every iteration and the design quickly
-diverges into a checkerboard pattern.
+\subsection{Why we filtered}
+
+The raw discrete gradient $\Delta\pts^{\text{raw}} \equiv \dd\Loss/\dd\pts$ is the
+exact gradient of the discrete loss, but on a free-node design it is contaminated by
+a near-Nyquist mode along the boundary (FD-validated to $10^{-7}$, yet rough):
+unfiltered $\ell^2$ descent amplifies it into a checkerboard.
 
 \subsection{The 3-point Nyquist filter}
 
@@ -1129,38 +1202,10 @@ $\pi$         (Nyquist)       & 0.00 & 0.20 & 0.06 \\
 
 \subsection{Implementation}
 
-The discrete system is a cyclic tridiagonal of size
-$M$ (number of boundary loop vertices); for $M \sim 24$ a dense
-$M \times M$ solve is microseconds. The implementation in
-\texttt{examples/shape\_optimization\_phase3\_cantilever.jl} is:
-\begin{lstlisting}[caption={Helmholtz boundary filter --- discrete cyclic Laplacian with frozen-entry rows.}]
-function helmholtz_filter_along_boundary!(out, in_, loop, free_mask; r=1.0)
-    out .= in_
-    n_loop = length(loop)
-    A = zeros(n_loop, n_loop)
-    rhs = zeros(n_loop)
-    for k in 1:n_loop
-        i_curr = loop[k]
-        rhs[k] = in_[2 * i_curr]
-        if free_mask[2 * i_curr]
-            k_prev = mod1(k - 1, n_loop); k_next = mod1(k + 1, n_loop)
-            A[k, k_prev] = -r*r;  A[k, k] = 1 + 2*r*r;  A[k, k_next] = -r*r
-        else
-            A[k, k] = 1.0  # identity row, frozen entry passes through
-        end
-    end
-    f = A \ rhs
-    for k in 1:n_loop
-        i_curr = loop[k]
-        free_mask[2 * i_curr] || continue
-        out[2 * i_curr] = f[k]
-    end
-    return out
-end
-\end{lstlisting}
-For larger boundary loops the dense solve would be replaced by a
-sparse cyclic-tridiagonal solver
-(Thomas algorithm + Sherman--Morrison), which is $O(M)$.
+The discrete system is a cyclic tridiagonal of size $M$ (boundary-loop vertices),
+solved in $O(M)$ (Thomas $+$ Sherman--Morrison; a dense solve is microseconds at
+$M\sim24$). See \texttt{helmholtz\_filter\_along\_boundary!} in the Phase-3
+cantilever example.
 
 \section{Verification methodology}
 \label{sec:verification}
@@ -1343,6 +1388,15 @@ both, and in doing so reorganized the optimizer around a design parameterization
 and an actively re-meshed cloud. This section records that turn; the granular
 record is the companion log \texttt{boundary\_gradient\_noise.md}.
 
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.6\linewidth]{fig_setup.png}
+\caption{The plate-with-hole discretization: the interior cloud, the outer Neumann
+frame under biaxial traction $\sigma_\infty$, the free (traction-free) hole
+boundary, and the three Dirichlet pins that remove rigid-body modes.}
+\label{fig:plate-setup}
+\end{figure}
+
 \subsection{The symptom and the diagnosis:
 \texorpdfstring{$\partial\mat W/\partial\pts$}{dW/dp}}
 \label{sec:plate-noise}
@@ -1366,6 +1420,17 @@ Neumann rows, because the pull-back of a second-order operator probes the third
 derivative of the $r^3$ kernel), worsens with kernel order (a conditioning
 effect), and sharpens under refinement. Crucially it is \emph{broadband} and
 overlaps the physical signal in frequency.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{fig_noise.png}
+\caption{The boundary gradient noise. \emph{Left:} the per-node radial shape
+gradient $\partial C/\partial r_j$ walked around the hole --- a near-Nyquist
+sawtooth. \emph{Right:} its Fourier amplitude spectrum \emph{rises} toward the
+highest representable mode; the circle-seeking $m{=}2$ mode (green) sits far below
+the high-mode band. The gradient is FD-exact yet genuinely rough.}
+\label{fig:plate-noise}
+\end{figure}
 
 \subsection{Why filtering is the wrong cure}
 
@@ -1452,6 +1517,17 @@ gradient --- the circle \emph{is} the discrete optimum of an appropriately
 re-initialized cloud. Averaged over independent fresh clouds the residual $m{=}2$
 gradient maps to $a_2^\star\approx0.008$, a tenfold debiasing.
 
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.9\linewidth]{fig_bias.png}
+\caption{The objective bias is a \emph{stale-cloud} artifact, not intrinsic. The
+discrete-compliance optimum $a_2^\star$ is displaced from the true circle
+($a_2{=}0$) and the sign \emph{brackets}: a frozen interior gives $+0.078$, a
+Laplace-morphed interior $-0.065$. Re-anchored re-meshing (two-front) lands at
+$+0.015$ --- essentially the circle.}
+\label{fig:plate-bias}
+\end{figure}
+
 A practical corollary closes a tempting shortcut: the old per-node route could
 \emph{not} have been rescued by periodic re-initialization alone. Re-meshing cures
 (B) and (C) but not (A); on a fresh cloud the per-node gradient is still
@@ -1475,6 +1551,16 @@ $\hat{\vect g}_{\mathrm{bnd}} = \vect g_{\mathrm{bnd}} + \mat M^\top
 \vect g_{\mathrm{int}}$; omitting this term makes the boundary-only gradient
 $O(1)$ wrong once the interior moves. Fixed stencils within the interval keep the
 objective smooth.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.6\linewidth]{fig_morph.png}
+\caption{Front~1 (morph). As the hole moves from the start ellipse (red) toward
+the circle (green), the differentiable Laplace extension carries the interior nodes
+inward (displacement arrows, $\times3$), decaying smoothly with distance. The
+adjoint flows back through this map by its transpose.}
+\label{fig:plate-morph}
+\end{figure}
 
 \paragraph{Front 2 --- re-anchored re-mesh (between intervals).} When a quality
 indicator trips, a fresh high-quality cloud is generated for the current design
@@ -1532,6 +1618,127 @@ re-meshes over sixty iterations. It lands at the true optimum, not at either
 stale-cloud bias ($+0.078$ or $-0.065$): the design space removes the noise, the
 re-anchoring removes the bias, and the morph keeps the cloud differentiable in
 between.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.95\linewidth]{fig_twofront.png}
+\caption{Two-front result. \emph{Top-left:} hole shapes (start ellipse $\to$ final,
+against the target circle). The optimizer drives $a_2\to0$ and the compliance down,
+while the cloud-quality indicators (bottom) trigger two re-meshes
+(\texttt{morph\_drift}). It converges to the true circle, not to either stale-cloud
+bias.}
+\label{fig:plate-twofront}
+\end{figure}
+
+\section{Differentiation strategy: manual pull-backs and an AD-native API}
+\label{sec:diffstrategy}
+
+The pipeline of Sections~\ref{sec:adjoint-theory}--\ref{sec:five-steps} is a discrete
+adjoint \emph{orchestrated by hand}: the RBF weights are differentiated automatically
+by \texttt{RadialBasisFunctions.jl}, but the chain rule through the assembled system
+(the five steps) is written explicitly inside \texttt{shape\_gradient} rather than
+traced by AD. This section
+explains why, and how the same numerics could be repackaged behind a clean
+reverse-mode API without paying the cost that motivated the manual route. It is an
+open engineering direction, not yet built.
+
+\subsection{Why not full reverse-mode AD}
+
+The obvious alternative is to write the forward computation in plain Julia and let a
+reverse-mode AD engine (Mooncake) differentiate it. We tried this first and
+abandoned it: AD \emph{traces every elementary operation}, and the forward solve
+contains an UMFPACK factorization and, inside \texttt{\_build\_weights}, one small
+RBF saddle solve per stencil. Tracing all of that produced multi-minute LLVM
+compile times even at $N=25$ nodes. The manual pipeline sidesteps this by calling
+the analytic pull-backs (\texttt{\_pullback\_weights!}, the IFT adjoint solve)
+directly --- no AD trace, no compile blow-up.
+
+\subsection{Primitive versus rule}
+
+The cost is avoidable \emph{without} giving up AD, and the distinction that makes
+this possible is worth stating plainly because it is easy to conflate:
+\begin{itemize}
+  \item A \emph{rule} (reverse rule, \texttt{rrule}) is the analytic derivative of
+        one function: given $y=f(x)$ it returns $y$ and a \emph{pull-back}
+        $\bar x = \mathrm{pb}(\bar y)$. It is the mathematics.
+  \item A function is a \emph{primitive} when AD is told to \emph{use the rule
+        instead of tracing inside it}. One makes a function a primitive \emph{by}
+        giving it a rule.
+\end{itemize}
+So ``primitive'' and ``rule'' are not alternatives --- a primitive is a function
+equipped with a rule. The leverage: declaring the two expensive functions
+(\texttt{build\_weights} and \texttt{solve}) primitives makes AD stop at their
+boundary and call our \emph{existing} analytic pull-backs, while it traces only the
+cheap glue (geometry parameterization, block assembly, scalar loss).
+
+\subsection{The schematic}
+
+The forward computation reads like ordinary code; the annotations mark which nodes
+AD traces and which are primitives backed by an analytic rule:
+
+\begin{footnotesize}
+\begin{verbatim}
+FORWARD (reads like normal code):
+
+  theta --geometry--> pts --build_weights--> W
+        --assemble--> (A,b) --solve--> u --loss--> C
+
+  geometry, assemble, loss : AD-traced (cheap glue)
+  build_weights            : PRIMITIVE, rule = _pullback_weights!  (dW/dx)
+  solve                    : PRIMITIVE, rule = IFT adjoint solve
+
+BACKWARD (Mooncake runs this once the primitives are declared):
+
+  C_bar --loss--> (u_bar, b_bar)
+        --[solve rule: one adjoint solve  A^-T (dC/du)]--> (A_bar, b_bar)
+        --assemble--> W_bar
+        --[build_weights rule: _pullback_weights! = dW/dx]--> pts_bar
+        --geometry--> theta_bar
+\end{verbatim}
+\end{footnotesize}
+
+Only the primitive nodes carry expensive numerics, and those are exactly the
+hand-written pull-backs already validated to $10^{-7}$ against finite differences.
+Everything else is small, so AD compiles quickly.
+
+\subsection{What changes, concretely}
+
+\begin{center}
+\begin{tabular}{lll}
+\hline
+piece & today (manual) & AD-native version \\
+\hline
+\texttt{build\_weights} & \texttt{\_pullback\_weights!} by hand & primitive $+$ \texttt{rrule!!} wrapping it \\
+\texttt{solve} & IFT adjoint in \texttt{shape\_gradient} & primitive $+$ \texttt{rrule!!} (forward $+$ adjoint solve) \\
+assembly, loss, geometry & hand-coded external terms & plain Julia, AD-traced \\
+call site & \texttt{shape\_gradient(pts, model, N, \ldots)} & \texttt{gradient(loss, theta)} \\
+\hline
+\end{tabular}
+\end{center}
+
+Two recurring pains vanish in the AD-native form. First, the design parameterization
+composes automatically: \texttt{gradient(theta -> loss(geometry(theta)))} chains
+$\partial C/\partial\pts \cdot \partial\pts/\partial\theta$ --- the parameterization
+Jacobian that Section~\ref{sec:plate} showed is essential for convergence --- with no
+extra code. Second, the two-term $\partial\vect b/\partial\pts$ subtlety
+(Section~\ref{sec:step5-load}: the explicit load-sensitivity term that must be added
+by hand in the manual API) disappears, because writing $C=\vect b^\top\vect u$ lets
+AD trace the loss's $\vect b$-dependence itself.
+
+\subsection{Status --- an open engineering point}
+
+This is a \emph{repackaging of validated numerics, not new mathematics}, but it is
+not yet done and carries real engineering risk. Registering a function as a Mooncake
+primitive incurs a one-time \texttt{rrule!!} build cost (already the dominant cost in
+the present shape-opt loop), which must be amortized through the prebuilt sysimage;
+and the analytic pull-backs mutate cached buffers, so wrapping them under Mooncake's
+calling convention needs care. The recommended next step is a small timed prototype
+--- wrap \texttt{build\_weights} and \texttt{solve} as primitives, check
+\texttt{gradient(loss, theta)} against the manual \texttt{shape\_gradient} and against
+finite differences, and measure the warm-up --- before the framework extraction
+commits to an API. The pay-off, if the warm-up is acceptable, is the industry-facing
+simplicity of a single \texttt{gradient} call in place of the present
+multi-argument entry point.
 
 \section{Generalization}
 \label{sec:generalization}
@@ -1724,19 +1931,10 @@ $\norm{\nabla\Loss}$ as $V(\pts)$ oscillates around $V_0$ across
 line-search trials. An augmented Lagrangian, with multiplier
 updated between outer iterations, eliminates this artefact.
 
-\paragraph{Adaptive Helmholtz $r$.}
-The current value $r = 1$ is hand-tuned. A standard recipe in
-topology optimization is to start with a large $r$ (aggressive
-smoothing during the early shape-finding phase) and reduce it
-toward zero as the design stabilizes. Implementing this is
-straightforward; the right schedule is empirical.
-
-\paragraph{Arc-length-weighted boundary Laplacian.}
-The current Helmholtz filter treats the boundary loop as a
-uniform 1D mesh, slightly over-smoothing longer segments
-relative to shorter ones. A geometric Laplacian with arc-length
-weights would be more rigorous; at the cantilever scale the
-visual impact is small.
+\paragraph{Filter tuning --- moot.}
+The adaptive-$r$ and arc-length-Laplacian refinements of the boundary filter are no
+longer pursued: Section~\ref{sec:plate} supersedes gradient filtering with the
+design-space contraction.
 
 \paragraph{Grid resolution study.}
 $N = 45$ is too coarse to express a clean Michell taper. A scale
@@ -1745,25 +1943,23 @@ optimum converges to a clean tapered beam as the grid refines.
 
 \subsection{Within the cantilever example}
 
-\paragraph{Tip-shrinkage gradient artefact.}
-The cantilever example is currently being repaired: the
-gradient driving tip-shrinkage was found to have an incorrect
-sign component, which had been masked by an earlier corner-freeze
-convention. The repair is purely at the example level (loss
-definition / boundary parameterization) and does not affect the
-adjoint pipeline. Once landed, the quantitative numbers in
-Section~\ref{sec:cantilever} will be re-validated.
+\paragraph{Cantilever retired.}
+The cantilever has served its purpose (adjoint validation, regularization study) and
+is retired; the plate-with-hole (Section~\ref{sec:plate}) is the current case. The
+illustrative numbers in Section~\ref{sec:cantilever} carry a known tip-shrinkage sign
+subtlety (masked by an earlier corner-freeze convention) and are not re-validated ---
+the qualitative contrasts they show are what we use them for.
 
-\paragraph{Reference textbook problem.}
-We rely on FD-vs-AD consistency as the validation criterion. A
-problem with an analytic solution (Schade plate, thin-walled
-pressure vessel, Lamé's problem) would let us check the
-discretization itself --- not just the adjoint.
+\paragraph{Reference textbook problem --- addressed.}
+Beyond FD-vs-AD consistency, the discretization itself is now checked against an
+analytic solution: the Kirsch plate-with-hole stress concentration
+($K_t = 2.966$ at $0.62\%$ L2 stress error).
 
 \subsection{Toward engineering geometries}
 
 \paragraph{Geometry kernel.}
-Today the boundary points \emph{are} the design variables. For
+The design is now a smooth, low-dimensional parameterization $\vect l$
+(Section~\ref{sec:plate}), not the boundary points directly. For
 real STL-driven geometries the differentiable chain
 $\vect l \to \mathcal G_{\text{STL}} \to \pts_b$ is needed, with
 $\vect l$ either (i) STL vertices direct, (ii) spline / NURBS
@@ -1779,12 +1975,11 @@ vertex perturbation, triangle-normal derivation with the analogue
 of~\eqref{eq:chord-jac}, STL-to-pointcloud sampling with
 Jacobian, optional spline-to-STL retessellation.
 
-\paragraph{Boundary-to-interior deformation.}
-When boundary points move, interior collocation points must
-follow to maintain point-cloud quality. An RBF-interpolation
-approach that reuses the existing \texttt{\_pullback\_weights!}
-machinery is the natural choice and was already sketched in
-\texttt{plan\_shape\_optimization\_pipeline.md}.
+\paragraph{Boundary-to-interior deformation --- done.}
+When boundary points move, interior points must follow to maintain cloud quality.
+This is now Front~1 (Section~\ref{sec:plate-twofront}): a differentiable Laplace
+morph, with the adjoint carried by its transpose. The remaining open item is its
+\emph{efficient} re-factorization between re-meshes at large $N$.
 
 \paragraph{Scale-up.}
 Forward and adjoint solves at $N \sim 10^4$--$10^5$ require
