@@ -45,12 +45,26 @@ Build order: **shakedown first** on hole→sphere, then climb.
   the volume, so the cavity nodes = SH template (connectivity known for normals).
 - **`max_points` in `Octree` is the TARGET total, not a cap** (`n=round(max·ratio)`).
   Set it to `V_solid/Δ³` for a uniform cloud.
-- **Flat boundaries are coplanar-degenerate at fine spacing.** A cube face with
-  ≫k in-plane nodes gives `SingularException` (poly_deg=3 unisolvency) because a
-  face node's k nearest are all coplanar. Cure: a **curved outer boundary** (a
-  large sphere) — also what the user suggested; hydrostatic load is then just σ∞·n.
 - **Boundary nodes must be ≳ Δ (coarser than / equal to the volume), never denser.**
   A cavity finer than the volume → coplanar surface stencils → singular.
+- **⚠ A planar boundary must NOT be a problem — the cube `SingularException` is a
+  BUG, not a law (TO INVESTIGATE).** RBF-FD handles flat domain boundaries
+  routinely; a flat-face node's k-NN stencil normally includes interior (off-plane)
+  support because the nodes directly behind the face are nearer than far in-plane
+  nodes, so the stencil is 3D and unisolvent. A purely-coplanar stencil means
+  something upstream is wrong, NOT that flat faces are intrinsically degenerate.
+  My earlier "flat faces are coplanar-degenerate, use a sphere" conclusion was a
+  WORKAROUND that masked the real defect — switching to a spherical outer boundary
+  made the symptom disappear but did not explain it. Suspected root causes to chase:
+  (a) the octree volume fill leaving a **gap adjacent to the flat faces** (no
+  near-surface interior nodes behind the face ⇒ k-NN returns only coplanar face
+  nodes); (b) **coincident/duplicate nodes** between the structured cube-face grid
+  and the octree's near-surface points; (c) the structured face grid being so dense
+  that k-NN never reaches interior (would still be a bug — fix by ensuring a
+  near-boundary volume layer, not by banning flat boundaries). Debug by printing
+  the singular node's index + its stencil coordinates (check for coplanarity and
+  whether any neighbor is off-plane / interior). Flat boundaries are needed for the
+  cube benchmark and most real geometries, so this must be fixed, not avoided.
 
 **Sphere-recovery optimizer — DIAGNOSED, not yet converging.** Gradient is exact,
 but descent stalls: C drops ~10× while shape barely moves (asph 34.3%→34.2%),

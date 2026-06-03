@@ -6,9 +6,12 @@
 # free).  The compliance-optimal cavity at fixed volume is a SPHERE (Eshelby/3D-
 # Kirsch: uniform boundary stress).  Start from an ellipsoid, recover the sphere.
 #
-# A spherical (curved) outer boundary is used rather than a cube: flat cube faces
-# at fine spacing give coplanar — hence unisolvency-singular — RBF-FD stencils;
-# a curved boundary avoids that entirely, and hydrostatic load is just σ∞·n.
+# A spherical (curved) outer boundary is used here as a WORKAROUND: the cube path
+# hit a SingularException that a curved boundary sidesteps.  NOTE: a planar
+# boundary must NOT be intrinsically singular (RBF-FD handles flat boundaries
+# routinely) — that crash is a BUG to find (likely an octree volume gap behind the
+# faces / duplicate nodes), not a property of flat faces.  See PROJECT_DIARY.md.
+# Hydrostatic load on the sphere is just σ∞·n.
 #
 # This is the GROUND-TRUTH rung of the parametrization-comparison facility: the
 # only problem with an exact analytic optimum, used to certify the metrics
