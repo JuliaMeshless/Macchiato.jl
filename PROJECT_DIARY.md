@@ -6,6 +6,73 @@ Full detail: `RBF_FD_shape_optimization.tex` (the story),
 
 ---
 
+## 2026-06-03 — 3D parametrization-comparison facility: core built + gradient-exact; sphere-recovery optimizer diagnosed (stale-cloud bias)
+
+**Direction (user).** Build a facility to compare surface parametrizations on 3D
+shape-opt problems. Three axes: PROBLEM × DESIGN-SPACE × PHYSICS, with a common
+optimizer + metrics. **Key unification:** every smooth parametrization (spherical
+harmonics, Biancolini RBF, FFD, Bézier) is, at the current surface, a linear
+sensitivity matrix `B = ∂(surface pts)/∂l`; the optimizer is identical, only
+`apply` (=B) and `contract` (=Bᵀ) differ. Hole→sphere is the GROUND-TRUTH rung
+(exact Eshelby optimum) to certify metrics; flagship flexibility benchmarks
+(all four chosen): **Vigdergauz hole → fillet → heat-sink → Pironneau drag**.
+Build order: **shakedown first** on hole→sphere, then climb.
+
+**Built + validated this session:**
+- **3D differentiable normals** (Phase-D-L2 analogue) — `triangle_normals`,
+  `NormalJacobian3D`, `update_traction_coeffs_3d!`, `extract_normal_sensitivities_3d!`,
+  threaded into `shape_gradient_3d` via `normal_jacobians`. FD-validated:
+  Jacobian 2.6e-10, full live-normal gradient median 0.999999
+  (`test_shape_gradient_3d_normals.jl`). Frozen-normal tests unchanged (no regression).
+- **SH radial design space** (`src/optimization/design_space_3d.jl`):
+  `SphericalHarmonicModes` (icosphere template + real `Y_lm` + radial
+  `r(θ,φ)=Σ c_lm Y_lm`), `contract_gradient` (=Bᵀ), exact `cavity_volume`/
+  `volume_gradient`/`project_volume`, `fit_ellipsoid_sh`, degree-set constructor.
+  Self-test (`test_sph_design_space.jl`): orthonormality 7e-5, contract==Bᵀ 3e-10,
+  volume-grad 2e-10, ellipsoid fit 1e-2, pure Y₀₀⇒exact sphere. ALL PASS.
+- **3D Laplace morph** — `LaplaceExtension` made dimension-generic (2D path
+  unchanged; 3D adds the zz term + SVector{3}).
+- **Octree geometry** (`cavity_sphere_recovery_sh.jl`) — spherical shell (outer
+  icosphere + cavity icosphere) filled by **WTP `Octree`** volume fill.
+- **Full-chain shape gradient FD-EXACT** on the real 3D cavity-compliance problem
+  (adjoint → `morph_transpose` → `contract`): median AD/FD = 0.99995.
+
+**Hard-won 3D geometry/discretization lessons (durable):**
+- **Use WTP `Octree`, NOT `SlakKosec`, for a cavity (multiply-connected) domain.**
+  SlakKosec runs away to the point cap. `Octree(mesh; spacing, alpha)` from a
+  triangulated `SimpleMesh` (outer outward + cavity flipped inward) is robust.
+  `discretize(PointBoundary,…)` **preserves my boundary nodes** and only fills
+  the volume, so the cavity nodes = SH template (connectivity known for normals).
+- **`max_points` in `Octree` is the TARGET total, not a cap** (`n=round(max·ratio)`).
+  Set it to `V_solid/Δ³` for a uniform cloud.
+- **Flat boundaries are coplanar-degenerate at fine spacing.** A cube face with
+  ≫k in-plane nodes gives `SingularException` (poly_deg=3 unisolvency) because a
+  face node's k nearest are all coplanar. Cure: a **curved outer boundary** (a
+  large sphere) — also what the user suggested; hydrostatic load is then just σ∞·n.
+- **Boundary nodes must be ≳ Δ (coarser than / equal to the volume), never denser.**
+  A cavity finer than the volume → coplanar surface stencils → singular.
+
+**Sphere-recovery optimizer — DIAGNOSED, not yet converging.** Gradient is exact,
+but descent stalls: C drops ~10× while shape barely moves (asph 34.3%→34.2%),
+then no-descent. Signature = 2D **failure mode C (stale-cloud objective bias)**:
+the cloud anchored to the ellipsoid has its *discrete* compliance optimum near
+the ellipsoid, not the sphere; plus residual discrete noise / cavity
+under-resolution (ρ≈3·Δ, 162 cavity nodes). The 2D cure is the **two-front
+re-anchored remesh**: descend on ‖Jᵀg‖, re-anchor a fresh octree cloud between
+steps (morph within, re-init between), fixed normalized step — NOT a C-based line
+search (C jumps across remeshes). `anchor()` already rebuilds a fresh cloud; the
+remaining work is wiring the two-front loop + raising cavity resolution.
+
+**NEXT (resume here):** (1) wire the two-front loop into
+`cavity_sphere_recovery_sh.jl` (re-anchor each iter or on a quality indicator;
+fixed normalized step; track ‖g‖ + asphericity), bump cavity NSUB/Δ so ρ≲r_ref;
+(2) add the **Biancolini RBF** design space (second `AbstractDesignSpace` subtype,
+same Bᵀ seam) and the metrics harness (recovery error, DOF efficiency, cond(BᵀB),
+hi/low) to compare SH vs Biancolini on the certified rung; (3) then climb to the
+Vigdergauz hole.
+
+---
+
 ## 2026-06-02 (latest) — 3D differentiable normals (Phase-D-L2 analogue) validated
 
 **State.** The 3D traction adjoint no longer needs frozen normals. Added the 3D

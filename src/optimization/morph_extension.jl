@@ -113,9 +113,11 @@ function build_laplace_extension(
     n_outer::Int,
     nθ::Int,
 )
-    Wxx = _build_weights(Partial(2, 1), pts, pts, adjl, basis)
-    Wyy = _build_weights(Partial(2, 2), pts, pts, adjl, basis)
-    Wlap = Wxx + Wyy
+    dim = length(first(pts))                       # 2 or 3 — inferred, dim-generic
+    Wlap = _build_weights(Partial(2, 1), pts, pts, adjl, basis)
+    for d in 2:dim
+        Wlap += _build_weights(Partial(2, d), pts, pts, adjl, basis)
+    end
     L_int     = Wlap[interior_idx, interior_idx] + 1e-8 * I
     L_int_bnd = Wlap[interior_idx, boundary_idx]
 
@@ -143,18 +145,18 @@ function morph(
     ext::LaplaceExtension,
     hole_new::AbstractVector{<:AbstractVector{Float64}},
 )
-    # Boundary displacement: outer = 0, hole = hole_new - ref_hole
-    Δhx = vcat(zeros(ext.n_outer),
-               [hole_new[j][1] - ext.ref_hole[j][1] for j in 1:ext.nθ])
-    Δhy = vcat(zeros(ext.n_outer),
-               [hole_new[j][2] - ext.ref_hole[j][2] for j in 1:ext.nθ])
-
-    Δix = ext.morph_fact \ (-ext.L_int_bnd * Δhx)
-    Δiy = ext.morph_fact \ (-ext.L_int_bnd * Δhy)
+    dim = length(first(ext.ref_pts))               # 2 or 3 — dim-generic
+    # Per-dimension boundary displacement: outer = 0, hole = hole_new - ref_hole.
+    Δi = ntuple(dim) do c
+        Δh = vcat(zeros(ext.n_outer),
+                  [hole_new[j][c] - ext.ref_hole[j][c] for j in 1:ext.nθ])
+        ext.morph_fact \ (-ext.L_int_bnd * Δh)
+    end
 
     pts = copy(ext.ref_pts)
     @inbounds for (kk, i) in enumerate(ext.interior_idx)
-        pts[i] = ext.ref_interior[kk] + SVector{2,Float64}(Δix[kk], Δiy[kk])
+        pts[i] = ext.ref_interior[kk] +
+                 SVector{dim,Float64}(ntuple(c -> Δi[c][kk], dim))
     end
     @inbounds for (kk, i) in enumerate(ext.boundary_idx[ext.n_outer + 1:end])
         pts[i] = hole_new[kk]
@@ -181,16 +183,15 @@ function morph_transpose(
     g_all::AbstractVector{<:AbstractVector{Float64}},
     hole_idx::AbstractVector{Int},
 )
-    gix = [g_all[i][1] for i in ext.interior_idx]
-    giy = [g_all[i][2] for i in ext.interior_idx]
-
-    # cb = -L_int_bndᵀ · L_int⁻ᵀ · g_int   (length n_boundary = n_outer + nθ)
-    cbx = -(ext.L_int_bnd' * (ext.morph_fact' \ gix))
-    cby = -(ext.L_int_bnd' * (ext.morph_fact' \ giy))
+    dim = length(first(ext.ref_pts))               # 2 or 3 — dim-generic
+    # cb_c = -L_int_bndᵀ · L_int⁻ᵀ · g_int_c   (length n_boundary = n_outer + nθ)
+    cb = ntuple(dim) do c
+        gic = [g_all[i][c] for i in ext.interior_idx]
+        -(ext.L_int_bnd' * (ext.morph_fact' \ gic))
+    end
 
     # Hole boundary = last nθ entries of the boundary ordering
-    return [SVector{2,Float64}(
-        g_all[hole_idx[j]][1] + cbx[ext.n_outer + j],
-        g_all[hole_idx[j]][2] + cby[ext.n_outer + j],
-    ) for j in 1:ext.nθ]
+    return [SVector{dim,Float64}(ntuple(c ->
+                g_all[hole_idx[j]][c] + cb[c][ext.n_outer + j], dim))
+            for j in 1:ext.nθ]
 end

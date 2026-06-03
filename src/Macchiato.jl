@@ -123,6 +123,7 @@ include("optimization/solve_ift.jl")
 include("optimization/manual_adjoint.jl")
 include("optimization/manual_adjoint_3d.jl")
 include("optimization/design_space.jl")
+include("optimization/design_space_3d.jl")
 include("optimization/morph_extension.jl")
 include("optimization/indicators.jl")
 export apply_dirichlet!
@@ -149,6 +150,12 @@ export AbstractDesignSpace, FourierModes
 export boundary_points, radius_at, r0_for_area
 export contract_gradient, sob_weight
 export calibrate_fourier, fit_start_fourier
+
+# Design space (3D)
+export SphericalHarmonicModes, icosphere, real_sph_harm, sph_lm_list
+export n_design_vars, radii, surface_faces, directions
+export cavity_volume, volume_gradient, project_volume, sph_sob_weight
+export fit_ellipsoid_sh, calibrate_sph, with_coeffs, set_sobolev
 
 # Extension (morph)
 export AbstractExtension, LaplaceExtension, build_laplace_extension
