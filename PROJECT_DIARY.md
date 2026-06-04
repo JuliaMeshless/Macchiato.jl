@@ -47,24 +47,36 @@ Build order: **shakedown first** on hole→sphere, then climb.
   Set it to `V_solid/Δ³` for a uniform cloud.
 - **Boundary nodes must be ≳ Δ (coarser than / equal to the volume), never denser.**
   A cavity finer than the volume → coplanar surface stencils → singular.
-- **⚠ A planar boundary must NOT be a problem — the cube `SingularException` is a
-  BUG, not a law (TO INVESTIGATE).** RBF-FD handles flat domain boundaries
-  routinely; a flat-face node's k-NN stencil normally includes interior (off-plane)
-  support because the nodes directly behind the face are nearer than far in-plane
-  nodes, so the stencil is 3D and unisolvent. A purely-coplanar stencil means
-  something upstream is wrong, NOT that flat faces are intrinsically degenerate.
-  My earlier "flat faces are coplanar-degenerate, use a sphere" conclusion was a
-  WORKAROUND that masked the real defect — switching to a spherical outer boundary
-  made the symptom disappear but did not explain it. Suspected root causes to chase:
-  (a) the octree volume fill leaving a **gap adjacent to the flat faces** (no
-  near-surface interior nodes behind the face ⇒ k-NN returns only coplanar face
-  nodes); (b) **coincident/duplicate nodes** between the structured cube-face grid
-  and the octree's near-surface points; (c) the structured face grid being so dense
-  that k-NN never reaches interior (would still be a bug — fix by ensuring a
-  near-boundary volume layer, not by banning flat boundaries). Debug by printing
-  the singular node's index + its stencil coordinates (check for coplanarity and
-  whether any neighbor is off-plane / interior). Flat boundaries are needed for the
-  cube benchmark and most real geometries, so this must be fixed, not avoided.
+- **✅ RESOLVED (2026-06-04) — flat faces are NOT intrinsically singular; the cube
+  crash was boundary-finer-than-volume, cured by `h_boundary ≥ Δ`.**
+  `examples/cavity_3d/diagnose_flat_boundary.jl` rebuilds the EXACT octree pipeline
+  with a cube outer boundary and checks every stencil's degree-3 3D Vandermonde
+  rank (σ_min/σ_max — the quantity `bunchkaufman!` throws on). Verdict depends
+  ONLY on face spacing `h` vs volume spacing `Δ`:
+    - `h = Δ`   → **0 singular stencils** (boundary nodes get 13–21 off-plane
+      volume neighbors; worst σ_min/σ_max = 8.8e-4, comfortable). Flat cube WORKS.
+    - `h = Δ/2` → 3362 singular; the worst boundary nodes have **0 volume
+      neighbors, max-off-plane = 0.000** — i.e. all 50 k-NN are coplanar face nodes.
+    - `h = Δ/3` → 20327 singular.
+  Mechanism (the user's intuition, quantified): boundary nodes lie on a 2D sheet,
+  so within radius `r` there are `~π(r/h)²` of them (∝ r²); the first interior
+  layer is at depth `~Δ`. When `h < Δ` the in-plane count saturates the `k`-budget
+  BEFORE `r` reaches the sparser interior layer → stencil collapses onto the plane
+  → `P` loses column rank → `SingularException`. When `h ≥ Δ` the nearest interior
+  node (depth ≤ h) beats most in-plane neighbors → genuinely 3D "cloud" stencil.
+  NOT flatness, NOT duplicate nodes (min NN distance never ~0). This is exactly the
+  "boundary ≳ Δ, never denser" rule above — now proven necessary & sufficient for
+  the SingularException. **Consequence: the spherical-outer-boundary workaround is
+  unnecessary; the cube benchmark is viable with its outer face grid at spacing ≥ Δ.**
+  **WIRED IN (2026-06-04):** `cavity_sphere_recovery_sh.jl` now uses a flat-faced
+  CUBE outer boundary (`outer_cube(L_OUT, H_OUT)`, `H_OUT=Δ`). Assembles + solves
+  with NO SingularException; full-chain gradient FD-check median AD/FD = 0.99972 ✓
+  (adjoint machinery unchanged). Hydrostatic σ∞·n on flat faces is the EXACT
+  uniform-stress BC, and edge/corner normal averaging is harmless (σ·n = σ∞ n ∀n).
+  Optimizer convergence is UNCHANGED from the sphere version (asph 34.3%→35.9%, C
+  drops 5× then no-descent, ‖g_c‖ blows up 1.4e4→1.5e7 over 4 iters) — that's the
+  separately-tracked stale-cloud-bias / per-node-noise stall, NOT a cube artifact;
+  cure remains the two-front re-anchored-remesh loop (next).
 
 **Sphere-recovery optimizer — DIAGNOSED, not yet converging.** Gradient is exact,
 but descent stalls: C drops ~10× while shape barely moves (asph 34.3%→34.2%),
@@ -77,9 +89,44 @@ steps (morph within, re-init between), fixed normalized step — NOT a C-based l
 search (C jumps across remeshes). `anchor()` already rebuilds a fresh cloud; the
 remaining work is wiring the two-front loop + raising cavity resolution.
 
-**NEXT (resume here):** (1) wire the two-front loop into
-`cavity_sphere_recovery_sh.jl` (re-anchor each iter or on a quality indicator;
-fixed normalized step; track ‖g‖ + asphericity), bump cavity NSUB/Δ so ρ≲r_ref;
+**Two-front loop BUILT (2026-06-04) — `cavity_sphere_recovery_twofront.jl`.**
+Reuses the cube geometry + adjoint; adds quality indicators (3D measures), fixed
+normalized Sobolev step, re-anchor-on-trip. Findings:
+- **Independent-cloud remesh THRASHES.** The absolute indicators (min_gap, min_sep,
+  cavity_cv) trip on EVERY fresh octree cloud (the jittered fill inherently makes
+  ~6e-3 near-duplicate interior↔boundary pairs), so it remeshes every iter; each
+  cloud is an independent random discretization ⇒ gradient-DIRECTION noise ⇒ asph
+  random-walks 31–38%, ‖g‖ spikes ~5e5. (morph_drift/stencil_growth stay 0/1 — the
+  RELATIVE degradation measures never engage because we never morph.)
+- **CRN (common random numbers) CURES the thrash.** `Random.seed!(SEED)` at the top
+  of `anchor()` ⇒ consecutive remeshed clouds differ only by the smooth design
+  change, not independent jitter ⇒ the stochastic gradient becomes a smooth
+  deterministic one ⇒ monotone descent. This is the key 3D-specific fix (2D used a
+  clean Cartesian cull so didn't need it).
+- **Residual = cavity UNDER-RESOLUTION bias, monotone in ρ/r_ref.** With CRN the
+  loop cleanly descends the DISCRETE compliance — but when ρ≳r_ref (stencil bigger
+  than the cavity) the discrete optimum is ASPHERICAL, so asph rises. Measured:
+  ρ/r_ref=1.04 (Δ0.10/k50) → asph drifts UP to 42%; =1.015 (Δ0.08/k50) → wanders
+  33–39%; =0.95 (Δ0.08/k40) → DESCENDS to 27%. So ρ<r_ref is the lever.
+- **k is NOT the lever (conditioning).** Lowering k to shrink ρ starves the
+  poly_deg=3 3D saddle system (20 monomials) — k=40 spiked ‖g‖ to ~4e7 (vs ~1e4 at
+  k=50). Shrink ρ via finer Δ ONLY (also improves conditioning). At k=50, ρ/Δ≈5.2,
+  so ρ<r_ref needs Δ≲0.06 (~120k DOF) — or NSUB=3 cavity (642 nodes) + Δ≈0.05
+  (~190k DOF) for a properly-resolved cavity surface too. Compute-gated from here.
+**Node-generation direction (user, 2026-06-04):** WTP **Octree is the SOTA node
+generator** and the intended path — do NOT abandon it. The Cartesian-lattice cull in
+`cavity_sphere_recovery_twofront.jl` is a TEMPORARY shakedown simplification (clean
+uniform stencils cheaply, deterministic so no CRN needed). The octree needs two bits
+of shape-opt development to come back as the default: (a) suppress the near-surface
+**near-duplicate** volume points (~6e-3 spacing) that trip min_sep/min_gap and forced
+remesh-every-iteration; (b) make routine use of its **graded spacing**
+(`BoundaryLayerSpacing`), which IS compulsory for the harder geometries (the graded
+attempt here only failed because the transition raised interior spacing_cv→0.47 and
+made the gradient noisy — an implementation/tuning issue, not a reason to avoid it).
+
+**NEXT:** (0) run the faithful-resolution config (Δ≈0.06, k=50, or NSUB=3/Δ≈0.05)
+to confirm clean asph→0 — needs ~120–190k-DOF 3D sparse solves (possibly iterative
+solver / more RAM); (1) [done — loop wired]
 (2) add the **Biancolini RBF** design space (second `AbstractDesignSpace` subtype,
 same Bᵀ seam) and the metrics harness (recovery error, DOF efficiency, cond(BᵀB),
 hi/low) to compare SH vs Biancolini on the certified rung; (3) then climb to the

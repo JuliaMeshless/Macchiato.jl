@@ -1,17 +1,21 @@
 # ============================================================================
 # cavity_sphere_recovery_sh.jl — 3D shape-optimization SHAKEDOWN.
 #
-# Benchmark: a large SPHERE with a central ellipsoidal cavity under HYDROSTATIC
-# far-field tension (radial traction σ∞·n on the outer sphere, cavity traction-
-# free).  The compliance-optimal cavity at fixed volume is a SPHERE (Eshelby/3D-
-# Kirsch: uniform boundary stress).  Start from an ellipsoid, recover the sphere.
+# Benchmark: a large CUBE with a central ellipsoidal cavity under HYDROSTATIC
+# far-field tension (traction σ∞·n on the outer faces, cavity traction-free).
+# A uniform hydrostatic stress σ_ij = σ∞ δ_ij is the EXACT uncavitated solution
+# for σ∞·n on ANY closed boundary, so the cube reproduces the far field cleanly
+# (no curvature approximation).  The compliance-optimal cavity at fixed volume is
+# a SPHERE (Eshelby/3D-Kirsch: uniform boundary stress).  Start ellipsoid → sphere.
 #
-# A spherical (curved) outer boundary is used here as a WORKAROUND: the cube path
-# hit a SingularException that a curved boundary sidesteps.  NOTE: a planar
-# boundary must NOT be intrinsically singular (RBF-FD handles flat boundaries
-# routinely) — that crash is a BUG to find (likely an octree volume gap behind the
-# faces / duplicate nodes), not a property of flat faces.  See PROJECT_DIARY.md.
-# Hydrostatic load on the sphere is just σ∞·n.
+# Flat outer faces are used DELIBERATELY (the real ground-truth geometry).  The old
+# cube SingularException was DIAGNOSED (2026-06-04, diagnose_flat_boundary.jl): it
+# came from an outer face grid FINER than the volume spacing Δ, which makes a face
+# node's k-NN stencil collapse onto the plane (0 off-plane neighbors ⇒ degree-3
+# unisolvency fails).  The cure is simply H_OUT ≥ Δ — boundary never finer than the
+# volume — which yields 0 singular stencils.  At an edge/corner node the (averaged)
+# normal is harmless under hydrostatic load: σ·n = σ∞ n for EVERY direction n.
+# See PROJECT_DIARY.md "RESOLVED (2026-06-04)".
 #
 # This is the GROUND-TRUTH rung of the parametrization-comparison facility: the
 # only problem with an exact analytic optimum, used to certify the metrics
@@ -40,9 +44,12 @@ using Unitful: m, ustrip
 # Resolution: the cavity must be well-resolved vs the stencil (ρ ≲ r_ref) or the
 # RBF-FD operators near it are inaccurate and the discrete optimum drifts off the
 # sphere.  ρ ≈ k^(1/3)·Δ ≈ 3.7Δ, so keep r_ref ≳ several·Δ.
-const R_OUT = 1.3                      # outer sphere radius (far-field frame)
-const NSUB_OUT = 3                     # outer icosphere subdivision (642 nodes)
+const L_OUT = 1.0                      # outer CUBE half-extent: domain [-L_OUT,L_OUT]³
 const Δ    = 0.10                      # volume spacing
+const H_OUT = Δ                        # outer face-grid spacing — MUST be ≥ Δ.
+                                       #  Boundary finer than the volume ⇒ flat-face
+                                       #  k-NN stencils go coplanar-singular.
+                                       #  (diagnose_flat_boundary.jl: h=Δ → 0 singular)
 const NSUB = 2                         # cavity icosphere subdivision (162 nodes;
                                        #  spacing ≳ Δ so stencils aren't coplanar-
                                        #  degenerate — denser-than-volume breaks unisolvency)
@@ -64,15 +71,48 @@ basis = PHS(3; poly_deg = 3)
 flat3(P) = reduce(vcat, [[p[1], p[2], p[3]] for p in P])
 const ZERO_NJAC3 = NormalJacobian3D(Int[], SMatrix{3,3,Float64,9}[])
 
-# ---- outer sphere boundary (icosphere, outward radial normals) --------------
-function outer_sphere(R, n_sub)
-    dirs, faces = icosphere(n_sub)
-    pts = [R * d for d in dirs]
-    nrm = copy(dirs)                       # outward radial
-    return pts, nrm, faces
+# ---- outer cube boundary (structured face grid, outward axis normals) -------
+# Returns (pts, nrm, faces): a deduped grid over the 6 faces of [-L,L]³ at spacing
+# ~h, per-node outward normals (averaged at shared edges/corners — harmless under
+# hydrostatic load), and triangles (indexing into pts) for the octree mesh.  Faces
+# are wound outward.  Keep h ≥ Δ so face-node stencils reach the interior cloud.
+function _wind(pts, tri, nv)               # orient a triangle outward (normal·nv ≥ 0)
+    a, b, c = tri
+    g = cross(pts[b] - pts[a], pts[c] - pts[a])
+    return dot(g, nv) ≥ 0 ? tri : (a, c, b)
 end
 
-# ---- octree mesh (outer icosphere outward + cavity icosphere inward) ---------
+function outer_cube(L, h)
+    n  = round(Int, 2L / h) + 1
+    ts = range(-L, L; length = n)
+    pts = SVector{3,Float64}[]; nacc = SVector{3,Float64}[]
+    seen = Dict{NTuple{3,Int},Int}()
+    key(p) = (round(Int, p[1]/h*2), round(Int, p[2]/h*2), round(Int, p[3]/h*2))
+    function idx!(p, nv)                    # dedupe; accumulate normals for averaging
+        kk = key(p); id = get(seen, kk, 0)
+        id != 0 && (nacc[id] += nv; return id)
+        push!(pts, p); push!(nacc, nv); seen[kk] = length(pts); return length(pts)
+    end
+    faces = NTuple{3,Int}[]
+    for (axis, s) in ((1,-1.0),(1,1.0),(2,-1.0),(2,1.0),(3,-1.0),(3,1.0))
+        nv  = setindex(SVector(0.0,0.0,0.0), s, axis)
+        gid = Matrix{Int}(undef, n, n)
+        for ia in 1:n, ib in 1:n
+            a = ts[ia]; b = ts[ib]
+            p = axis == 1 ? SVector(s*L, a, b) :
+                axis == 2 ? SVector(a, s*L, b) : SVector(a, b, s*L)
+            gid[ia, ib] = idx!(p, nv)
+        end
+        for ia in 1:(n-1), ib in 1:(n-1)
+            v1,v2,v3,v4 = gid[ia,ib], gid[ia+1,ib], gid[ia+1,ib+1], gid[ia,ib+1]
+            push!(faces, _wind(pts, (v1,v2,v3), nv))
+            push!(faces, _wind(pts, (v1,v3,v4), nv))
+        end
+    end
+    return pts, [normalize(v) for v in nacc], faces
+end
+
+# ---- octree mesh (outer cube faces outward + cavity icosphere inward) --------
 mp(p) = WTP.Point(p[1]*m, p[2]*m, p[3]*m)
 function octree_mesh(out_pts, out_faces, cav_pts, cav_faces)
     no = length(out_pts)
@@ -102,12 +142,12 @@ end
 function anchor(ds::SphericalHarmonicModes)
     cav_pts = boundary_points(ds)
     cav_faces = surface_faces(ds)
-    out_pts, out_nrm, out_faces = outer_sphere(R_OUT, NSUB_OUT)
+    out_pts, out_nrm, out_faces = outer_cube(L_OUT, H_OUT)
     bnd_pts = vcat(out_pts, cav_pts)
     bnd_nrm = vcat(out_nrm, [-normalize(p) for p in cav_pts])
     bnd = PointBoundary([mp(p) for p in bnd_pts], bnd_nrm, fill(Δ^2*m^2, length(bnd_pts)))
     mesh = octree_mesh(out_pts, out_faces, cav_pts, cav_faces)
-    V_solid = (4/3)*π*R_OUT^3 - cavity_volume(ds)
+    V_solid = (2*L_OUT)^3 - cavity_volume(ds)
     n_target = round(Int, V_solid / Δ^3)
     alg = WTP.Octree(mesh; spacing = ConstantSpacing(Δ*m), alpha = 1.0, placement = :jittered)
     cloud = WTP.discretize(bnd, ConstantSpacing(Δ*m); alg = alg, max_points = n_target)
@@ -136,7 +176,7 @@ function anchor(ds::SphericalHarmonicModes)
 
     # pins (3-2-1) on interior nodes to remove rigid-body modes
     nrst(p0) = interior_idx[argmin([norm(pts[i]-p0) for i in interior_idx])]
-    rmid = 0.6 * R_OUT
+    rmid = 0.6 * L_OUT
     A = nrst(SVector(rmid,0.,0.)); B = nrst(SVector(-rmid,0.,0.)); C = nrst(SVector(0.,rmid,0.))
     dirichlet_dofs = [A, A+N, A+2N,  B+N, B+2N,  C+2N]
     active = let a = trues(3N); for d in dirichlet_dofs; a[d]=false; end; collect(a) end
