@@ -124,13 +124,57 @@ remesh-every-iteration; (b) make routine use of its **graded spacing**
 attempt here only failed because the transition raised interior spacing_cv→0.47 and
 made the gradient noisy — an implementation/tuning issue, not a reason to avoid it).
 
-**NEXT:** (0) run the faithful-resolution config (Δ≈0.06, k=50, or NSUB=3/Δ≈0.05)
-to confirm clean asph→0 — needs ~120–190k-DOF 3D sparse solves (possibly iterative
-solver / more RAM); (1) [done — loop wired]
-(2) add the **Biancolini RBF** design space (second `AbstractDesignSpace` subtype,
-same Bᵀ seam) and the metrics harness (recovery error, DOF efficiency, cond(BᵀB),
-hi/low) to compare SH vs Biancolini on the certified rung; (3) then climb to the
-Vigdergauz hole.
+**Simplified node-gen + larger hole (2026-06-04, end of session).** Switched the
+twofront example to a DETERMINISTIC Cartesian-lattice-cull interior (no octree/jitter)
++ a LARGER cavity (ax,ay,az=0.62,0.48,0.55, r_ref≈0.55, L_OUT=1.0). This FIXED the loop
+MECHANICS: clean uniform stencils (spacing_cv 0.16 vs octree's 0.31–0.47, min_sep≈Δ, no
+near-duplicates) ⇒ the absolute indicators no longer trip ⇒ **FRONT-1 morphing finally
+engages** (morph_drift climbs 0→0.6 over ~9 iters, then remesh — the proper two-front
+regime; deterministic so no CRN needed). ρ_cav=0.26 (0.48·r_ref), well-resolved, ~16k
+nodes/48k DOF, fits easily. ALSO learned: my OOM forecast for direct LU was way off — a
+78k-DOF graded run used only ~15 GB (free bottomed 3G). And the graded-spacing attempt
+fits RAM but its fine/coarse TRANSITION raised interior spacing_cv→0.47 ⇒ noisy gradient
+(implementation issue; graded stays compulsory for harder geometries — see Node-gen note).
+
+**BUT asph still does NOT recover the sphere — and it's NOT resolution/noise.** Across
+EVERY config (octree & lattice, ρ/r_ref 1.04→0.48, noisy & clean) the optimizer drives
+asph UP/wandering, never →0. **Decisive sphere-stationarity test (start AT the sphere,
+ax=ay=az):** the discrete gradient at the sphere is NONZERO (‖g_proj‖≈5e4–9e4 after
+volume projection) and asph climbs away (0→7→15%). So the sphere is NOT a stationary
+point of the DISCRETE compliance on the cube domain. **Pin placement changes the C
+landscape:** rpin=0.6 (ON the r_ref≈0.55 cavity) ⇒ sphere→7% INCREASES C (sphere lower,
+fixed-step overshoots); rpin=0.9 (out near faces) ⇒ sphere→7% DECREASES C (aspherical
+genuinely lower-C). So the 3-2-1 pins + cube discretization are SETTING the optimum, not
+the physics. Three live causes, not yet separated:
+  (a) **3-2-1 pins break symmetry** (A@+x,B@−x,C@+y is asymmetric) ⇒ spurious l=2
+      gradient at the sphere. Moving pins out flipped the C-sign but ‖g‖ stayed ~8e4 —
+      necessary fix, not sufficient. Try a SYMMETRIC rigid-mode removal (nullspace
+      projection of the 6 rigid modes instead of 3 asymmetric pins).
+  (b) **Cube outer boundary has CUBIC symmetry** ⇒ the finite-domain optimum carries a
+      cubic harmonic (l=4) the l=2 design can't represent; pins break cubic→lower sym,
+      leaking into l=2. **STRONGEST LEAD: for the GROUND-TRUTH sphere-recovery rung,
+      revert the OUTER boundary to a SPHERE** (the original design) — spherical symmetry
+      makes the sphere provably the optimum. The cube was introduced only to exercise
+      flat faces; that flat-boundary singularity question is DONE/validated separately
+      (diagnose_flat_boundary.jl), so the cube belongs in a flat-boundary MECHANICS test,
+      NOT the exact-optimum recovery benchmark. I (Claude) conflated the two by putting
+      the cavity-recovery benchmark on a cube.
+  (c) **Fixed normalized step can't settle a shallow optimum** — it always moves
+      STEP_FRAC·r_ref regardless of ‖g‖, so near a shallow min it overshoots and jitters
+      (2D got away with it because the gradient vanished cleanly at the circle and the
+      maxδ<1e-14 check fired; 3D has a nonzero noise floor). Add a backtracking
+      line-search WITHIN a morph interval (C IS comparable there — no remesh) and keep
+      the fixed step only on the post-remesh iter.
+
+**NEXT (resume here, priority order):** (0a) **revert outer boundary to a SPHERE** for
+the recovery benchmark (keep cube as a separate flat-boundary mechanics check) — most
+likely to make the sphere the true optimum; (0b) re-run the sphere-stationarity test —
+expect ‖g_proj‖→~0 at the sphere; (0c) if still nonzero, swap 3-2-1 pins for a symmetric
+nullspace rigid-mode removal and/or add within-interval line search; (0d) THEN the
+ellipsoid→sphere recovery should converge. (1) [done — two-front loop wired, mechanics
+validated]. (2) add the **Biancolini RBF** design space (second `AbstractDesignSpace`
+subtype, same Bᵀ seam) + metrics harness (recovery error, DOF efficiency, cond(BᵀB),
+hi/low) to compare SH vs Biancolini; (3) climb to the Vigdergauz hole.
 
 ---
 

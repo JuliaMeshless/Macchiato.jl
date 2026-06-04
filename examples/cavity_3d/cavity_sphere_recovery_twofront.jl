@@ -55,8 +55,12 @@ const σ∞    = 1.0e4
 # uniform mesh — the cheap, simple way to escape the under-resolution bias.  r_ref≈0.55
 # ⇒ ρ/r_ref≈0.76, ~16k nodes.  (Wall L_OUT−r_ref≈0.45; far-field is tighter than a
 # tiny hole but ample for this shakedown.)
-const ax, ay, az = 0.62, 0.48, 0.55    # start ellipsoid semi-axes (r_ref≈0.55)
-const MAX_ITER  = 25
+const ax, ay, az = 0.547, 0.547, 0.547 # STATIONARITY TEST: start AT the sphere.  If the
+                                       #  optimizer stays (asph≈0), the sphere is a stable
+                                       #  discrete optimum; if it walks away, the sphere is
+                                       #  NOT the compliance minimizer (or the projected
+                                       #  descent has a sign bug).  (ellipsoid: 0.62,0.48,0.55)
+const MAX_ITER  = 15
 const STEP_FRAC = 0.04                 # max radial step / r_ref per iter
 const SOB_P     = 2
 
@@ -174,9 +178,15 @@ function anchor(ds::SphericalHarmonicModes)
     neumann_ids = vcat(outer_idx, cavity_idx)
     neumann_adjl = adjl[neumann_ids]
 
+    # 3-2-1 rigid-body pins.  CRITICAL: place them FAR from the cavity — the pin set
+    # is asymmetric (A at +x, B at −x, C at +y), so any pin-reaction stress that reaches
+    # the cavity breaks its spherical symmetry and biases the optimum off the sphere.
+    # rpin near the cube faces (≫ r_ref) ⇒ Saint-Venant decays the pin field before the
+    # cavity.  (At rpin=0.6 with the r_ref≈0.55 hole the pins sat ON the cavity — that
+    # was the source of the "sphere walks away" bias.)
     nrst(p0) = interior_idx[argmin([norm(pts[i]-p0) for i in interior_idx])]
-    rmid = 0.6 * L_OUT
-    A = nrst(SVector(rmid,0.,0.)); B = nrst(SVector(-rmid,0.,0.)); C = nrst(SVector(0.,rmid,0.))
+    rpin = 0.90 * L_OUT
+    A = nrst(SVector(rpin,0.,0.)); B = nrst(SVector(-rpin,0.,0.)); C = nrst(SVector(0.,rpin,0.))
     dirichlet_dofs = [A, A+N, A+2N,  B+N, B+2N,  C+2N]
     active = let a = trues(3N); for d in dirichlet_dofs; a[d]=false; end; collect(a) end
     interior_rows = let r=falses(N); for i in interior_idx; r[i]=true; end; r end
