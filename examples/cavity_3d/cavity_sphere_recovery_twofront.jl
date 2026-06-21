@@ -1,28 +1,9 @@
 # ============================================================================
 # cavity_sphere_recovery_twofront.jl — 3D TWO-FRONT shape optimization.
 #
-# The 3D lift of plate_with_hole_twofront_opt.jl.  Same closed-loop control:
-#
-#   FRONT 1 — MORPH (within a remesh interval):
-#       The interior is slaved to the moving cavity by a smooth, DIFFERENTIABLE
-#       3D Laplace extension.  The discrete adjoint flows through it exactly
-#       (morph-transpose-corrected gradient).  Fixed stencils ⇒ smooth objective.
-#
-#   FRONT 2 — REMESH + RE-ANCHOR (between intervals):
-#       When a quality indicator trips, regenerate a FRESH lattice cloud for the
-#       CURRENT design and RE-ANCHOR (reset reference + refactorize the morph).
-#       Each remesh is a RE-INITIALIZATION — this removes cloud degradation AND
-#       the stale-cloud objective bias that stalled the single-anchor shakedown
-#       (cavity_sphere_recovery_sh.jl: C dropped 5× but asph barely moved, ‖g‖
-#       blew up 1.4e4→1.5e7 over 4 morph-only iters).
-#
-#   DESIGN-SPACE CONTRACTION (failure mode A cure, already in place):
-#       The design is a few smooth spherical-harmonic radial modes (l=0,2), so
-#       the per-node Nyquist noise integrates out in `contract_gradient`.
-#
-# Descend on the GRADIENT (‖g‖→0), fixed normalized step — NOT a C line search
-# (C jumps across remeshes).  Benchmark: cube + ellipsoidal cavity under
-# hydrostatic σ∞·n; exact optimum is a SPHERE (Eshelby).
+# Node generation: WTP Octree + Bridson Poisson-disk sampling.  The annular
+# cavity mesh (outer sphere − inner cavity) is built as a WTP SimpleMesh and
+# loaded through WTP's standard pipeline (PointBoundary → Octree → discretize).
 #
 # Run:  jlrun cavity_3d/cavity_sphere_recovery_twofront.jl   (from examples/)
 # ============================================================================
@@ -30,38 +11,25 @@ using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))
 
 using Macchiato
+import WhatsThePoint as WTP
+const _M = WTP.Meshes
 import RadialBasisFunctions: find_neighbors
 using RadialBasisFunctions: PHS
 using StaticArrays, LinearAlgebra, Printf
 using Statistics: mean, std
+using Unitful: m, ustrip
 
 # ---- CONFIG -----------------------------------------------------------------
-# Node generation is a SIMPLE deterministic Cartesian lattice culled around the
-# cavity (no octree/jitter) — clean uniform stencils (spacing_cv≈0, min_sep≈Δ, no
-# near-duplicates), so the absolute quality indicators don't trip every iter and
-# FRONT-1 morphing actually engages (the proper two-front regime, as in 2D).
-# Determinism removes the remesh jitter noise too, so no common-random-numbers
-# hack is needed.  (Graded spacing — BoundaryLayerSpacing — stays available in the
-# framework for the harder geometries to come; it's just overkill for this rung.)
-const L_OUT  = 1.0                     # outer CUBE half-extent: domain [-L_OUT,L_OUT]³
-const Δ      = 0.08                    # uniform lattice spacing ⇒ ρ≈k^⅓·Δ ≈ 0.42
-const H_OUT  = 0.10                    # outer face-grid spacing — MUST be ≥ Δ
-const NSUB   = 2                       # cavity icosphere subdivision (162 nodes)
-const DEGREES = [0, 2]                 # SH degrees: base radius + quadrupole only
-const k      = 50                      # RBF-FD stencil — keep ≥50 for poly_deg=3 3D
-                                       #  conditioning (do NOT lower to shrink ρ)
+const L_OUT  = 1.0
+const Δ      = 0.08
+const OUTER_NSUB = 3
+const NSUB   = 2
+const DEGREES = [0, 2]
+const k      = 50
 const σ∞    = 1.0e4
-# LARGER hole: a big cavity is well-resolved vs the stencil (ρ/r_ref<1) on a COARSE
-# uniform mesh — the cheap, simple way to escape the under-resolution bias.  r_ref≈0.55
-# ⇒ ρ/r_ref≈0.76, ~16k nodes.  (Wall L_OUT−r_ref≈0.45; far-field is tighter than a
-# tiny hole but ample for this shakedown.)
-const ax, ay, az = 0.547, 0.547, 0.547 # STATIONARITY TEST: start AT the sphere.  If the
-                                       #  optimizer stays (asph≈0), the sphere is a stable
-                                       #  discrete optimum; if it walks away, the sphere is
-                                       #  NOT the compliance minimizer (or the projected
-                                       #  descent has a sign bug).  (ellipsoid: 0.62,0.48,0.55)
+const ax, ay, az = 0.575, 0.522, 0.545
 const MAX_ITER  = 15
-const STEP_FRAC = 0.04                 # max radial step / r_ref per iter
+const STEP_FRAC = 0.04
 const SOB_P     = 2
 
 model = LinearElasticity3D(E = 1.0e7, ν = 0.3)
@@ -70,71 +38,9 @@ basis = PHS(3; poly_deg = 3)
 
 flat3(P) = reduce(vcat, [[p[1], p[2], p[3]] for p in P])
 const ZERO_NJAC3 = NormalJacobian3D(Int[], SMatrix{3,3,Float64,9}[])
+svec(p) = (cc = WTP.coords(p); SVector{3,Float64}(ustrip(cc.x), ustrip(cc.y), ustrip(cc.z)))
 
-# ---- outer cube boundary (structured face grid, outward axis normals) -------
-_wind(pts, tri, nv) = (a=tri[1]; b=tri[2]; c=tri[3];
-    dot(cross(pts[b]-pts[a], pts[c]-pts[a]), nv) ≥ 0 ? tri : (a, c, b))
-
-function outer_cube(L, h)
-    n  = round(Int, 2L / h) + 1
-    ts = range(-L, L; length = n)
-    pts = SVector{3,Float64}[]; nacc = SVector{3,Float64}[]
-    seen = Dict{NTuple{3,Int},Int}()
-    key(p) = (round(Int, p[1]/h*2), round(Int, p[2]/h*2), round(Int, p[3]/h*2))
-    function idx!(p, nv)
-        kk = key(p); id = get(seen, kk, 0)
-        id != 0 && (nacc[id] += nv; return id)
-        push!(pts, p); push!(nacc, nv); seen[kk] = length(pts); return length(pts)
-    end
-    faces = NTuple{3,Int}[]
-    for (axis, s) in ((1,-1.0),(1,1.0),(2,-1.0),(2,1.0),(3,-1.0),(3,1.0))
-        nv  = setindex(SVector(0.0,0.0,0.0), s, axis)
-        gid = Matrix{Int}(undef, n, n)
-        for ia in 1:n, ib in 1:n
-            a = ts[ia]; b = ts[ib]
-            p = axis == 1 ? SVector(s*L, a, b) :
-                axis == 2 ? SVector(a, s*L, b) : SVector(a, b, s*L)
-            gid[ia, ib] = idx!(p, nv)
-        end
-        for ia in 1:(n-1), ib in 1:(n-1)
-            v1,v2,v3,v4 = gid[ia,ib], gid[ia+1,ib], gid[ia+1,ib+1], gid[ia,ib+1]
-            push!(faces, _wind(pts, (v1,v2,v3), nv))
-            push!(faces, _wind(pts, (v1,v3,v4), nv))
-        end
-    end
-    return pts, [normalize(v) for v in nacc], faces
-end
-
-# ---- interior lattice culled around the cavity ------------------------------
-# NOTE (tooling direction): this Cartesian lattice is a TEMPORARY simplification for
-# this shakedown rung — NOT a rejection of WTP's Octree, which is the SOTA node
-# generator (and far better-performing) and the intended path for the harder
-# geometries.  The octree just needs development for shape-opt use: (a) avoid the
-# near-surface near-duplicate volume points that forced remesh-every-iteration here,
-# and (b) lean on its graded spacing (BoundaryLayerSpacing).  Return to Octree once
-# those are addressed; the lattice only buys clean uniform stencils cheaply for now.
-#
-# Structured Cartesian grid over the cube, offset by Δ/2 so it never lands on the
-# cube faces; cull any node inside (margin·) the cavity.  The cavity radius in a
-# given direction is read off the SH template (nearest of the `nv` unit directions
-# — the design is smooth, l=0,2 only, so nearest-direction is plenty for culling).
-function interior_lattice(ds)
-    cav_dirs = directions(ds); cav_r = radii(ds)
-    margin = 1 + 1.2 * Δ / r_ref                       # leave a ≳1.2Δ gap to the cavity
-    rng = (-L_OUT + Δ/2):Δ:(L_OUT - Δ/2)
-    pts = SVector{3,Float64}[]
-    for x in rng, y in rng, z in rng
-        p = SVector(x, y, z); np = norm(p)
-        np < 1e-9 && continue                          # origin: inside the cavity
-        d = p / np
-        j = argmax(i -> dot(d, cav_dirs[i]), eachindex(cav_dirs))
-        np < margin * cav_r[j] && continue             # inside cavity → cull
-        push!(pts, p)
-    end
-    return pts
-end
-
-# ---- CloudState (one anchored cloud) — + quality-indicator reference fields --
+# ---- CloudState -------------------------------------------------------------
 struct CloudState
     pts::Vector{SVector{3,Float64}}
     N::Int; n_int::Int; n_outer::Int; nv::Int
@@ -146,18 +52,79 @@ struct CloudState
     neumann_ids::Vector{Int}; neumann_adjl::Vector{Vector{Int}}
     adjl::Vector{Vector{Int}}
     dirichlet_dofs::Vector{Int}
+    rigid_modes::Matrix{Float64}
     active::Vector{Bool}; interior_rows::BitVector
     morph::LaplaceExtension
-    ref_radius::Vector{Float64}                  # per-node stencil radius at anchor
-    ref_interior::Vector{SVector{3,Float64}}     # interior reference (drift baseline)
+    ref_radius::Vector{Float64}
+    ref_interior::Vector{SVector{3,Float64}}
     dx::Float64
 end
 
+# ---- sphere mesh builder (matches WTP validate_cavity.jl conventions) -------
+function _make_sphere_mesh(R, nθ, nφ)
+    pts = [WTP.Point(R * sin(π * i / nθ) * cos(2π * j / nφ) * m,
+                     R * sin(π * i / nθ) * sin(2π * j / nφ) * m,
+                     R * cos(π * i / nθ) * m)
+           for j in 0:(nφ - 1), i in 0:nθ][:]
+    conn = WTP.Connectivity{WTP.Triangle}[]
+    for i in 0:(nθ - 1), j in 0:(nφ - 1)
+        a = i * nφ + j + 1; b = i * nφ + (j + 1) % nφ + 1
+        c = (i + 1) * nφ + j + 1; d = (i + 1) * nφ + (j + 1) % nφ + 1
+        i > 0    && push!(conn, WTP.connect((a, c, b)))
+        i < nθ-1 && push!(conn, WTP.connect((b, c, d)))
+    end
+    return WTP.SimpleMesh(pts, conn)
+end
+
+function _make_annular_cavity_mesh(R_outer, r_inner, nθ, nφ)
+    outer = _make_sphere_mesh(R_outer, nθ, nφ)
+    inner = _make_sphere_mesh(r_inner, nθ, nφ)
+    outer_v = collect(_M.vertices(outer))
+    inner_v = collect(_M.vertices(inner))
+    n_outer = length(outer_v)
+    all_conn = WTP.Connectivity{WTP.Triangle}[]
+    for c in _M.topology(outer); push!(all_conn, c); end
+    for c in _M.topology(inner)
+        p = _M.indices(c)
+        push!(all_conn, WTP.connect((p[1] + n_outer, p[3] + n_outer, p[2] + n_outer)))
+    end
+    return WTP.SimpleMesh(vcat(outer_v, inner_v), all_conn)
+end
+
+# ---- anchor: build annular mesh → WTP pipeline → cloud ----------------------
 function anchor(ds::SphericalHarmonicModes)
-    cav_pts   = boundary_points(ds)
-    cav_faces = surface_faces(ds)
-    out_pts, out_nrm, _ = outer_cube(L_OUT, H_OUT)
-    vol = interior_lattice(ds)
+    r_cav = (ax * ay * az)^(1/3)
+    nθ = 2 * 2^NSUB; nφ = 2 * nθ
+
+    # 1. Build annular cavity mesh as WTP SimpleMesh
+    mesh = _make_annular_cavity_mesh(L_OUT, r_cav, nθ, nφ)
+
+    # 2. Spacing guidance pre-flight — validate Δ against geometry limits
+    g = WTP.suggest_spacing(mesh; name = "annular_cavity", bridson_factor = 0.75)
+    Δ_input = Δ * m
+    if ustrip(Δ_input) >= ustrip(g.h_ceiling)
+        @warn "Δ=$(Δ) ≥ h_ceiling=$(round(ustrip(g.h_ceiling); sigdigits=3)) — interior will be empty!"
+    elseif ustrip(Δ_input) > ustrip(g.h_baseline)
+        @warn "Δ=$(Δ) > h_baseline=$(round(ustrip(g.h_baseline); sigdigits=3)) — coarser than recommended, expect sparse cloud"
+    end
+
+    # 3. WTP standard pipeline: PointBoundary → Octree → discretize
+    spacing = WTP.ConstantSpacing(Δ * m)
+    bnd = WTP.PointBoundary(mesh, spacing)          # Poisson-disk boundary sampling
+    alg = WTP.Octree(mesh; spacing, alpha = 1.0, placement = :bridson)
+    V_solid = (4 / 3) * π * L_OUT^3 - cavity_volume(ds)
+    n_target = round(Int, V_solid / Δ^3)
+    cloud = WTP.discretize(bnd, spacing; alg, max_points = n_target)
+
+    # 3. Extract volume points (strip units) and boundary info
+    vol = svec.(WTP.points(WTP.volume(cloud)))
+    out_pts_bnd = svec.(WTP.points(WTP.boundary(cloud)))
+    out_nrm_bnd = WTP.normal(WTP.boundary(cloud))
+    out_nrm = [SVector{3,Float64}(ustrip(n[1]), ustrip(n[2]), ustrip(n[3]))
+               for n in out_nrm_bnd]
+
+    cav_pts = boundary_points(ds)           # SH icosphere vertices (design surface)
+    out_pts = out_pts_bnd                   # already SVectors from svec
 
     nvol = length(vol); n_outer = length(out_pts); nv = length(cav_pts)
     pts = vcat(vol, out_pts, cav_pts)
@@ -167,6 +134,7 @@ function anchor(ds::SphericalHarmonicModes)
     cavity_idx   = collect((nvol+n_outer+1):N)
     boundary_idx = vcat(outer_idx, cavity_idx)
 
+    cav_faces = surface_faces(ds)
     cav_faces_g = [(cavity_idx[a], cavity_idx[b], cavity_idx[c]) for (a,b,c) in cav_faces]
     vf = Dict{Int,Vector{Int}}()
     for (fi,(a,b,c)) in enumerate(cav_faces_g), v in (a,b,c)
@@ -178,25 +146,17 @@ function anchor(ds::SphericalHarmonicModes)
     neumann_ids = vcat(outer_idx, cavity_idx)
     neumann_adjl = adjl[neumann_ids]
 
-    # 3-2-1 rigid-body pins.  CRITICAL: place them FAR from the cavity — the pin set
-    # is asymmetric (A at +x, B at −x, C at +y), so any pin-reaction stress that reaches
-    # the cavity breaks its spherical symmetry and biases the optimum off the sphere.
-    # rpin near the cube faces (≫ r_ref) ⇒ Saint-Venant decays the pin field before the
-    # cavity.  (At rpin=0.6 with the r_ref≈0.55 hole the pins sat ON the cavity — that
-    # was the source of the "sphere walks away" bias.)
-    nrst(p0) = interior_idx[argmin([norm(pts[i]-p0) for i in interior_idx])]
-    rpin = 0.90 * L_OUT
-    A = nrst(SVector(rpin,0.,0.)); B = nrst(SVector(-rpin,0.,0.)); C = nrst(SVector(0.,rpin,0.))
-    dirichlet_dofs = [A, A+N, A+2N,  B+N, B+2N,  C+2N]
-    active = let a = trues(3N); for d in dirichlet_dofs; a[d]=false; end; collect(a) end
-    interior_rows = let r=falses(N); for i in interior_idx; r[i]=true; end; r end
+    rigid_modes    = rigid_body_modes_3d(pts)
+    dirichlet_dofs = Int[]
+    active         = trues(3N)
+    interior_rows  = let r=falses(N); for i in interior_idx; r[i]=true; end; r end
 
     ext = build_laplace_extension(pts, adjl, basis, interior_idx, boundary_idx,
                                   pts[interior_idx], cav_pts, n_outer, nv)
     ref_radius = [maximum(norm(pts[i]-pts[j]) for j in adjl[i] if j != i) for i in 1:N]
     return CloudState(pts, N, nvol, n_outer, nv, interior_idx, outer_idx, cavity_idx,
                       boundary_idx, out_nrm, cav_faces_g, cav_vfaces,
-                      neumann_ids, neumann_adjl, adjl, dirichlet_dofs, active,
+                      neumann_ids, neumann_adjl, adjl, dirichlet_dofs, rigid_modes, active,
                       interior_rows, ext, ref_radius, vol, Δ)
 end
 
@@ -217,7 +177,7 @@ function solve_adjoint(pts, st::CloudState)
                             st.dirichlet_dofs, zeros(length(st.dirichlet_dofs)), _ -> b;
                             interior_rows = st.interior_rows, traction_layout = layout,
                             neumann_ids = st.neumann_ids, neumann_adjl = st.neumann_adjl,
-                            normal_jacobians = njacs)
+                            normal_jacobians = njacs, rigid_modes = st.rigid_modes)
     C = dot(b, res.u)
     g_all = [SVector(res.Δpts[3i-2], res.Δpts[3i-1], res.Δpts[3i]) for i in 1:st.N]
     return C, g_all
@@ -226,7 +186,7 @@ end
 design_grad_raw(g_all, st::CloudState, ds::SphericalHarmonicModes) =
     contract_gradient(ds, Macchiato.morph_transpose(st.morph, g_all, st.cavity_idx))
 
-# ---- 3D quality measures (problem-specific; same (pts,st)->Float64 contract) -
+# ---- quality measures -------------------------------------------------------
 nn3(pts, adjl, i) = minimum(norm(pts[i] - pts[j]) for j in adjl[i] if j != i)
 m_drift(pts, st)  = maximum(norm(pts[st.interior_idx[c]] - st.ref_interior[c]) for c in 1:st.n_int) / st.dx
 m_gap(pts, st)    = minimum(norm(pts[i] - pts[j]) for i in st.interior_idx, j in st.cavity_idx) / st.dx
@@ -240,45 +200,61 @@ m_cavity_cv(pts, st)  = (d = [nn3(pts, st.adjl, i) for i in st.cavity_idx]; std(
 const r_ref = (ax*ay*az)^(1/3)
 ds0 = fit_ellipsoid_sh(SphericalHarmonicModes(DEGREES, NSUB), ax, ay, az)
 st0 = anchor(ds0)
-# ρ AT THE CAVITY (where the design acts and the bias lives) — the global ρ is
-# bulk-dominated and irrelevant.  Use ρ_cav to calibrate the Sobolev length.
 ρ_cav  = maximum(maximum(norm(st0.pts[i]-st0.pts[j]) for j in st0.adjl[i] if j != i)
                  for i in st0.cavity_idx)
 ρ_bulk = maximum(norm(st0.pts[i]-st0.pts[j]) for i in 1:st0.N for j in st0.adjl[i] if j != i)
 ds0 = calibrate_sph(ds0, ρ_cav, r_ref)
 const V0 = cavity_volume(ds0)
-@printf("cloud: %d int + %d cube + %d cavity = %d · ρ_cav=%.3f (%.2f·r_ref) ρ_bulk=%.3f · sob_l=%.3f\n",
+@printf("cloud: %d int + %d sphere + %d cavity = %d · ρ_cav=%.3f (%.2f·r_ref) ρ_bulk=%.3f · sob_l=%.3f\n",
         st0.n_int, st0.n_outer, st0.nv, st0.N, ρ_cav, ρ_cav/r_ref, ρ_bulk, ds0.sob_l)
 @printf("start ellipsoid (%.2f,%.2f,%.2f) · target sphere r=%.4f · V=%.5e\n",
         ax, ay, az, r_ref, V0)
 
 asph(ds) = (r = radii(ds); (maximum(r)-minimum(r)) / (sum(r)/length(r)))
-# Volume-restored design from a coefficient step (exact: V(t·c)=t³V(c)).
 stepped(ds, c) = (d = with_coeffs(ds, c); with_coeffs(d, d.coeffs .* (V0/cavity_volume(d))^(1/3)))
 
-# ---- toggleable quality-indicator registry (watch the log, prune) -----------
+# ---- quality indicators -----------------------------------------------------
 indicators = [
     Indicator(name = :morph_drift,    measure = m_drift,      threshold = 0.60, trip_when = :above, enabled = true),
     Indicator(name = :min_gap,        measure = m_gap,        threshold = 0.30, trip_when = :below, enabled = true),
-    Indicator(name = :spacing_cv,     measure = m_spacing_cv, threshold = 0.35, trip_when = :above, enabled = true),
-    Indicator(name = :min_sep,        measure = m_min_sep,    threshold = 0.20, trip_when = :below, enabled = true),
-    Indicator(name = :stencil_growth, measure = m_growth,     threshold = 1.40, trip_when = :above, enabled = true),
+    Indicator(name = :spacing_cv,     measure = m_spacing_cv, threshold = 0.50, trip_when = :above, enabled = true),
+    Indicator(name = :min_sep,        measure = m_min_sep,    threshold = 0.15, trip_when = :below, enabled = true),
+    Indicator(name = :stencil_growth, measure = m_growth,     threshold = 1.50, trip_when = :above, enabled = true),
     Indicator(name = :cavity_cv,      measure = m_cavity_cv,  threshold = 0.40, trip_when = :above, enabled = true),
 ]
 println("indicators: ", join(string.(getfield.(filter(i->i.enabled, indicators), :name)), ", "))
 
-# ---- the closed-loop two-front optimizer ------------------------------------
+# ---- FD check ---------------------------------------------------------------
+const FD_CHECK = false
+if FD_CHECK
+    C0, g_all0 = solve_adjoint(morph_cloud(st0, ds0), st0)
+    g_c0 = design_grad_raw(g_all0, st0, ds0)
+    h = 1e-6
+    @printf("\nFD check · C0=%.6e\n", C0)
+    @printf("  %4s %4s %14s %14s %9s\n", "k", "l", "AD", "FD", "AD/FD")
+    for kk in eachindex(ds0.coeffs)
+        cp = copy(ds0.coeffs); cp[kk] += h
+        cm = copy(ds0.coeffs); cm[kk] -= h
+        Cp, _ = solve_adjoint(morph_cloud(st0, with_coeffs(ds0, cp)), st0)
+        Cm, _ = solve_adjoint(morph_cloud(st0, with_coeffs(ds0, cm)), st0)
+        fd = (Cp - Cm) / (2h)
+        @printf("  %4d %4d %14.5e %14.5e %9.4f\n", kk, ds0.lm[kk][1], g_c0[kk], fd,
+                abs(fd) > 1e-8 ? g_c0[kk]/fd : NaN)
+    end
+end
+
+# ---- optimizer --------------------------------------------------------------
 function optimize(ds, st, indicators)
     log = NamedTuple[]
     @printf("\n%4s %12s %9s %10s  %-30s %s\n", "it", "C", "asph(%)", "‖g‖", "indicators", "event")
     println("-"^92)
     for it in 1:MAX_ITER
-        pts = morph_cloud(st, ds)                              # FRONT 1
+        pts = morph_cloud(st, ds)
         vals, tripped = assess(indicators, pts, st)
         event = ""
-        if !isempty(tripped)                                   # FRONT 2: re-anchor
+        if !isempty(tripped)
             st  = anchor(ds)
-            pts = morph_cloud(st, ds)                          # fresh cloud, zero morph
+            pts = morph_cloud(st, ds)
             vals, _ = assess(indicators, pts, st)
             event = "REMESH ⟵ " * join(string.(tripped), ",")
         end
@@ -295,7 +271,7 @@ function optimize(ds, st, indicators)
         push!(log, (it=it, C=C, asph=asph(ds), g=gnorm, remeshed=!isempty(tripped)))
 
         (gnorm < 1e-6 || maxδ < 1e-14) && (println("  Converged (‖g‖≈0)."); break)
-        s = STEP_FRAC * r_ref / max(maxδ, 1e-30)               # fixed normalized step
+        s = STEP_FRAC * r_ref / max(maxδ, 1e-30)
         ds = stepped(ds, ds.coeffs .- s .* g_pc)
     end
     return ds, st, log

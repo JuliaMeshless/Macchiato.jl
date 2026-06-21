@@ -1,6 +1,6 @@
 # Manual Adjoint for RBF-FD Shape Optimization
 
-**Last updated**: 2026-05-23 (Phase D L3: D_actual traction model + 33×17 scale-up)
+**Last updated**: 2026-06-21 (3D uniaxial cavity: adjoint validated, solver stability blocker)
 
 ## Status Summary
 
@@ -17,14 +17,20 @@
 | Phase D reg (Helmholtz) | PDE sensitivity filter on the boundary loop | **Done** — r=1 on 9×5; scaled to r=4 on 33×17 |
 | Phase 1 (traced) | Monolithic Mooncake trace | **Abandoned** — 5+ min LLVM compile for 25 pts |
 | Phase 2 (traced) | `gradient(sim, loss; wrt=:pts)` API | Implemented but superseded by manual adjoint |
+| **3D adjoint** | `shape_gradient_3d` with rigid-body-mode removal | **Validated** — FD 1.0000 on all 6 SH coeffs |
+| **3D normals** | Differentiable triangle-vertex normals | **Validated** — FD 2.6e-10, full gradient median 0.999999 |
+| **3D uniaxial** | Cube + ellipsoidal cavity, uniaxial σ₀e_x | **Adjoint OK, solver unstable** — forward solve degrades during morph |
 
 ### What's implemented
 
-- **`src/optimization/manual_adjoint.jl`**: `extract_weight_sensitivities_elasticity!`, `allocate_weight_gradients`, `assemble_elasticity_from_weights`, `TractionLayout` + `build_traction_layout`, `apply_traction!`, `extract_neumann_sensitivities!`, **`extract_load_sensitivities!`** (Phase D L1 — ηᵀ·∂b/∂pts for shape-dependent dead loads)
-- **`ext/MacchiatoMooncakeExt.jl`**: unified `shape_gradient` with kwargs for Dirichlet-only or mixed BCs; new **`traction_jacobians`** kwarg accepts per-Neumann-point 2×2 Jacobians and adds the ηᵀ·∂b/∂pts term automatically. Backwards-compatible (default `nothing` ⇒ frozen-load behavior).
+- **`src/optimization/manual_adjoint.jl`**: `extract_weight_sensitivities_elasticity!`, `allocate_weight_gradients`, `assemble_elasticity_from_weights`, `TractionLayout` + `build_traction_layout`, `apply_traction!`, `extract_neumann_sensitivities!`, **`extract_load_sensitivities!`** (Phase D L1 — ηᵀ·∂b/∂pts for shape-dependent dead loads), **`NormalJacobian`** + `polyline_normals` + `update_traction_coeffs!` + `extract_normal_sensitivities!` (Phase D L2)
+- **`src/optimization/manual_adjoint_3d.jl`**: 3D analogues — `extract_weight_sensitivities_elasticity_3d!`, `TractionLayout3D` + `build_traction_layout_3d`, `apply_traction_3d!`, `extract_neumann_sensitivities_3d!`, **`NormalJacobian3D`** + `triangle_normals` + `update_traction_coeffs_3d!` + `extract_normal_sensitivities_3d!`, **`rigid_body_modes_3d`** (bordered Lagrange system for pure-traction problems)
+- **`ext/MacchiatoMooncakeExt.jl`**: unified `shape_gradient` (2D) with kwargs for Dirichlet or mixed BCs; `traction_jacobians`, `normal_jacobians` kwargs. **`shape_gradient_3d`** with same structure + `rigid_modes` kwargs for symmetric gauge fix. Default `nothing` ⇒ Dirichlet-pin path, backwards-compatible.
 - **`examples/shape_opt/shape_optimization_manual_adjoint_phaseA.jl`**: Dirichlet-only AD-vs-FD validation
 - **`examples/shape_opt/shape_optimization_manual_adjoint_phaseB.jl`**: Mixed-BC AD-vs-FD validation (frozen loads)
-- **`examples/shape_opt/shape_optimization_phase3_cantilever.jl`**: end-to-end shape opt loop with live tractions + boundary-loop sensitivity filter. Iter-0 FD validation included (rel_err 1.4e-7).
+- **`examples/shape_opt/shape_optimization_phase3_cantilever.jl`**: end-to-end shape opt loop with live tractions + boundary-loop sensitivity filter
+- **`examples/cavity_3d/cavity_cube_uniaxial.jl`**: 3D uniaxial stress benchmark — Armijo backtracking, VTU export, cloud quality diagnostic. **Current blocker: solver instability during morph.**
+- **`examples/cavity_3d/cavity_cube_twofront.jl`**: 3D hydrostatic benchmark with rigid-body-mode removal
 
 ### Phase C status — COMPLETE
 

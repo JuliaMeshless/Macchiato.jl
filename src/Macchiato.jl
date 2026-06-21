@@ -139,6 +139,7 @@ export update_traction_coeffs!, extract_normal_sensitivities!
 
 # 3D adjoint
 export shape_gradient_3d
+export rigid_body_modes_3d
 export extract_weight_sensitivities_elasticity_3d!
 export TractionLayout3D, build_traction_layout_3d, apply_traction_3d!
 export extract_neumann_sensitivities_3d!

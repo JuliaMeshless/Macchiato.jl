@@ -593,6 +593,16 @@ Keywords:
   applies (not overwritten by BC rows).
 - `traction_layout::TractionLayout3D`, `neumann_ids::Vector{Int}`,
   `neumann_adjl::Vector{Vector{Int}}` — supply all three for mixed BC.
+- `rigid_modes::AbstractMatrix{Float64}` — `3N×m` rigid-body modes for a
+  PURE-traction problem (no Dirichlet pins).  When supplied, the singular
+  operator is regularized by a bordered Lagrange system `[A R; Rᵀ 0]` that
+  fixes the gauge SYMMETRICALLY (`Rᵀu = 0`) instead of pinning asymmetric
+  points — so no spurious point-reaction stress perturbs the field.  **R must
+  be FROZEN at the anchor geometry** (built once per remesh, constant within a
+  morph interval), exactly like the boundary connectivity/normals; then
+  `∂R/∂pts = 0` and the adjoint extraction below is unchanged (the bordered
+  multipliers drop out, `η = η̄[1:3N]`).  Use `active = trues(3N)`,
+  `dirichlet_dofs = Int[]`.  Default `nothing` ⇒ the Dirichlet-pin path.
 
 Returns `(u, Δpts, η)`.
 """
@@ -611,6 +621,7 @@ function shape_gradient_3d(
     neumann_ids::Union{Nothing, Vector{Int}} = nothing,
     neumann_adjl::Union{Nothing, Vector{Vector{Int}}} = nothing,
     normal_jacobians::Union{Nothing, AbstractVector{NormalJacobian3D}} = nothing,
+    rigid_modes::Union{Nothing, AbstractMatrix{Float64}} = nothing,
 )
     has_neumann = traction_layout !== nothing
     μ, λ = lame_parameters_3d(model)
@@ -641,11 +652,26 @@ function shape_gradient_3d(
         apply_traction_3d!(A, b, traction_layout, W_dx, W_dy, W_dz)
     end
 
-    F = lu(A)
-    u = F \ b
+    if rigid_modes === nothing
+        F = lu(A)
+        u = F \ b
 
-    # --- Step 2: Adjoint -----------------------------------------------------
-    η = F' \ ∂L_∂u(u)
+        # --- Step 2: Adjoint -------------------------------------------------
+        η = F' \ ∂L_∂u(u)
+    else
+        # Bordered Lagrange system [A R; Rᵀ 0] — symmetric gauge fix (Rᵀu = 0)
+        # for the pure-traction operator.  R frozen ⇒ ∂M/∂pts = [∂A/∂pts 0; 0 0],
+        # so the multiplier block drops out of the gradient and only η[1:3N] feeds
+        # the unchanged extraction below.
+        nr = size(rigid_modes, 2)
+        Rs = sparse(rigid_modes)
+        M  = [A Rs; permutedims(Rs) spzeros(nr, nr)]
+        Fm = lu(M)
+        ub = Fm \ vcat(b, zeros(nr))
+        u  = ub[1:3N]
+        ηb = Fm' \ vcat(∂L_∂u(u), zeros(nr))
+        η  = ηb[1:3N]
+    end
 
     # --- Step 3: Extract ΔW --------------------------------------------------
     ΔW_d2x, ΔW_d2y, ΔW_d2z, ΔW_d2xy, ΔW_d2xz, ΔW_d2yz =
@@ -702,6 +728,39 @@ Reshape flat [x1,y1,z1, x2,y2,z2, …] → [SVector(x1,y1,z1), …].
 function _pts_from_flat_3d(p::AbstractVector{T}) where {T<:Real}
     N = length(p) ÷ 3
     return [SVector{3, T}(p[3i - 2], p[3i - 1], p[3i]) for i in 1:N]
+end
+
+"""
+    rigid_body_modes_3d(pts) -> Matrix{Float64}  (3N × 6)
+
+The six rigid-body modes (3 translations + 3 rotations) of a 3D body, in the
+BLOCK DOF ordering `[x₁..x_N, y₁..y_N, z₁..z_N]` the assembled operator uses
+(DOF of node `i`, component `d∈{0,1,2}` is `i + d·N`).  Rotations are taken
+about the centroid and each column is unit-normalized for conditioning.
+
+This is the `R` block of the bordered Lagrange system in `shape_gradient_3d`,
+which fixes the pure-traction gauge symmetrically (`Rᵀu = 0`) in place of
+asymmetric 3-2-1 point pins.  **Build ONCE per anchor and hold it FROZEN within
+a morph interval** (same contract as boundary connectivity/normals): a frozen R
+has `∂R/∂pts = 0`, keeping the discrete shape gradient exact.
+"""
+function rigid_body_modes_3d(pts::AbstractVector{<:AbstractVector{<:Real}})
+    N = length(pts)
+    R = zeros(Float64, 3N, 6)
+    c = sum(pts) / N
+    for i in 1:N
+        x, y, z = pts[i][1] - c[1], pts[i][2] - c[2], pts[i][3] - c[3]
+        R[i,      1] = 1.0                          # Tx
+        R[i + N,  2] = 1.0                          # Ty
+        R[i + 2N, 3] = 1.0                          # Tz
+        R[i + N,  4] = -z;  R[i + 2N, 4] =  y       # Rx: (0,-z, y)
+        R[i,      5] =  z;  R[i + 2N, 5] = -x       # Ry: (z, 0,-x)
+        R[i,      6] = -y;  R[i + N,  6] =  x       # Rz: (-y,x, 0)
+    end
+    for k in 1:6
+        R[:, k] ./= norm(@view R[:, k])
+    end
+    return R
 end
 
 # Weight-gradient propagation (Step 4) uses `_propagate_weight_gradient!` from

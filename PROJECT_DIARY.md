@@ -6,6 +6,236 @@ Full detail: `RBF_FD_shape_optimization.tex` (the story),
 
 ---
 
+## 2026-06-21 — Uniaxial cavity benchmark: adjoint VALIDATED, forward solver instability is the blocker
+
+**Direction (user).** Run the uniaxial stress case (`cavity_cube_uniaxial.jl`) —
+cube with ellipsoidal cavity under σ₀e_x⊗e_x. Literature benchmark (Allaire 1992):
+optimal cavity is an elongated ellipsoid aligned with the loading direction, NOT
+a sphere. Large compliance gap ⇒ steep gradient ⇒ clean convergence expected.
+
+**Adjoint: VALIDATED.** FD check passes perfectly: median AD/FD = 1.00144, all
+6 SH coefficients within 13%. The `shape_gradient_3d` pipeline with rigid-body-
+mode removal (bordered Lagrange system) is correct for the uniaxial case.
+
+**Forward solver instability: THE BLOCKER.** The optimization loop shows a
+clear degradation pattern from iter 1:
+
+| iter | C | asph(%) | ‖g‖ | bt | ‖u‖ | nn_cv |
+|------|------|---------|------|-----|------|-------|
+| 1 | 1.05e4 | 35.95 | 1.9e5 | 0 | 0.71 | 0.0443 |
+| 2 | 9.96e3 | 35.81 | 9.2e4 | 0 | 0.40 | 0.0443 |
+| 3 | 9.67e3 | 35.41 | 7.0e4 | 0 | 0.26 | 0.0444 |
+| 4 | 9.42e3 | 34.99 | 6.9e4 | 0 | 0.19 | 0.0444 |
+| 5 | 9.04e3 | 34.72 | 1.6e5 | 0 | 0.22 | 0.0444 |
+| 6 | 7.47e3 | 34.85 | 1.2e6 | 2 | 1.19 | 0.0445 |
+| 7 | 5.12e3 | 34.92 | 4.9e6 | 4 | 3.21 | 0.0445 |
+| 8 | 3.34e3 | 34.93 | 1.0e7 | 5 | 4.83 | 0.0445 |
+| 9 | 1.66e3 | 34.93 | 1.7e7 | 6 | 6.37 | 0.0445 |
+| 10 | 3.76e2 | 34.93 | 2.4e7 | 9 | 7.55 | 0.0445 |
+
+**Three symptoms, all from iter 5-6 onward:**
+1. **‖u‖ grows monotonically** from iter 1 (0.71→7.55) — the displacement field
+   is getting larger even when compliance drops. For a well-conditioned elastic
+   solve under fixed load, ‖u‖ should track √C, not diverge from it.
+2. **Gradient explodes** (1.9e5→2.4e7) — Armijo needs 9 backtracks by iter 10.
+3. **Compliance collapse** (5.1e3→3.8e2 in 4 iters) — 28× drop with asph barely
+   moving (34.92%→34.93%). This is numerical garbage, not physical improvement.
+
+**What it is NOT:**
+- **NOT node degradation** — nn_cv stays constant at 0.0445 throughout, 0 near-
+  duplicates, 0 gaps. The morph is preserving node quality by this metric.
+- **NOT gradient direction** — the adjoint is FD-exact (median 1.00144). The
+  gradient is mathematically correct; the solver is producing increasingly
+  inaccurate forward solutions that the adjoint faithfully differentiates.
+- **NOT the Sobolev preconditioner** — removing it (raw g_proj) improved
+  stability but did not cure the degradation. The pattern persists.
+
+**What it likely IS:** the morph is producing increasingly degenerate stencil
+geometry that the simple nn_cv metric doesn't capture. The ‖u‖ growth from
+iter 1 is the tell — even in the "stable" early iters (bt=0), the solver is
+producing larger displacements than physics warrants. The node cloud looks
+uniform by spacing statistics but the stencil quality (Vandermonde conditioning,
+3D cloud shape) is degrading in ways that only manifest in the solve.
+
+**VTU export added** for diagnosis: `examples/cavity_3d/vtu_uniaxial/iter_NNN.vtu`
+saved each iteration with node_class (interior/outer/cavity) and gradient field.
+Open in ParaView to inspect the actual node positions and see if there are
+visible degeneracies (flat clouds, coincident nodes, etc.) that the scalar
+metrics miss.
+
+**Current state of the code:**
+- `cavity_cube_uniaxial.jl` — working script with Armijo backtracking (no
+  Sobolev), VTU export, cloud quality diagnostic, displacement-norm check.
+  `FD_CHECK=false`, `STEP_FRAC=0.005`, `MAX_ITER=50`.
+- `src/optimization/manual_adjoint_3d.jl` — `rigid_body_modes_3d` + bordered
+  Lagrange system in `shape_gradient_3d`. Exported from `Macchiato.jl`.
+- `examples/cavity_3d/` — new files: `cavity_cube_uniaxial.jl`,
+  `cavity_cube_twofront.jl`, `check_normals.jl`, `export_annular_cavity_stl.jl`,
+  `assess_node_quality.jl`.
+
+**Priority: THIS MUST BE SOLVED.** The uniaxial case is the literature benchmark.
+The adjoint works. The design space (SH modes) works. The optimizer mechanics
+(Armijo, volume projection) work. The ONLY remaining blocker is the forward
+solve becoming unreliable during morphing. Until this is fixed, nothing else
+matters — not the 2D noise saga, not the symmetry-mismatch hypothesis, not the
+WTP Octree pivot. The solver stability is the gate.
+
+**NEXT (resume here):**
+1. **Inspect VTU snapshots** in ParaView — look for visible node degeneracies
+   that nn_cv misses (flat clouds, boundary-interior mixing, etc.).
+2. **Add Vandermonde conditioning diagnostic** — compute σ_min/σ_max of the
+   degree-3 3D monomial basis per stencil, log min/median/max each iter. This
+   is the quantity `bunchkaufman!` throws on and the direct measure of stencil
+   health.
+3. **Try a REFRESHED cloud** — instead of morph-only, rebuild the cloud at
+   the current design every N iters (the two-front approach). If the solver
+   stabilizes on a fresh cloud, the morph is the culprit.
+4. **Check if the cavity surface mesh is degenerating** — the icosphere faces
+   are fixed connectivity; if the morph moves vertices too far, triangles
+   become slivers and the normal computation (which uses the face mesh) becomes
+   unreliable, corrupting the Neumann BCs.
+
+---
+
+## 2026-06-06 — spherical outer boundary wired (step 0a); node-gen quality certified; sphere STILL not stationary ⇒ pins (cause a), not the cube (cause b)
+
+**Direction (user).** Apply diary step 0a (revert the recovery benchmark's outer
+boundary from a cube to a SPHERE) and assess node-generation quality.
+
+**Done.**
+- **Step 0a wired** — `cavity_sphere_recovery_twofront.jl` now uses a SPHERICAL
+  outer boundary: `outer_sphere(R, n_sub)` = an `icosphere(OUTER_NSUB=3)` shell at
+  radius `L_OUT`, outward radial normals = vertex directions, faces pre-oriented.
+  `interior_lattice` gained an outer-radius cull (`np > L_OUT − 1.2Δ`) so the
+  Cartesian fill stops ≳1.2Δ short of the shell. Removed `outer_cube`/`_wind`/`H_OUT`
+  from this file (the cube lives on ONLY in `cavity_sphere_recovery_sh.jl` as the
+  flat-boundary mechanics test, as intended). Pin comments updated (rpin near the
+  shell, not "cube faces"). The spherical domain is a BALL ⇒ fewer nodes than the
+  cube (4726 vs ~16k: 3922 int + 642 shell + 162 cavity) ⇒ cheaper solves, still
+  ρ_cav/r_ref=0.48 (well-resolved).
+- **Node-gen quality CERTIFIED** (new `examples/cavity_3d/assess_node_quality.jl`,
+  standalone like `diagnose_flat_boundary.jl`): for the spherical-outer lattice cloud —
+  **0/4726 singular stencils** (σ_min/σ_max worst = 1.03e-3 on the outer shell, 5
+  orders above the 1e-8 throw threshold); **no near-duplicates** (0 below 0.5Δ; cf.
+  the octree's ~6e-3=0.075Δ pain point); interior **spacing_cv = 0.000**, shell 0.078,
+  cavity 0.069; **h≥Δ rule satisfied** on BOTH boundaries (shell 1.76Δ, cavity 1.91Δ);
+  worst (shell) stencils have **39 off-class interior neighbors** — the h≥Δ 3D-cloud
+  escape working exactly as theory says. The deterministic Cartesian-lattice + icosphere
+  generator is clean and well-conditioned for poly_deg=3. (Quality is NOT the blocker.)
+
+**DECISIVE RESULT — the cube was NOT the cause; the pins are.** Re-ran the
+sphere-stationarity test (start AT the sphere, ax=ay=az=0.547) on the spherical-outer
+domain. **The sphere STILL walks away:** ‖g_proj‖ = 2.37e4 at iter 1 (NONZERO), asph
+0.0%→25.9% over 15 morph-only iters (0 remeshes; morph_drift maxed 0.48<0.60). So:
+- **Hypothesis (b) — cube cubic-symmetry l=4 leak — is FALSIFIED as the cause.** A
+  spherical outer boundary is fully symmetric (cavity + far field), so the Eshelby
+  sphere is provably the *continuous* optimum; yet the DISCRETE gradient at the sphere
+  is still ~2.4e4. The spherical boundary DID help — ‖g‖ dropped ~3× from the cube's
+  ~8e4 to 2.4e4 — but did NOT zero it.
+- **⇒ Cause (a) — the asymmetric 3-2-1 displacement pins — is now isolated as the
+  dominant symmetry-breaker.** With the boundary symmetric, the only thing left that
+  breaks the sphere's symmetry is the pin set (A@+x fix xyz, B@−x fix yz, C@+y fix z):
+  point reactions inject a spurious l=2 stress at the cavity. Gradient is FD-exact
+  (median 0.9997+), so this is the discrete problem's TRUE optimum being off-sphere,
+  not a sign/projection bug.
+- ‖g‖ also never settles (6e3↔4.5e6 jitter) — cause (c), the fixed normalized step
+  overshooting a shallow/perturbed optimum, is present too.
+
+**Step 0c IMPLEMENTED (2026-06-06).** Symmetric rigid-body-mode removal via a
+**bordered Lagrange system** `[A R; Rᵀ 0]` replaces the 3-2-1 point pins:
+- `rigid_body_modes_3d(pts)` (`manual_adjoint_3d.jl`, exported) — the 3N×6 rigid
+  modes (3 translation + 3 rotation about the centroid, unit-normalized) in the
+  block DOF ordering `i+d·N`.
+- `shape_gradient_3d` gained a `rigid_modes` kwarg: when given, it skips Dirichlet
+  pinning and solves the bordered system for both forward and adjoint, slicing
+  `u,η = ·[1:3N]`. **Key to keeping the gradient FD-exact: R is FROZEN at the anchor
+  geometry** (constant within a morph interval, same contract as connectivity/normals)
+  ⇒ `∂M/∂pts = [∂A/∂pts 0; 0 0]`, the multiplier block drops out, and the existing
+  extraction (which only consumes `η[1:3N]`, `u[1:3N]`) is unchanged. Use
+  `active=trues(3N)`, `dirichlet_dofs=Int[]`.
+- Example wired: `anchor` builds+freezes R into `CloudState`; `solve_adjoint` passes
+  it; added a toggleable iter-0 FD check (`FD_CHECK`) of the raw coefficient gradient
+  vs central FD across the bordered solve.
+
+**RESULT (2026-06-06) — gradient EXACT, but the sphere is STILL not stationary; pins
+were NOT the dominant cause either.**
+- **FD check: PERFECT.** AD/FD = 1.0000 for all 6 SH coeffs through the bordered
+  solve ⇒ the rigid-mode-removal implementation is correct and the shape gradient is
+  exact (frozen-R contract holds). No bug.
+- **Stationarity STILL fails.** Start at the sphere ⇒ ‖g_proj‖ = 1.81e4 (was 2.37e4
+  with pins — only ~24% lower), asph walks to 23.0% (was 25.9%). So removing the
+  asymmetric pins shaved a fraction but did NOT zero the spurious gradient. **Neither
+  (b) cube boundary NOR (a) asymmetric pins is the dominant cause.**
+- The residual is purely **l=2** (project_volume removes l=0; the FD-exact l=2 coeff
+  gradients are 1.1e4, −6.0e3, 6.7e2, −5.6e3, 1.1e4 — large xy & x²−y², small 3z²−r²),
+  i.e. a SYSTEMATIC quadrupole drive, not random walk.
+
+**NEW LEADING HYPOTHESIS — discretization SYMMETRY MISMATCH (cause d).** The discrete
+compliance's optimum is off-sphere because the CLOUD is not spherically symmetric and,
+worse, its pieces don't share a symmetry group: the interior is a **cubic** Cartesian
+lattice (octahedral O_h), the cavity + outer shell are **icosahedral** (I_h) icospheres.
+Either symmetry ALONE would PROTECT the l=2 modes (their l=2 reps — O_h: E_g⊕T_2g; I_h:
+H_g — contain no trivial component, so dC/dl₂=0 at the sphere by symmetry; this is the
+3D analogue of 2D, where a fresh SQUARE-lattice cloud gave dC/da₂≈5e-8 at the circle —
+square symmetry protected m=2). But O_h ∩ I_h is tiny, so the COMBINED cloud has no
+l=2 protection ⇒ a generic, systematic spurious l=2 gradient (~1.8e4) at the sphere.
+This is a node-generation artifact, NOT physics and NOT the adjoint.
+
+**NEXT (resume here):** make the interior node-gen ISOTROPIC / symmetry-matched so the
+l=2 protection is restored:
+- (cheap confirm) rotate the cavity+shell icospheres vs the fixed lattice and re-run
+  the stationarity test — orientation-dependent ‖g‖ confirms the anisotropy artifact.
+- (likely fix for THIS sphere rung) **concentric icosphere shells** for the interior
+  (shares the cavity's I_h symmetry ⇒ l=2 protected, deterministic, no CRN).
+- (SOTA general path, user's steer) **WTP Octree** interior — isotropic, no lattice
+  symmetry, so its per-node noise is RANDOM (integrates out in the smooth l=0,2
+  design space, failure mode A) rather than a systematic l=2 lattice bias; needs the
+  near-duplicate suppression + CRN noted earlier.
+Then (0d) ellipsoid→sphere recovery; (2) Biancolini RBF design space; (3) Vigdergauz.
+(Gradient/adjoint, rigid-mode removal, spherical boundary, and node QUALITY are all
+settled — the open issue is node SYMMETRY.)
+
+**SNR PROBE BLOCKED — node-gen too fragile to even RUN off-sphere (2026-06-06).**
+Tried to measure the gradient SNR at the ELLIPSOID (real signal, vs the zero-signal
+sphere stationarity test). The deterministic lattice + icosphere cloud **throws
+`SingularException` (degenerate poly_deg=3 cavity stencil) for ANY aspherical cavity** —
+strong ellipsoid (0.62,0.48,0.55) AND a mild one (0.575,0.522,0.545, asph≈9.7%) both
+fail at the same pivot signature; only the perfectly-uniform sphere builds. Making the
+lattice cull EXACT (true SH radius, absolute ≥1.2Δ gap — a real robustness fix, kept)
+did NOT help: the bad stencil is on the CAVITY, independent of the cull, and would break
+the elasticity solve too. So we cannot even obtain one off-sphere gradient.
+
+**DECISION (user, 2026-06-06) — ABANDON the SH-radial parametrization on the
+deterministic lattice.** The evidence converged:
+  (i) the smooth design space CANNOT cure a systematic LOW-mode (l=2) discretization
+      artifact — it lives in the signal's own modes, so no design-space truncation and
+      no gradient filter (Sobolev/Helmholtz/**Vertex Morphing** all pass l=2) separates
+      them. Filtering is dead for this failure, as is swapping to another smooth param.
+  (ii) the lattice+icosphere node-gen is too fragile to survive even a 10%-aspherical
+      cavity (singular stencils), so it is a non-starter for real (STL) geometry.
+  (iii) load magnitude is NOT a lever: C, its shape gradient, AND the gradient's
+      discretization error all scale ∝σ∞², so SNR is load-invariant ("more stress"
+      cannot raise it). The hydrostatic sphere is also the SHALLOWEST optimum (worst
+      conditioning), chosen only because Eshelby gives the exact answer.
+
+**PIVOT (the real lever is node-gen, not the design side):** move to the **WTP Octree**
+as the node generator (isotropic ⇒ no lattice symmetry ⇒ its per-node gradient error is
+RANDOM, integrates out in a smooth design space, instead of a coherent l=2 bias; AND it
+is robust on arbitrary/STL geometry — the documented real target). On the design side,
+the long-term choice is filter-based **Vertex Morphing / Sobolev** with one physical
+knob (per the minimal-parametrization preference), NOT explicit SH/Biancolini/FFD — but
+note Vertex Morphing is a design-side choice and does not by itself fix the l=2 artifact;
+the octree (isotropy) does. Consider also a better-conditioned ground-truth than the
+shallow hydrostatic sphere (e.g. uniaxial load ⇒ deep target-ellipse optimum, strong
+signal) if a known-answer calibration is still wanted.
+KEEP (validated, reusable regardless of pivot): the 3D discrete adjoint + FD-exact
+shape gradient; differentiable 3D normals; the bordered-Lagrange **rigid-body-mode
+removal** (`rigid_body_modes_3d` + `shape_gradient_3d(rigid_modes=…)`); the spherical
+outer boundary; the exact-SH lattice cull; `assess_node_quality.jl`. The adjoint/solver
+stack is sound — only the node-gen + parametrization choices change.
+
+---
+
 ## 2026-06-03 — 3D parametrization-comparison facility: core built + gradient-exact; sphere-recovery optimizer diagnosed (stale-cloud bias)
 
 **Direction (user).** Build a facility to compare surface parametrizations on 3D
