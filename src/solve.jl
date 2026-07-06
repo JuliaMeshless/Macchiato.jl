@@ -1,34 +1,40 @@
-abstract type AbstractProblem end
-
 """
-    LinearSolve.LinearProblem(domain::Domain; scheme=nothing, kwargs...)
+    LinearSolve.LinearProblem(domain::Domain; scheme=nothing, verbose=false, kwargs...)
 
 Construct a `LinearProblem` for steady-state simulation from a `Domain`.
 
 Assembles the system matrix `A` and right-hand side `b` from the physics model,
 then applies boundary conditions by modifying the appropriate rows of `A` and `b`.
-The resulting system `Ax = b` is solved with `LinearSolve.solve`.
+The resulting system `Ax = b` is solved with `LinearSolve.solve`. Pass `verbose=true`
+to print assembly progress.
+
+Steady-state solving currently supports a single physics model per domain.
 """
 function LinearSolve.LinearProblem(
         domain::Domain;
         scheme = nothing,
+        verbose = false,
         kwargs...
     )
-    # create initial system matrix and rhs based on physics model
-    # current setup only works when you have one physics model
-    println("Creating linear problem")
+    length(domain.models) == 1 || throw(
+        ArgumentError(
+            "Steady-state solving currently supports a single physics model per domain; got $(length(domain.models))."
+        )
+    )
     model = only(domain.models)
-    @time A, b = make_system(model, domain; kwargs...)
+
+    verbose && println("Creating linear problem")
+    A, b = make_system(model, domain; kwargs...)
     bc_kw = _bc_kwargs(model)
 
     for boundary in domain.boundaries
         ids, bc = boundary.second
-        println("Applying boundary condition: ", boundary.first)
+        verbose && println("Applying boundary condition: ", boundary.first)
         surf = domain.cloud[boundary.first]
-        @time make_bc!(A, b, bc, surf, domain, ids; scheme = scheme, bc_kw..., kwargs...)
+        make_bc!(A, b, bc, surf, domain, ids; scheme = scheme, bc_kw..., kwargs...)
     end
 
-    println("Done creating linear problem")
+    verbose && println("Done creating linear problem")
     return LinearSolve.LinearProblem(dropzeros(A), b)
 end
 

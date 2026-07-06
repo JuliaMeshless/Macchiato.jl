@@ -76,12 +76,16 @@ function _run!(sim::Simulation, ::Steady; kwargs...)
 end
 
 function _create_ode_problem(domain::Domain, u0::AbstractVector, tspan)
-    boundary_funcs = [
+    # Only Dirichlet surfaces get an ODE-style pinning closure; Neumann/Robin flux is
+    # folded into each model's diffusion operator (see `build_neumann_diffusion`).
+    # Collect callables into `Tuple`s so the RHS specializes instead of dispatching
+    # dynamically on an abstract-eltype vector every timestep.
+    boundary_funcs = Tuple(
         make_bc(bc, domain.cloud[surf_name], domain, ids)
             for (surf_name, (ids, bc)) in domain.boundaries
-    ]
-
-    model_funcs = [make_f(m, domain) for m in domain.models]
+            if bc_family(typeof(bc)) === Dirichlet
+    )
+    model_funcs = Tuple(make_f(m, domain) for m in domain.models)
 
     function f(du, u, p, t)
         for model in model_funcs

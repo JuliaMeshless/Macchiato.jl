@@ -51,8 +51,7 @@ Convection(h, k, T∞::Number) = Convection(h, k, (x, t) -> T∞)
 (bc::Convection)(x, t) = bc.h * bc.T∞(x, t)
 
 function Base.show(io::IO, bc::Convection)
-    T∞_val = bc.T∞(zeros(3), 0.0)
-    return print(io, "Convection: h=$(bc.h), k=$(bc.k), T∞≈$T∞_val")
+    return print(io, "Convection: h=$(bc.h), k=$(bc.k)")
 end
 
 # ============================================================================

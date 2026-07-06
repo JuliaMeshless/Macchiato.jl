@@ -14,10 +14,10 @@ Central container that ties together a point cloud, boundary conditions, and phy
 # Constructors
 ```julia
 Domain(cloud, boundaries, model)    # cloud + BCs + model(s)
-Domain(cloud, model)                # cloud + model(s), no BCs
 ```
 
-At construction, the `Domain` validates that:
+Boundary conditions are required: a physics model on a domain with no boundary conditions
+is ill-posed. At construction, the `Domain` validates that:
 1. Every boundary condition key matches a surface name in the point cloud
 2. Every surface in the point cloud has a corresponding boundary condition entry
 """
@@ -56,18 +56,6 @@ function Domain(cloud::PointCloud, boundaries, models)
 end
 
 """
-    Domain(cloud::PointCloud, models)
-
-Construct a `Domain` without boundary conditions — useful for interior-only problems
-or when BCs will be added later via [`add!`](@ref).
-"""
-function Domain(cloud::PointCloud{M, C}, models) where {M <: Manifold, C <: CRS}
-    boundaries = Dict{Symbol, AbstractBoundaryCondition}()
-    models = models isa Vector ? models : [models]
-    return Domain(cloud, boundaries, models, :domain1)
-end
-
-"""
     add!(domain::Domain, model::AbstractModel)
 
 Append a physics model to the domain's model list.
@@ -77,12 +65,16 @@ add!(domain::Domain, model::AbstractModel) = push!(domain.models, model)
 """
     add!(domain::Domain, boundary::AbstractBoundaryCondition, name::Symbol)
 
-Attach a boundary condition to the named surface on the domain.
+Replace the boundary condition on the named surface, preserving that surface's index range.
+The surface must already exist in the domain (boundary conditions are assigned at construction).
 """
-function add!(
-        domain::Domain, boundary::AbstractBoundaryCondition, name::Symbol
+function add!(domain::Domain, boundary::AbstractBoundaryCondition, name::Symbol)
+    haskey(domain.boundaries, name) || throw(
+        ArgumentError("Surface $name has no boundary entry; boundary conditions must be specified when the `Domain` is constructed.")
     )
-    return domain.boundaries[name] = boundary
+    ids, _ = domain.boundaries[name]
+    domain.boundaries[name] = (ids, boundary)
+    return domain
 end
 
 """
@@ -95,7 +87,6 @@ function delete!(domain::Domain, model::AbstractModel)
 end
 
 function Base.show(io::IO, domain::Domain)
-    print(io, "$(domain.name): Domain")
-    println()
+    println(io, "$(domain.name): Domain")
     return show(io, domain.models)
 end

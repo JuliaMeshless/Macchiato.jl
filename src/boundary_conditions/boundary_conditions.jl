@@ -30,14 +30,16 @@ function make_bc(::Type{Dirichlet}, bc, surf, domain, ids; kwargs...)
     return bc_func
 end
 
+# Transient Neumann/Robin conditions are not applied here: they are folded into the
+# diffusion operator via ghost nodes (see `build_neumann_diffusion`), so the boundary
+# nodes stay dynamic. Only Dirichlet surfaces get an ODE-style BC closure.
 function make_bc(::Type{DerivativeBoundaryCondition}, bc, surf, domain, ids; kwargs...)
-    function bc_func(du, u, p, t)
-        for (local_i, global_i) in enumerate(ids)
-            du[global_i] = zero(eltype(du))
-        end
-        return nothing
-    end
-    return bc_func
+    throw(
+        ArgumentError(
+            "Transient Neumann/Robin conditions are folded into the diffusion operator " *
+                "(see `build_neumann_diffusion`), not applied through `make_bc`."
+        )
+    )
 end
 
 # ============================================================================
@@ -143,9 +145,12 @@ function write_bc_robin!(
             surf, domain, scheme, A, global_i, local_i, normals; kwargs...
         )
 
-        robin_weights = convert(TA, β_val) .* weights
+        robin_weights = β_val .* weights
         diag_idx = searchsortedfirst(nbs, global_i)
-        robin_weights[diag_idx] += convert(TA, α_val)
+        (diag_idx <= length(nbs) && nbs[diag_idx] == global_i) || throw(
+            ArgumentError("Robin BC: boundary node $global_i is not in its own stencil; cannot add the α·u diagonal term.")
+        )
+        robin_weights[diag_idx] += α_val
 
         sv = SparseVector(size(A, 2), nbs, robin_weights)
         A[global_i, :] = sv

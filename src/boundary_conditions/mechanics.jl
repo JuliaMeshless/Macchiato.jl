@@ -114,7 +114,7 @@ function make_bc!(
 
     # Build first-derivative operators with shared KNN adjacency list
     eval_pts = [get_node_coords(surf, i) for i in 1:length(ids)]
-    k = get(kwargs, :k, 40)
+    k = get(kwargs, :k, DEFAULT_STENCIL_SIZE)
     adjl = find_neighbors(coords_all, eval_pts, k)
 
     # Build operators (KernelAbstractions parallelizes internally)

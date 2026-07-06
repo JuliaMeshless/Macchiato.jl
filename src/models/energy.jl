@@ -28,33 +28,37 @@ end
 
 _num_vars(::SolidEnergy, _) = 1
 
-function make_f(model::SolidEnergy, domain; neighbors = 40, kwargs...)
+function make_f(model::SolidEnergy, domain; neighbors = DEFAULT_STENCIL_SIZE, kwargs...)
     (; k, ρ, cₚ, source) = model
     vol = _coords(domain.cloud.volume)
-    all_points = _coords(domain.cloud)
-
-    method = KNearestSearch(domain.cloud, neighbors)
-    adjl = collect.(search.(points(domain.cloud.volume), Ref(method)))
-
-    ∇² = laplacian(_ustrip(all_points), _ustrip(vol); k = neighbors, adjl = adjl)
     α = k / (cₚ * ρ)
-    w = α * ∇².weights
+
+    W, G, source_appliers = build_neumann_diffusion(domain; k = neighbors)
+    Wα = α .* W
+    Gα = α .* G
+    n_ghost = size(G, 2)
+    cbuf = zeros(n_ghost)
 
     start = maximum(domain.boundaries) do b
         b[2][1][end]
     end
     vol_ids = (start + 1):(start + length(vol))
 
-    # Transient heat equation: ∂T/∂t = α∇²T + f/(ρcₚ)
-    # Create single function that handles both cases to avoid method overwriting
+    # Transient heat equation: ∂T/∂t = α∇²T + f/(ρcₚ).
+    # Neumann/Robin flux is folded into Wα/Gα via ghost nodes so those boundary
+    # nodes stay dynamic; Dirichlet nodes are pinned afterwards by their BC closure.
     function f(du, u, p, t)
-        mul!(view(du, vol_ids), w, u)
+        mul!(du, Wα, u)
+        if n_ghost > 0
+            for apply! in source_appliers
+                apply!(cbuf, t)
+            end
+            mul!(du, Gα, cbuf, 1, 1)
+        end
 
-        # Add source term contribution if present
         if source !== nothing
             for (i, pt) in enumerate(vol)
-                x = [ustrip(pt.x), ustrip(pt.y), ustrip(pt.z)]
-                du[vol_ids[i]] += source(x, t) / (ρ * cₚ)
+                du[vol_ids[i]] += source(ustrip.(pt), t) / (ρ * cₚ)
             end
         end
         return nothing
@@ -66,7 +70,7 @@ end
 function make_system(model::SolidEnergy, domain; kwargs...)
     (; k, ρ, cₚ, source) = model
     coords = _coords(domain.cloud)
-    ∇² = laplacian(_ustrip(coords); k = 40, kwargs...)
+    ∇² = laplacian(_ustrip(coords); k = DEFAULT_STENCIL_SIZE, kwargs...)
     α = k / (cₚ * ρ)
     A = α * ∇².weights
 
@@ -77,7 +81,6 @@ function make_system(model::SolidEnergy, domain; kwargs...)
     else
         # Evaluate source at each point
         b = map(coords) do pt
-            # x = [ustrip(pt.x), ustrip(pt.y), ustrip(pt.z)]
             source(ustrip.(pt), 0.0)  # Steady-state: t=0
         end
     end

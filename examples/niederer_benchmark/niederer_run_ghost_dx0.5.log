@@ -1,0 +1,54 @@
+  Activating project at `~/.julia/dev/Macchiato/examples`
+⠋ generating nodes    Time: 0:00:00[K⠙ generating nodes    Time: 0:00:00[K✓ generating nodes    Time: 0:00:00[K
+Julia Version 1.12.6
+Commit 15346901f00 (2026-04-09 19:20 UTC)
+Build Info:
+  Official https://julialang.org release
+Platform Info:
+  OS: Linux (x86_64-linux-gnu)
+  CPU: 24 × AMD Ryzen 9 9900X 12-Core Processor
+  WORD_SIZE: 64
+  LLVM: libLLVM-18.1.7 (ORCJIT, znver5)
+  GC: Built with stock GC
+Threads: 20 default, 1 interactive, 20 GC (on 24 virtual cores)
+Environment:
+  JULIA_NUM_THREADS = 20
+  JULIA_PKG_USE_CLI_GIT = true
+Refined boundary mesh: 2916 triangles
+VdSF cloud: 6328 points (2916 boundary + 3412 volume, 402 out-of-domain dropped)
+Domain: 6328 points (3412 volume, 2916 boundary), 84 stimulated
+Shadow distances (mm): min=0.021 max=0.479 mean=0.234
+Ghost nodes: 2916 (one per boundary, outward by dx=0.5 mm)
+W_diff_bc: size=(6328, 6328), nnz=323035, max |row-sum|=1.2026490914252008e-13, max |W|=182.7
+Solving (dt = 0.005 ms, t_end = 80.0 ms, sampling every 0.1 ms)...
+  t = 5.0 ms | V ∈ [-92.3, 31.0] mV | activated: 312 / 6328
+  t = 10.0 ms | V ∈ [-93.4, 27.8] mV | activated: 900 / 6328
+  t = 15.0 ms | V ∈ [-92.1, 28.8] mV | activated: 1643 / 6328
+  t = 20.0 ms | V ∈ [-95.3, 31.0] mV | activated: 2591 / 6328
+  t = 25.0 ms | V ∈ [-91.7, 30.4] mV | activated: 3616 / 6328
+  t = 30.0 ms | V ∈ [-91.7, 31.2] mV | activated: 4526 / 6328
+  t = 35.0 ms | V ∈ [-89.4, 36.2] mV | activated: 5471 / 6328
+  t = 40.0 ms | V ∈ [-92.4, 33.3] mV | activated: 6186 / 6328
+  t = 45.0 ms | V ∈ [19.8, 31.8] mV | activated: 6328 / 6328
+  t = 50.0 ms | V ∈ [21.9, 32.3] mV | activated: 6328 / 6328
+  t = 55.0 ms | V ∈ [25.5, 33.3] mV | activated: 6328 / 6328
+  t = 60.0 ms | V ∈ [25.4, 35.3] mV | activated: 6328 / 6328
+  t = 65.0 ms | V ∈ [24.1, 38.8] mV | activated: 6328 / 6328
+  t = 70.0 ms | V ∈ [22.2, 45.2] mV | activated: 6328 / 6328
+  t = 75.0 ms | V ∈ [19.3, 57.4] mV | activated: 6328 / 6328
+  t = 80.0 ms | V ∈ [14.2, 82.4] mV | activated: 6328 / 6328
+ 14.339765 seconds (31.47 M allocations: 4.776 GiB, 3.10% gc time, 93.20% compilation time)
+
+Activation times at Niederer reference points:
+  Pi   target (mm)           snapped (mm)                dist   AT (ms)
+  P1   (0.0  , 0.0 , 0.0 ) (0.0   , 0.182, 0.65 ) 0.675  1.3
+  P2   (0.0  , 7.0 , 0.0 ) (0.0   , 6.616, 0.399) 0.554  19.0
+  P3   (20.0 , 7.0 , 0.0 ) (20.0  , 6.616, 0.399) 0.554  41.6
+  P4   (20.0 , 0.0 , 0.0 ) (19.699, 0.302, 0.474) 0.638  34.6
+  P5   (0.0  , 0.0 , 3.0 ) (0.0   , 0.384, 2.601) 0.554  5.5
+  P6   (0.0  , 7.0 , 3.0 ) (0.0   , 6.818, 2.35 ) 0.675  20.4
+  P7   (20.0 , 0.0 , 3.0 ) (20.0  , 0.384, 2.601) 0.554  34.7
+  P8   (20.0 , 7.0 , 3.0 ) (20.0  , 6.818, 2.35 ) 0.675  42.0
+  P9   (10.0 , 3.5 , 1.5 ) (10.175, 3.525, 1.65 ) 0.232  21.1
+Diagonal P1→P8 activation curve written to /home/kylebeggs/.julia/dev/Macchiato/examples/niederer_benchmark/niederer_diagonal.csv
+Results written to /home/kylebeggs/.julia/dev/Macchiato/examples/niederer_benchmark/niederer_result.vtu

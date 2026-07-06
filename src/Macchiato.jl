@@ -10,11 +10,10 @@ using CoordRefSystems
 using Accessors
 using ProgressMeter
 using Unitful
-using Unitful: ustrip
 using StaticArrays
-using LinearAlgebra
 using RadialBasisFunctions
 using SparseArrays
+using NearestNeighbors: KDTree, knn
 using OrdinaryDiffEq
 using OhMyThreads
 using WriteVTK
@@ -23,6 +22,9 @@ using JLD2
 import LinearSolve
 
 include("utils.jl")
+
+# Default RBF-FD stencil size (nearest neighbors per node).
+const DEFAULT_STENCIL_SIZE = 40
 
 #################### Abstract Types ####################
 
@@ -60,6 +62,9 @@ export Adiabatic, Temperature, HeatFlux, Convection
 
 include("boundary_conditions/mechanics.jl")
 export Displacement, Traction, TractionFree
+
+# Ghost-node machinery for transient Neumann/Robin BCs (needs α/β from energy.jl above)
+include("boundary_conditions/numerical/ghost.jl")
 
 export make_bc, make_bc!
 
@@ -116,9 +121,6 @@ export _num_vars
 include("solve.jl")
 
 #################### Operators ####################
-abstract type AbstractOperator end
-export AbstractOperator
-
 include("upwinding.jl")
 export upwind
 
@@ -132,13 +134,6 @@ include("simulation.jl")
 
 export Simulation, run!, set!
 export temperature, velocity, pressure, displacement
-
-# test funcs
-export node_drop, findmin_turbo
-export cov, make_memory_contiguous, ranges_from_permutation, permute!
-
-# utils
-export findmin_turbo
 
 function __init__()
     threads = Threads.nthreads()

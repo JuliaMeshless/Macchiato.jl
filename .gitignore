@@ -41,3 +41,5 @@ docs/site/
 # development
 dev
 CLAUDE.md
+examples/niederer_benchmark/niederer_result.vtu
+examples/niederer_benchmark/niederer_result_fd.vtr

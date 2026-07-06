@@ -27,6 +27,7 @@ Steady-state heat conduction on a unit square with prescribed temperatures:
 using WhatsThePoint, Macchiato, Unitful: m, °
 
 # Geometry: unit square point cloud
+# (`rectangle` is a small boundary-builder helper defined in the Getting Started guide)
 part = PointBoundary(rectangle(1m, 1m)...)
 split_surface!(part, 75°)
 cloud = discretize(part, ConstantSpacing(1/33 * m), alg=VanDerSandeFornberg())

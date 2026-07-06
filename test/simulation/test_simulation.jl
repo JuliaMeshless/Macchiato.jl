@@ -49,7 +49,7 @@ end
         @test sim.mode isa Transient
         @test sim.mode.Δt == 0.001
         @test sim.mode.stop_time == 1.0
-        @test sim.mode.solver isa MM.OrdinaryDiffEq.Tsit5
+        @test sim.mode.solver isa MM.OrdinaryDiffEq.FBDF
     end
 
     @testset "Constructor - Transient with custom solver" begin
@@ -86,11 +86,45 @@ end
         @test length(T) == length(domain.cloud)
     end
 
-    # NOTE: Transient tests are skipped because make_f() for SolidEnergy triggers
-    # a bug in RadialBasisFunctions.classify_stencil with SubArray types.
-    # This is a pre-existing issue unrelated to the Simulation API.
     @testset "Transient run!" begin
-        @test_skip "Skipped: make_f() has pre-existing RBF bug"
+        dx = 1 / 17 * m
+        part = create_2d_square_domain(dx)
+        cloud = WTP.discretize(part, ConstantSpacing(dx), alg = VanDerSandeFornberg())
+        model = MM.SolidEnergy(k = 1.0, ρ = 1.0, cₚ = 1.0)
+
+        dirichlet = Dict(
+            :surface1 => MM.Temperature(0.0), :surface2 => MM.Temperature(0.0),
+            :surface3 => MM.Temperature(100.0), :surface4 => MM.Temperature(0.0)
+        )
+
+        # Transient Dirichlet must converge to the steady-state solution.
+        steady = Simulation(MM.Domain(cloud, dirichlet, model))
+        set!(steady, T = 0.0)
+        run!(steady)
+        Ts = temperature(steady)
+
+        sim = Simulation(MM.Domain(cloud, dirichlet, model), Transient(Δt = 1e-2, stop_time = 10.0))
+        set!(sim, T = 0.0)
+        run!(sim)
+        Tt = temperature(sim)
+        @test !sim.running
+        @test all(isfinite, Tt)
+        @test maximum(abs, Tt .- Ts) < 0.5
+
+        # Flux/Robin conditions are folded into the diffusion operator via ghost nodes;
+        # each must remain bounded (the earlier penalty form blew up to ~1e5 for Adiabatic).
+        for bc in (MM.Adiabatic(), MM.HeatFlux(-10.0), MM.Convection(5.0, 1.0, 20.0))
+            bcs = Dict(
+                :surface1 => bc, :surface2 => MM.Temperature(0.0),
+                :surface3 => MM.Temperature(100.0), :surface4 => MM.Temperature(0.0)
+            )
+            flux_sim = Simulation(MM.Domain(cloud, bcs, model), Transient(Δt = 1e-2, stop_time = 10.0))
+            set!(flux_sim, T = 0.0)
+            run!(flux_sim)
+            T = temperature(flux_sim)
+            @test all(isfinite, T)
+            @test all(-10 .< T .< 110)
+        end
     end
 
     @testset "run! returns simulation" begin

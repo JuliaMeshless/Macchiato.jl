@@ -181,7 +181,7 @@ set!(sim, T=0.0)
 # Or use a function of position
 set!(sim, T=x -> 50.0 * exp(-10 * ((x[1]-0.5)^2 + (x[2]-0.5)^2)))
 
-# Run transient simulation (time-steps with Tsit5 by default)
+# Run transient simulation (implicit FBDF solver by default — diffusion is stiff)
 run!(sim)
 
 T_final = temperature(sim)

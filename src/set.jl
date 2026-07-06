@@ -214,6 +214,6 @@ function _get_solution_vector(sim)
     elseif sim.u0 !== nothing
         return sim.u0
     else
-        throw(ErrorException("No solution available"))
+        throw(ArgumentError("No solution available; call `run!(sim)` before extracting fields."))
     end
 end

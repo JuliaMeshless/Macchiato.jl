@@ -1,0 +1,50 @@
+Julia Version 1.12.6
+Commit 15346901f00 (2026-04-09 19:20 UTC)
+Build Info:
+  Official https://julialang.org release
+Platform Info:
+  OS: Linux (x86_64-linux-gnu)
+  CPU: 24 × AMD Ryzen 9 9900X 12-Core Processor
+  WORD_SIZE: 64
+  LLVM: libLLVM-18.1.7 (ORCJIT, znver5)
+  GC: Built with stock GC
+Threads: 20 default, 1 interactive, 20 GC (on 24 virtual cores)
+Environment:
+  JULIA_NUM_THREADS = 20
+  JULIA_PKG_USE_CLI_GIT = true
+  Activating project at `~/.julia/dev/Macchiato/examples`
+Grid: 201 × 71 × 31 = 442401 points (44202 boundary + 398199 volume)
+Domain: 442401 points (398199 volume, 44202 boundary), 4096 stimulated
+Rotate to inspect the point cloud. Press Enter to continue to simulation setup...
+Solving (dt = 0.01 ms, t_end = 80.0 ms, sampling every 0.1 ms)...
+  t = 5.0 ms | V ∈ [-85.2, 21.9] mV | activated: 14465 / 442401
+  t = 10.0 ms | V ∈ [-85.2, 31.8] mV | activated: 47744 / 442401
+  t = 15.0 ms | V ∈ [-85.2, 26.8] mV | activated: 97136 / 442401
+  t = 20.0 ms | V ∈ [-85.2, 29.4] mV | activated: 159627 / 442401
+  t = 25.0 ms | V ∈ [-85.2, 30.6] mV | activated: 236355 / 442401
+  t = 30.0 ms | V ∈ [-85.2, 30.9] mV | activated: 327611 / 442401
+  t = 35.0 ms | V ∈ [-85.2, 32.9] mV | activated: 405925 / 442401
+  t = 40.0 ms | V ∈ [-85.2, 30.1] mV | activated: 435999 / 442401
+  t = 45.0 ms | V ∈ [19.9, 30.2] mV | activated: 442401 / 442401
+  t = 50.0 ms | V ∈ [20.8, 30.3] mV | activated: 442401 / 442401
+  t = 55.0 ms | V ∈ [24.4, 30.4] mV | activated: 442401 / 442401
+  t = 60.0 ms | V ∈ [26.9, 30.8] mV | activated: 442401 / 442401
+  t = 65.0 ms | V ∈ [26.3, 30.8] mV | activated: 442401 / 442401
+  t = 70.0 ms | V ∈ [25.7, 31.1] mV | activated: 442401 / 442401
+  t = 75.0 ms | V ∈ [25.1, 31.0] mV | activated: 442401 / 442401
+  t = 80.0 ms | V ∈ [24.6, 30.4] mV | activated: 442401 / 442401
+491.697030 seconds (519.73 M allocations: 226.520 GiB, 6.73% gc time, 97.11% compilation time)
+
+Activation times at Niederer reference points:
+  Pi   target (mm)           snapped (mm)                dist   AT (ms)
+  P1   (0.0  , 0.0 , 0.0 ) (0.0   , 0.0  , 0.0  ) 0.0    1.3
+  P2   (0.0  , 7.0 , 0.0 ) (0.0   , 7.0  , 0.0  ) 0.0    30.1
+  P3   (20.0 , 7.0 , 0.0 ) (20.0  , 7.0  , 0.0  ) 0.0    42.9
+  P4   (20.0 , 0.0 , 0.0 ) (20.0  , 0.0  , 0.0  ) 0.0    31.9
+  P5   (0.0  , 0.0 , 3.0 ) (0.0   , 0.0  , 3.0  ) 0.0    9.1
+  P6   (0.0  , 7.0 , 3.0 ) (0.0   , 7.0  , 3.0  ) 0.0    31.5
+  P7   (20.0 , 0.0 , 3.0 ) (20.0  , 0.0  , 3.0  ) 0.0    33.0
+  P8   (20.0 , 7.0 , 3.0 ) (20.0  , 7.0  , 3.0  ) 0.0    43.8
+  P9   (10.0 , 3.5 , 1.5 ) (10.0  , 3.5  , 1.5  ) 0.0    19.9
+Diagonal P1→P8 activation curve written to /home/kylebeggs/.julia/dev/Macchiato/examples/niederer_benchmark/niederer_diagonal_fd.csv
+Results written to /home/kylebeggs/.julia/dev/Macchiato/examples/niederer_benchmark/niederer_result_fd.vtr

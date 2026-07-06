@@ -144,7 +144,7 @@ function make_system(model::LinearElasticity, domain; kwargs...)
     N = length(coords)
 
     # Pre-compute shared KNN adjacency list (same coords and k for all 3 operators)
-    k = get(kwargs, :k, 40)
+    k = get(kwargs, :k, DEFAULT_STENCIL_SIZE)
     adjl = find_neighbors(coords, k)
 
     # Build RBF operators (KernelAbstractions parallelizes internally)
