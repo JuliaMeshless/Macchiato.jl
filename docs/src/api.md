@@ -9,7 +9,7 @@ CurrentModule = Macchiato
 ```@docs
 Domain
 add!
-delete!
+delete!(::Domain, ::AbstractModel)
 ```
 
 ## Models
