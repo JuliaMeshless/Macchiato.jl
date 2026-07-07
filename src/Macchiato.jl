@@ -20,7 +20,7 @@ using OhMyThreads
 using WriteVTK
 using JLD2
 
-import LinearSolve
+import LinearSolve: LinearSolve, LinearProblem
 
 include("utils.jl")
 
