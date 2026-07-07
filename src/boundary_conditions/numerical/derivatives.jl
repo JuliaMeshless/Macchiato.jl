@@ -23,7 +23,7 @@ function compute_local_derivative_weights(
     nbs_coords = [get_node_coords(domain.cloud, nb) for nb in nbs]
 
     # Compute weights
-    n = ustrip(normals[local_i])
+    n = ustrip.(normals[local_i])
     d = directional(nbs_coords, [surf_pt], n)
 
     # Collect to dense to preserve precision
@@ -45,7 +45,7 @@ function compute_local_derivative_weights(
     surf_pt = get_node_coords(surf, local_i)
     nbs_coords = [get_node_coords(domain.cloud, nb) for nb in nbs]
 
-    n = ustrip(normals[local_i])
+    n = ustrip.(normals[local_i])
     d = ustrip(shadow_op.Δ(surf_pt))
 
     # Compute derivative using shadow point: (u_surf - u_shadow)/Δ
@@ -70,7 +70,7 @@ function compute_local_derivative_weights(
     surf_pt = get_node_coords(surf, local_i)
     nbs_coords = [get_node_coords(domain.cloud, nb) for nb in nbs]
 
-    n = ustrip(normals[local_i])
+    n = ustrip.(normals[local_i])
     d = ustrip(shadow_op.Δ(surf_pt))
 
     # Compute derivative using 2nd order shadow points

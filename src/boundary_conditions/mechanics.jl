@@ -140,7 +140,7 @@ function make_bc!(
     for (local_i, global_i) in enumerate(ids)
         x = get_node_coords(surf, local_i)
         tx, ty = bc(x, 0.0)
-        n = ustrip(normals[local_i])
+        n = ustrip.(normals[local_i])
         n_x, n_y = n[1], n[2]
 
         # Collect unique nonzero column indices from both weight rows
