@@ -55,8 +55,8 @@ end
     @testset "Constructor - Transient with custom solver" begin
         domain = create_test_domain()
 
-        sim = Simulation(domain, Transient(Δt = 0.001, stop_time = 1.0, solver = MM.OrdinaryDiffEq.RK4()))
-        @test sim.mode.solver isa MM.OrdinaryDiffEq.RK4
+        sim = Simulation(domain, Transient(Δt = 0.001, stop_time = 1.0, solver = MM.OrdinaryDiffEq.Tsit5()))
+        @test sim.mode.solver isa MM.OrdinaryDiffEq.Tsit5
     end
 
     @testset "show methods" begin
