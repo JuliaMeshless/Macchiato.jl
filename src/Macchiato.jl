@@ -12,6 +12,7 @@ using ProgressMeter
 using Unitful
 using StaticArrays
 using RadialBasisFunctions
+import RadialBasisFunctions: autoselect_k
 using SparseArrays
 using NearestNeighbors: KDTree, knn
 using OrdinaryDiffEq
