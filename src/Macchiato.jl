@@ -134,7 +134,7 @@ include("set.jl")
 include("simulation.jl")
 
 export Simulation, run!, set!
-export temperature, velocity, pressure, displacement
+export solution, temperature, velocity, pressure, displacement
 
 function __init__()
     threads = Threads.nthreads()

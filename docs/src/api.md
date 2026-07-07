@@ -120,6 +120,7 @@ set!
 ## Field Extraction
 
 ```@docs
+solution
 temperature
 velocity
 pressure

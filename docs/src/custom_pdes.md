@@ -118,8 +118,8 @@ sim = Simulation(domain)
 run!(sim)
 
 # Verify against exact solution
-# For custom models, access the raw solution vector directly
-u_numerical = sim._solution
+# For custom models, access the solution vector via the public accessor
+u_numerical = solution(sim)
 pts = points(cloud)
 u_exact_vals = [u_exact(ustrip.([coords(pt).x, coords(pt).y])) for pt in pts]
 error = maximum(abs.(u_numerical .- u_exact_vals))

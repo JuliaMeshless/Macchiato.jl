@@ -208,6 +208,18 @@ function _has_field(sim, field::Symbol)
     return false
 end
 
+"""
+    solution(sim) -> Vector{Float64}
+
+Return the raw solution vector for the simulation.
+
+For built-in models, prefer the typed accessors [`temperature`](@ref), [`velocity`](@ref),
+[`pressure`](@ref), and [`displacement`](@ref). For custom PDEs this is the supported way
+to read results after [`run!`](@ref). Falls back to the initial condition if `run!` has not
+been called; throws an `ArgumentError` if no solution or initial condition is available.
+"""
+solution(sim) = _get_solution_vector(sim)
+
 function _get_solution_vector(sim)
     if sim._solution !== nothing
         return sim._solution
