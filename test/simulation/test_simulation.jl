@@ -55,8 +55,8 @@ end
     @testset "Constructor - Transient with custom solver" begin
         domain = create_test_domain()
 
-        sim = Simulation(domain, Transient(Δt = 0.001, stop_time = 1.0, solver = MM.OrdinaryDiffEq.RK4()))
-        @test sim.mode.solver isa MM.OrdinaryDiffEq.RK4
+        sim = Simulation(domain, Transient(Δt = 0.001, stop_time = 1.0, solver = MM.OrdinaryDiffEq.Tsit5()))
+        @test sim.mode.solver isa MM.OrdinaryDiffEq.Tsit5
     end
 
     @testset "show methods" begin
@@ -103,7 +103,7 @@ end
         run!(steady)
         Ts = temperature(steady)
 
-        sim = Simulation(MM.Domain(cloud, dirichlet, model), Transient(Δt = 1e-2, stop_time = 10.0))
+        sim = Simulation(MM.Domain(cloud, dirichlet, model), Transient(Δt = 1.0e-2, stop_time = 10.0))
         set!(sim, T = 0.0)
         run!(sim)
         Tt = temperature(sim)
@@ -118,7 +118,7 @@ end
                 :surface1 => bc, :surface2 => MM.Temperature(0.0),
                 :surface3 => MM.Temperature(100.0), :surface4 => MM.Temperature(0.0)
             )
-            flux_sim = Simulation(MM.Domain(cloud, bcs, model), Transient(Δt = 1e-2, stop_time = 10.0))
+            flux_sim = Simulation(MM.Domain(cloud, bcs, model), Transient(Δt = 1.0e-2, stop_time = 10.0))
             set!(flux_sim, T = 0.0)
             run!(flux_sim)
             T = temperature(flux_sim)

@@ -72,7 +72,7 @@ function build_neumann_diffusion(domain; k = DEFAULT_STENCIL_SIZE)
         surf_x = eltype(all_pts)[]
         for (local_i, gi) in enumerate(ids)
             x = all_pts[gi]
-            n = ustrip(normals[local_i])
+            n = ustrip.(normals[local_i])
             _, nn_dist = knn(tree_all, x, 2, true)
             Δ = nn_dist[2]
             ghost = x .+ Δ .* n

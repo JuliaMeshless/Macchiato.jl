@@ -12,6 +12,7 @@ using ProgressMeter
 using Unitful
 using StaticArrays
 using RadialBasisFunctions
+import RadialBasisFunctions: autoselect_k
 using SparseArrays
 using NearestNeighbors: KDTree, knn
 using OrdinaryDiffEq
@@ -19,7 +20,7 @@ using OhMyThreads
 using WriteVTK
 using JLD2
 
-import LinearSolve
+import LinearSolve: LinearSolve, LinearProblem
 
 include("utils.jl")
 
@@ -133,7 +134,7 @@ include("set.jl")
 include("simulation.jl")
 
 export Simulation, run!, set!
-export temperature, velocity, pressure, displacement
+export solution, temperature, velocity, pressure, displacement
 
 function __init__()
     threads = Threads.nthreads()

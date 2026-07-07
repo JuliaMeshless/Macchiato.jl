@@ -442,6 +442,7 @@ function report_reference_points(all_pts, activation_time)
             "$(rpad(round(dist; digits = 3), 6)) $at_str"
         )
     end
+    return
 end
 
 function write_diagonal_csv(filename, all_pts, activation_time; n_samples = 50)

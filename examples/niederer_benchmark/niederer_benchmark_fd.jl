@@ -116,7 +116,7 @@ function build_fd_diffusion_operator(geo)
     @inline function push_neighbor!(k_center, k_nbr, coef)
         push!(Is, k_center)
         push!(Js, k_nbr)
-        push!(Vs, coef)
+        return push!(Vs, coef)
     end
 
     for iz in 1:nz, iy in 1:ny, ix in 1:nx
@@ -238,6 +238,7 @@ function report_reference_points(all_pts, activation_time)
             "$(rpad(round(dist; digits = 3), 6)) $at_str"
         )
     end
+    return
 end
 
 function write_diagonal_csv(filename, all_pts, activation_time; n_samples = 50)
@@ -300,11 +301,13 @@ function visualize_geometry(geo; markersize = 0.15)
         xlabel = "x (mm)", ylabel = "y (mm)", zlabel = "z (mm)",
     )
 
-    pb = meshscatter!(ax,
+    pb = meshscatter!(
+        ax,
         [p[1] for p in bnd], [p[2] for p in bnd], [p[3] for p in bnd];
         markersize = markersize, color = :red,
     )
-    pv = meshscatter!(ax,
+    pv = meshscatter!(
+        ax,
         [p[1] for p in vol], [p[2] for p in vol], [p[3] for p in vol];
         markersize = markersize, color = :blue,
     )

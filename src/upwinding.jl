@@ -7,6 +7,8 @@ Build an upwind finite-difference-style operator using RBF interpolation.
 Computes backward, forward, and centered partial derivatives with respect to dimension `dim`,
 then returns a function `(ϕ, v, θ)` that blends them based on flow direction `v` and
 upwind parameter `θ ∈ [0, 1]` (1 = full upwind, 0 = centered).
+The returned callable computes the advective term `v .* ∂ϕ` (the derivative scaled by the
+local velocity `v`), not the bare derivative.
 
 The single-argument form `upwind(data, dim)` evaluates at the data points themselves.
 
@@ -27,8 +29,8 @@ function upwind(
         k::T = autoselect_k(data, basis)
     ) where {T <: Int, B <: AbstractRadialBasis}
     Δ === nothing && (Δ = _find_smallest_dist(data, k))
-    backward = ∂virtual(data, eval_points, dim, basis; Δ = Δ, backward = true, k = k)
-    forward = ∂virtual(data, eval_points, dim, basis; Δ = Δ, backward = false, k = k)
+    backward = ∂virtual(data, eval_points, dim, Δ, basis; backward = true, k = k)
+    forward = ∂virtual(data, eval_points, dim, Δ, basis; backward = false, k = k)
     center = partial(data, eval_points, 1, dim, basis; k = k)
 
     du = let backward = backward, forward = forward, center = center
@@ -50,4 +52,10 @@ function upwind(
         k::T = autoselect_k(data, basis)
     ) where {T <: Int, B <: AbstractRadialBasis}
     return upwind(data, data, dim, basis; Δ = Δ, k = k)
+end
+
+function _find_smallest_dist(data, k)
+    tree = KDTree(data)
+    _, dists = knn(tree, data, k, true)
+    return minimum(d -> minimum(@view d[2:end]), dists)
 end

@@ -82,8 +82,9 @@ end
 
 Remove a physics model from the domain.
 """
-function delete!(domain::Domain, model::AbstractModel)
-    return deleteat!(domain.models, findall(x -> x == model, domain.models))
+function Base.delete!(domain::Domain, model::AbstractModel)
+    deleteat!(domain.models, findall(x -> x == model, domain.models))
+    return domain
 end
 
 function Base.show(io::IO, domain::Domain)

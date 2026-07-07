@@ -28,7 +28,7 @@ const Ca_o = 2.0
 # Maximum conductances — epicardial variant
 const G_Na = 14.838
 const G_bNa = 0.00029
-const G_CaL = 3.980e-5
+const G_CaL = 3.98e-5
 const G_bCa = 0.000592
 const G_to = 0.294       # epicardial
 const G_Ks = 0.392       # epicardial
@@ -53,7 +53,7 @@ const K_pCa = 0.0005
 # Calcium dynamics
 const k1_prime = 0.15
 const k2_prime = 0.045
-const k3 = 0.060
+const k3 = 0.06
 const k4 = 0.005
 const EC = 1.5
 const max_sr = 2.5
@@ -113,33 +113,33 @@ contribution to dV/dt (zero when not stimulated or outside the stimulus region).
 """
 function tt06_reaction_point!(du, u, i, N, stim_dvdt)
     @inbounds begin
-        V      = u[i]
+        V = u[i]
         # Clamp gates and concentrations into physical ranges. Forward Euler on the
         # TT06 fast gates/ion concentrations can undershoot by O(1e-10)–O(1e-300)
         # per step, which then raises DomainError in downstream `log`. Clamping is
         # the standard cardiac-modelling workaround when using explicit integration.
-        Xr1    = clamp(u[1N + i], 0.0, 1.0)
-        Xr2    = clamp(u[2N + i], 0.0, 1.0)
-        Xs     = clamp(u[3N + i], 0.0, 1.0)
+        Xr1 = clamp(u[1N + i], 0.0, 1.0)
+        Xr2 = clamp(u[2N + i], 0.0, 1.0)
+        Xs = clamp(u[3N + i], 0.0, 1.0)
         m_gate = clamp(u[4N + i], 0.0, 1.0)
         h_gate = clamp(u[5N + i], 0.0, 1.0)
         j_gate = clamp(u[6N + i], 0.0, 1.0)
         d_gate = clamp(u[7N + i], 0.0, 1.0)
         f_gate = clamp(u[8N + i], 0.0, 1.0)
         f2gate = clamp(u[9N + i], 0.0, 1.0)
-        fCass  = clamp(u[10N + i], 0.0, 1.0)
+        fCass = clamp(u[10N + i], 0.0, 1.0)
         s_gate = clamp(u[11N + i], 0.0, 1.0)
         r_gate = clamp(u[12N + i], 0.0, 1.0)
-        Ca_i   = max(u[13N + i], 1.0e-10)
-        Ca_SR  = max(u[14N + i], 1.0e-10)
-        Ca_ss  = max(u[15N + i], 1.0e-10)
+        Ca_i = max(u[13N + i], 1.0e-10)
+        Ca_SR = max(u[14N + i], 1.0e-10)
+        Ca_ss = max(u[15N + i], 1.0e-10)
         R_prim = clamp(u[16N + i], 0.0, 1.0)
-        Na_i   = max(u[17N + i], 1.0e-10)
-        K_i    = max(u[18N + i], 1.0e-10)
+        Na_i = max(u[17N + i], 1.0e-10)
+        K_i = max(u[18N + i], 1.0e-10)
 
         # Nernst potentials
         E_Na = RTOF * log(Na_o / Na_i)
-        E_K  = RTOF * log(K_o / K_i)
+        E_K = RTOF * log(K_o / K_i)
         E_Ks = RTOF * log((K_o + P_kna * Na_o) / (K_i + P_kna * Na_i))
         E_Ca = 0.5 * RTOF * log(Ca_o / Ca_i)
 
@@ -153,16 +153,16 @@ function tt06_reaction_point!(du, u, i, N, stim_dvdt)
 
         # L-type Ca2+ current (GHK formulation)
         Veff = V - 15.0
-        if abs(Veff) < 1e-6
+        if abs(Veff) < 1.0e-6
             # L'Hôpital limit at Veff → 0: Veff/(exp(2*Veff*FORT)-1) → 1/(2*FORT)
             I_CaL = G_CaL * d_gate * f_gate * f2gate * fCass *
-                     2.0 * FF * (0.25 * Ca_ss * exp(2.0 * Veff * FORT) - Ca_o)
+                2.0 * FF * (0.25 * Ca_ss * exp(2.0 * Veff * FORT) - Ca_o)
         else
             exp_2Veff = exp(2.0 * Veff * FORT)
             I_CaL = G_CaL * d_gate * f_gate * f2gate * fCass *
-                     4.0 * Veff * FF^2 / (R_gas * Temp) *
-                     (0.25 * Ca_ss * exp_2Veff - Ca_o) /
-                     (exp_2Veff - 1.0)
+                4.0 * Veff * FF^2 / (R_gas * Temp) *
+                (0.25 * Ca_ss * exp_2Veff - Ca_o) /
+                (exp_2Veff - 1.0)
         end
 
         # Background Ca2+ current
@@ -179,25 +179,29 @@ function tt06_reaction_point!(du, u, i, N, stim_dvdt)
 
         # Inward rectifier K+ current
         α_K1 = 0.1 / (1.0 + exp(0.06 * (V - E_K - 200.0)))
-        β_K1 = (3.0 * exp(0.0002 * (V - E_K + 100.0)) +
-                 exp(0.1 * (V - E_K - 10.0))) /
-                (1.0 + exp(-0.5 * (V - E_K)))
+        β_K1 = (
+            3.0 * exp(0.0002 * (V - E_K + 100.0)) +
+                exp(0.1 * (V - E_K - 10.0))
+        ) /
+            (1.0 + exp(-0.5 * (V - E_K)))
         xK1_inf = α_K1 / (α_K1 + β_K1)
         I_K1 = G_K1 * xK1_inf * (V - E_K)
 
         # Na+/K+ pump current
         Vfrt = V * FORT
         I_NaK = P_NaK * K_o / (K_o + K_mK) *
-                 Na_i / (Na_i + K_mNa) /
-                 (1.0 + 0.1245 * exp(-0.1 * Vfrt) + 0.0353 * exp(-Vfrt))
+            Na_i / (Na_i + K_mNa) /
+            (1.0 + 0.1245 * exp(-0.1 * Vfrt) + 0.0353 * exp(-Vfrt))
 
         # Na+/Ca2+ exchanger current
         exp_gVfrt = exp(γ_NaCa * Vfrt)
         exp_gm1Vfrt = exp((γ_NaCa - 1.0) * Vfrt)
         I_NaCa = k_NaCa *
-                  (exp_gVfrt * Na_i^3 * Ca_o - exp_gm1Vfrt * Na_o^3 * Ca_i * α_NaCa) /
-                  ((Km_Nai^3 + Na_o^3) * (Km_Ca + Ca_o) *
-                   (1.0 + K_sat * exp_gm1Vfrt))
+            (exp_gVfrt * Na_i^3 * Ca_o - exp_gm1Vfrt * Na_o^3 * Ca_i * α_NaCa) /
+            (
+            (Km_Nai^3 + Na_o^3) * (Km_Ca + Ca_o) *
+                (1.0 + K_sat * exp_gm1Vfrt)
+        )
 
         # Sarcolemmal Ca2+ pump
         I_pCa = G_pCa * Ca_i / (K_pCa + Ca_i)
@@ -207,7 +211,7 @@ function tt06_reaction_point!(du, u, i, N, stim_dvdt)
 
         # Total ionic current (µA/cm²)
         I_ion = I_Na + I_bNa + I_CaL + I_bCa + I_to + I_Ks + I_Kr + I_K1 +
-                I_NaK + I_NaCa + I_pCa + I_pK
+            I_NaK + I_NaCa + I_pCa + I_pK
 
         # --- Gating variable kinetics: dx/dt = (x_inf - x) / tau_x ---
 
@@ -236,7 +240,7 @@ function tt06_reaction_point!(du, u, i, N, stim_dvdt)
         m_inf = (1.0 / (1.0 + exp((-56.86 - V) / 9.03)))^2
         α_m = 1.0 / (1.0 + exp((-60.0 - V) / 5.0))
         β_m = 0.1 / (1.0 + exp((V + 35.0) / 5.0)) +
-              0.1 / (1.0 + exp((V - 50.0) / 200.0))
+            0.1 / (1.0 + exp((V - 50.0) / 200.0))
         tau_m = α_m * β_m
         dm = (m_inf - m_gate) / tau_m
 
@@ -259,7 +263,7 @@ function tt06_reaction_point!(du, u, i, N, stim_dvdt)
             β_j = 0.6 * exp(0.057 * V) / (1.0 + exp(-0.1 * (V + 32.0)))
         else
             α_j = (-2.5428e4 * exp(0.2444 * V) - 6.948e-6 * exp(-0.04391 * V)) *
-                  (V + 37.78) / (1.0 + exp(0.311 * (V + 79.23)))
+                (V + 37.78) / (1.0 + exp(0.311 * (V + 79.23)))
             β_j = 0.02424 * exp(-0.01052 * V) / (1.0 + exp(-0.1378 * (V + 40.14)))
         end
         tau_j = 1.0 / (α_j + β_j)
@@ -297,7 +301,7 @@ function tt06_reaction_point!(du, u, i, N, stim_dvdt)
         # s (Ito inactivation — epicardial)
         s_inf = 1.0 / (1.0 + exp((V + 20.0) / 5.0))
         tau_s = 85.0 * exp(-(V + 45.0)^2 / 320.0) +
-                5.0 / (1.0 + exp((V - 20.0) / 5.0)) + 3.0
+            5.0 / (1.0 + exp((V - 20.0) / 5.0)) + 3.0
         ds = (s_inf - s_gate) / tau_s
 
         # r (Ito activation)
@@ -326,41 +330,45 @@ function tt06_reaction_point!(du, u, i, N, stim_dvdt)
         Ca_ss_bufss = 1.0 / (1.0 + Buf_ss * K_buf_ss / (Ca_ss + K_buf_ss)^2)
 
         # Calcium concentration ODEs
-        dCa_i = Ca_i_bufc * (I_leak - I_up + I_xfer -
-                 (I_bCa + I_pCa - 2.0 * I_NaCa) * Cm_cell / (2.0 * V_c * FF) * 1e6)
+        dCa_i = Ca_i_bufc * (
+            I_leak - I_up + I_xfer -
+                (I_bCa + I_pCa - 2.0 * I_NaCa) * Cm_cell / (2.0 * V_c * FF) * 1.0e6
+        )
         dCa_SR = Ca_sr_bufsr * (V_c / V_sr) * (I_up - I_rel - I_leak)
-        dCa_ss = Ca_ss_bufss * (-I_CaL * Cm_cell / (2.0 * V_ss * FF) * 1e6 +
-                  I_rel * V_sr / V_ss - I_xfer * V_c / V_ss)
+        dCa_ss = Ca_ss_bufss * (
+            -I_CaL * Cm_cell / (2.0 * V_ss * FF) * 1.0e6 +
+                I_rel * V_sr / V_ss - I_xfer * V_c / V_ss
+        )
 
         # Sodium and potassium concentration ODEs
         dNa_i = -(I_Na + I_bNa + 3.0 * I_NaK + 3.0 * I_NaCa) *
-                 Cm_cell / (V_c * FF) * 1e6
+            Cm_cell / (V_c * FF) * 1.0e6
         dK_i = -(I_K1 + I_to + I_Kr + I_Ks + I_pK - 2.0 * I_NaK) *
-                Cm_cell / (V_c * FF) * 1e6
+            Cm_cell / (V_c * FF) * 1.0e6
 
         # --- Write derivatives ---
         # dV/dt = -(sum of ionic currents) + stimulus. Currents are already in pA/pF
         # (≡ mV/ms); Cm_cell appears only in the concentration-update conversions
         # below. This matches the TT06 CellML membrane equation.
-        du[i]        = -I_ion + stim_dvdt
-        du[1N + i]   = dXr1
-        du[2N + i]   = dXr2
-        du[3N + i]   = dXs
-        du[4N + i]   = dm
-        du[5N + i]   = dh
-        du[6N + i]   = dj
-        du[7N + i]   = dd
-        du[8N + i]   = df
-        du[9N + i]   = df2
-        du[10N + i]  = dfCass
-        du[11N + i]  = ds
-        du[12N + i]  = dr
-        du[13N + i]  = dCa_i
-        du[14N + i]  = dCa_SR
-        du[15N + i]  = dCa_ss
-        du[16N + i]  = dR_prime
-        du[17N + i]  = dNa_i
-        du[18N + i]  = dK_i
+        du[i] = -I_ion + stim_dvdt
+        du[1N + i] = dXr1
+        du[2N + i] = dXr2
+        du[3N + i] = dXs
+        du[4N + i] = dm
+        du[5N + i] = dh
+        du[6N + i] = dj
+        du[7N + i] = dd
+        du[8N + i] = df
+        du[9N + i] = df2
+        du[10N + i] = dfCass
+        du[11N + i] = ds
+        du[12N + i] = dr
+        du[13N + i] = dCa_i
+        du[14N + i] = dCa_SR
+        du[15N + i] = dCa_ss
+        du[16N + i] = dR_prime
+        du[17N + i] = dNa_i
+        du[18N + i] = dK_i
     end
 
     return nothing

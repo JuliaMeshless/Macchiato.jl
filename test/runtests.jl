@@ -1,9 +1,12 @@
 using Macchiato
-using TestItemRunner
 using Test
 
-@run_package_tests
 testfiles = [
+    "aqua.jl",
+    "core/test_domain.jl",
+    "core/test_utils.jl",
+    "operators/test_upwinding.jl",
+    "io/test_io.jl",
     "end_2_end/2d_Laplacian_MoMS.jl",
     "simulation/test_set.jl",
     "simulation/test_simulation.jl",

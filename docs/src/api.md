@@ -9,7 +9,7 @@ CurrentModule = Macchiato
 ```@docs
 Domain
 add!
-delete!
+delete!(::Domain, ::AbstractModel)
 ```
 
 ## Models
@@ -120,6 +120,7 @@ set!
 ## Field Extraction
 
 ```@docs
+solution
 temperature
 velocity
 pressure
