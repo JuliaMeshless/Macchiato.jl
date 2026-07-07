@@ -104,3 +104,18 @@ end
         @test !MM._has_field(sim, :p)
     end
 end
+
+@testset "solution accessor" begin
+    domain = create_test_domain()
+    sim = Simulation(domain)
+
+    @test_throws ArgumentError solution(sim)
+
+    set!(sim, T = 300.0)
+    @test solution(sim) === sim.u0
+
+    run!(sim)
+    @test solution(sim) === sim._solution
+    @test solution(sim) == temperature(sim)
+    @test length(solution(sim)) == length(domain.cloud)
+end
