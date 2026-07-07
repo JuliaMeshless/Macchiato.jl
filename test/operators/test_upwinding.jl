@@ -14,16 +14,16 @@ unit_square_grid(n = 11) = [
 
     @testset "advective derivative of linear field is exact" begin
         for θ in (0.0, 0.5, 1.0)
-            @test dux(ϕ_lin, ones(N), θ) ≈ fill(2.0, N) atol = 1e-6
+            @test dux(ϕ_lin, ones(N), θ) ≈ fill(2.0, N) atol = 1.0e-6
         end
     end
 
     @testset "operator scales by velocity" begin
-        @test dux(ϕ_lin, fill(2.0, N), 1.0) ≈ fill(4.0, N) atol = 1e-6
+        @test dux(ϕ_lin, fill(2.0, N), 1.0) ≈ fill(4.0, N) atol = 1.0e-6
     end
 
     @testset "negative velocity switches stencil" begin
-        @test dux(ϕ_lin, -ones(N), 1.0) ≈ fill(-2.0, N) atol = 1e-6
+        @test dux(ϕ_lin, -ones(N), 1.0) ≈ fill(-2.0, N) atol = 1.0e-6
     end
 
     @testset "zero velocity yields zero advection" begin
@@ -50,14 +50,14 @@ unit_square_grid(n = 11) = [
         result = du(ϕ_lin, [1.0], 1.0)
 
         @test length(result) == 1
-        @test result[1] ≈ 2.0 atol = 1e-6
+        @test result[1] ≈ 2.0 atol = 1.0e-6
     end
 
     @testset "keyword overrides accepted" begin
         dux_k = upwind(data, 1; k = 15)
-        @test dux_k(ϕ_lin, ones(N), 1.0) ≈ fill(2.0, N) atol = 1e-6
+        @test dux_k(ϕ_lin, ones(N), 1.0) ≈ fill(2.0, N) atol = 1.0e-6
 
         dux_Δ = upwind(data, 1; Δ = 0.05)
-        @test dux_Δ(ϕ_lin, ones(N), 1.0) ≈ fill(2.0, N) atol = 1e-6
+        @test dux_Δ(ϕ_lin, ones(N), 1.0) ≈ fill(2.0, N) atol = 1.0e-6
     end
 end

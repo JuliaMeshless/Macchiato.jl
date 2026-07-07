@@ -10,10 +10,12 @@ using GLMakie: Figure, Axis3, meshscatter!, display
 
 Lx, Ly, Lz = 20.0, 7.0, 3.0
 
-vertices = Point.([
-    (0.0, 0.0, 0.0), (Lx, 0.0, 0.0), (Lx, Ly, 0.0), (0.0, Ly, 0.0),
-    (0.0, 0.0, Lz),  (Lx, 0.0, Lz),  (Lx, Ly, Lz),  (0.0, Ly, Lz),
-])
+vertices = Point.(
+    [
+        (0.0, 0.0, 0.0), (Lx, 0.0, 0.0), (Lx, Ly, 0.0), (0.0, Ly, 0.0),
+        (0.0, 0.0, Lz), (Lx, 0.0, Lz), (Lx, Ly, Lz), (0.0, Ly, Lz),
+    ]
+)
 
 triangles = [
     connect((1, 3, 2), Triangle), connect((1, 4, 3), Triangle),
@@ -47,7 +49,7 @@ cloud = WhatsThePoint.discretize(boundary, spacing; alg, max_points = target_vol
 
 # Filter volume points against the known domain bounding box
 function extract_coords(ptcloud)
-    map(WhatsThePoint.points(ptcloud)) do p
+    return map(WhatsThePoint.points(ptcloud)) do p
         c = coords(p)
         SVector(ustrip(c.x), ustrip(c.y), ustrip(c.z))
     end

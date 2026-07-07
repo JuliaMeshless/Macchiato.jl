@@ -66,10 +66,10 @@ function run_and_report(; dt, BCL = 1000.0, n_beats = 10, stim_amp = 52.0, stim_
     println("── dt = $dt ms, $n_beats beats @ BCL = $BCL ms ──")
     ts, Vs, dVdt = pace(; dt, BCL, n_beats, stim_amp, stim_dur)
     m = compute_metrics(ts, Vs, dVdt)
-    println("  V_rest    = $(round(m.V_rest;    digits = 2)) mV    [expect ≈ -85 to -87]")
-    println("  V_peak    = $(round(m.V_peak;    digits = 2)) mV    [expect ≈ +35 to +55]")
-    println("  dV/dt max = $(round(m.dVdt_max;  digits = 1)) mV/ms [expect ≈ 250-300]")
-    println("  APD90     = $(round(m.APD90;     digits = 1)) ms    [expect ≈ 270-310]")
+    println("  V_rest    = $(round(m.V_rest; digits = 2)) mV    [expect ≈ -85 to -87]")
+    println("  V_peak    = $(round(m.V_peak; digits = 2)) mV    [expect ≈ +35 to +55]")
+    println("  dV/dt max = $(round(m.dVdt_max; digits = 1)) mV/ms [expect ≈ 250-300]")
+    println("  APD90     = $(round(m.APD90; digits = 1)) ms    [expect ≈ 270-310]")
     return ts, Vs, m
 end
 
@@ -82,10 +82,12 @@ function main()
     ts_fine, Vs_fine, _ = run_and_report(; dt = 0.002)
 
     fig = Figure(; size = (900, 400))
-    ax = Axis(fig[1, 1]; xlabel = "time (ms)", ylabel = "V (mV)",
-              title = "TT06 epi — last beat (BCL=1000 ms)")
+    ax = Axis(
+        fig[1, 1]; xlabel = "time (ms)", ylabel = "V (mV)",
+        title = "TT06 epi — last beat (BCL=1000 ms)"
+    )
     lines!(ax, ts_coarse, Vs_coarse; label = "dt = 0.01 ms")
-    lines!(ax, ts_fine,   Vs_fine;   label = "dt = 0.002 ms")
+    lines!(ax, ts_fine, Vs_fine; label = "dt = 0.002 ms")
     axislegend(ax)
     save(joinpath(@__DIR__, "tt06_single_cell_ap.png"), fig)
     println("\nAction potentials saved to tt06_single_cell_ap.png")
