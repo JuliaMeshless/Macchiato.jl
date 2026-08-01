@@ -112,49 +112,62 @@ function write_bc_dirichlet!(
     return
 end
 
-function write_bc_neumann!(
-        A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        ids, boundary, surf, domain, scheme, t = 0.0; kwargs...
-    ) where {TA, TB}
-    normals = normal(surf)
+"""
+    scatter_rows!(A, rows, R)
 
-    for (local_i, global_i) in enumerate(ids)
-        x = get_node_coords(surf, local_i)
-        nbs, weights = compute_local_derivative_weights(
-            surf, domain, scheme, A, global_i, local_i, normals; kwargs...
+Overwrite `A[rows[r], :]` with `R[r, :]`, in place.
+
+Each row of `R` must be supported on columns already stored in the
+corresponding row of `A`; throws otherwise.
+"""
+function scatter_rows!(A::SparseMatrixCSC, rows, R::SparseMatrixCSC)
+    zero_rows!(A, Set(rows))
+    rowv = collect(rows)
+    Ir, Jr, Vr = findnz(R)
+    @inbounds for t in eachindex(Ir)
+        i, j = rowv[Ir[t]], Jr[t]
+        rng = A.colptr[j]:(A.colptr[j + 1] - 1)
+        p = searchsortedfirst(view(A.rowval, rng), i)
+        (p <= length(rng) && A.rowval[rng[p]] == i) || throw(
+            ArgumentError(
+                "boundary row $i has support at column $j that the assembled operator " *
+                    "does not: the boundary and interior stencils disagree. Pass the same " *
+                    "`adjl` to both, or omit it from both."
+            )
         )
-
-        sv = SparseVector(size(A, 2), nbs, weights)
-        A[global_i, :] = sv
-        b[global_i] = convert(TB, boundary(x, t))
+        A.nzval[rng[p]] = Vr[t]
     end
+    return A
+end
+
+# Writes `β ∂u/∂n + α u = g` on `ids`. Neumann is α = 0, β = 1; Robin takes α
+# and β from the boundary condition.
+function write_bc_derivative_block!(
+        A::AbstractMatrix{TA}, b::AbstractVector{TB},
+        ids, boundary, surf, domain, scheme, α_val, β_val, t = 0.0; kwargs...
+    ) where {TA, TB}
+    n = length(ids)
+    R = convert(TA, β_val) .*
+        derivative_rows(surf, domain, scheme, ids, normal(surf); kwargs...)
+    if !iszero(α_val)
+        # α on the diagonal, added as a block rather than element by element.
+        R += sparse(1:n, collect(ids), fill(convert(TA, α_val), n), n, size(A, 2))
+    end
+    for (local_i, global_i) in enumerate(ids)
+        b[global_i] = convert(TB, boundary(get_node_coords(surf, local_i), t))
+    end
+    scatter_rows!(A, ids, R)
     return
 end
 
-function write_bc_robin!(
-        A::AbstractMatrix{TA}, b::AbstractVector{TB},
-        ids, boundary, surf, domain, scheme, t = 0.0; kwargs...
-    ) where {TA, TB}
-    α_val = convert(TA, α(boundary))
-    β_val = convert(TA, β(boundary))
-    normals = normal(surf)
+function write_bc_neumann!(A, b, ids, boundary, surf, domain, scheme, t = 0.0; kwargs...)
+    return write_bc_derivative_block!(
+        A, b, ids, boundary, surf, domain, scheme, 0.0, 1.0, t; kwargs...
+    )
+end
 
-    for (local_i, global_i) in enumerate(ids)
-        x = get_node_coords(surf, local_i)
-        nbs, weights = compute_local_derivative_weights(
-            surf, domain, scheme, A, global_i, local_i, normals; kwargs...
-        )
-
-        robin_weights = β_val .* weights
-        diag_idx = searchsortedfirst(nbs, global_i)
-        (diag_idx <= length(nbs) && nbs[diag_idx] == global_i) || throw(
-            ArgumentError("Robin BC: boundary node $global_i is not in its own stencil; cannot add the α·u diagonal term.")
-        )
-        robin_weights[diag_idx] += α_val
-
-        sv = SparseVector(size(A, 2), nbs, robin_weights)
-        A[global_i, :] = sv
-        b[global_i] = convert(TB, boundary(x, t))
-    end
-    return
+function write_bc_robin!(A, b, ids, boundary, surf, domain, scheme, t = 0.0; kwargs...)
+    return write_bc_derivative_block!(
+        A, b, ids, boundary, surf, domain, scheme, α(boundary), β(boundary), t; kwargs...
+    )
 end

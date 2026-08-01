@@ -7,29 +7,48 @@ Compute interpolation weights at a point, returning dense vector.
 end
 
 """
-Compute derivative weights for a boundary point using standard directional derivative.
-No shadow points - uses direct finite difference.
-Returns (neighbor_indices, weights).
+    derivative_rows(surf, domain, scheme, ids, normals; adjl=nothing, kwargs...)
+
+Weights of `∂/∂n` at the boundary nodes `ids`, as a
+`length(ids) × length(cloud)` sparse block whose row `r` corresponds to node
+`ids[r]`.
+
+`adjl`, when given, lists every cloud node's stencil by global index; otherwise
+stencils are the `DEFAULT_STENCIL_SIZE` nearest neighbours. `basis` must match
+the one the interior operator was built with.
 """
-function compute_local_derivative_weights(
-        surf, domain, shadow_op::Nothing, A, global_i, local_i, normals; kwargs...
+function derivative_rows(
+        surf, domain, ::Nothing, ids, normals;
+        adjl = nothing, basis = PHS(3; poly_deg = 2), kwargs...
     )
+    coords = _ustrip(_coords(domain.cloud))
+    eval_points = coords[ids]
 
-    # Get neighbors from A (assuming structural symmetry)
-    nbs = A.rowval[A.colptr[global_i]:(A.colptr[global_i + 1] - 1)]
+    # Stencils may reach interior nodes, so the data set is the whole cloud and
+    # only the evaluation set is restricted to this surface.
+    stencils = isnothing(adjl) ?
+        find_neighbors(coords, eval_points, DEFAULT_STENCIL_SIZE) : adjl[ids]
 
-    # Get coords
-    surf_pt = get_node_coords(surf, local_i)
-    nbs_coords = [get_node_coords(domain.cloud, nb) for nb in nbs]
+    # ∂/∂n = Σ_d n_d ∂/∂x_d, combined from one batched Jacobian.
+    G = gradient(coords; eval_points = eval_points, adjl = stencils, basis = basis)
+    n = ustrip.(normals)
+    return mapreduce(+, enumerate(weights(G))) do (d, W)
+        Diagonal(getindex.(n, d)) * W
+    end
+end
 
-    # Compute weights
-    n = ustrip.(normals[local_i])
-    d = directional(nbs_coords, n; eval_points = [surf_pt])
-
-    # Collect to dense to preserve precision
-    W = weights(d)
-    w = W isa AbstractVector ? collect(W) : collect(W[1, :])
-    return nbs, w
+# Shadow-point schemes have no batched form; build the same block node by node.
+function derivative_rows(surf, domain, scheme, ids, normals; kwargs...)
+    I, J, V = Int[], Int[], Float64[]
+    for (local_i, global_i) in enumerate(ids)
+        nbs, w = compute_local_derivative_weights(
+            surf, domain, scheme, nothing, global_i, local_i, normals; kwargs...
+        )
+        append!(I, fill(local_i, length(nbs)))
+        append!(J, nbs)
+        append!(V, w)
+    end
+    return sparse(I, J, V, length(ids), length(domain.cloud))
 end
 
 """
