@@ -6,11 +6,11 @@ Macchiato.jl is not limited to the built-in physics models — you can define an
 
 We solve the 2D Poisson equation:
 
-```
-∇²u = f    on Ω = [0, 1]²
+```math
+\nabla^2 u = f \quad \text{on} \quad \Omega = [0, 1]^2
 ```
 
-with Dirichlet boundary conditions ``u = g`` on ``∂Ω``.
+with Dirichlet boundary conditions ``u = g`` on ``\partial\Omega``.
 
 We use a **manufactured solution** to verify correctness. Choose an exact solution and derive the source term and BCs from it:
 
@@ -99,7 +99,7 @@ f_source(x, t) = -2π^2 * sin(π * x[1]) * sin(π * x[2])
 part = PointBoundary(rectangle(1m, 1m)...)
 split_surface!(part, 75°)
 dx = 1/33 * m
-cloud = discretize(part, ConstantSpacing(dx), alg=VanDerSandeFornberg())
+cloud = discretize(part, ConstantSpacing(dx))
 
 # Model
 model = PoissonModel(f_source)

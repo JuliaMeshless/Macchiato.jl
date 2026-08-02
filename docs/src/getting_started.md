@@ -55,10 +55,12 @@ Splitting at corners creates named surfaces so you can assign different boundary
 ```@example getting_started
 # Discretize: place interior points at ~1/33 m spacing
 dx = 1/33 * m
-cloud = discretize(part, ConstantSpacing(dx), alg=VanDerSandeFornberg())
+cloud = discretize(part, ConstantSpacing(dx))
 ```
 
-The resulting `PointCloud` contains both boundary points (organized by surface) and interior (volume) points.
+The resulting `PointCloud` contains both boundary points (organized by surface) and interior (volume)
+points. In 2D, `discretize` uses the Fornberg–Flyer advancing-front algorithm; pass `alg=` to choose
+a different one in 3D.
 
 ## Step 2: Define the Physics Model
 
@@ -126,19 +128,47 @@ The `Domain` validates that every BC key matches a surface in the point cloud.
 
 ## Step 5: Create and Run the Simulation
 
+The same `domain` solves either way — only the simulation mode changes. [`Simulation`](@ref)
+defaults to steady-state when no mode is given.
+
+:::tabs
+
+== Steady-State
+
 ```@example getting_started
 sim = Simulation(domain)
 run!(sim)
 ```
 
-[`Simulation`](@ref) defaults to steady-state when no mode is given:
-- **`Steady()` (default)** — assembles `Ax = b` and solves with LinearSolve.jl
-- **`Transient(Δt=..., stop_time=...)`** — builds an ODE right-hand side and integrates with OrdinaryDiffEq.jl
+`run!` calls `LinearSolve.LinearProblem(domain)` internally, which:
 
-For steady-state, `run!` calls `LinearSolve.LinearProblem(domain)` internally, which:
 1. Asks the model to build its system matrix and RHS via `make_system`
 2. Applies each BC by modifying the appropriate matrix rows
-3. Solves the sparse linear system
+3. Solves the sparse linear system with LinearSolve.jl
+
+== Transient
+
+Pass `Transient(Δt=..., stop_time=...)` and set an initial condition. `run!` then builds an ODE
+right-hand side via `make_f` and integrates it with OrdinaryDiffEq.jl.
+
+```@example getting_started
+sim_transient = Simulation(domain, Transient(Δt=0.001, stop_time=1.0))
+
+# Uniform initial temperature...
+set!(sim_transient, T=0.0)
+
+# ...or a function of position
+set!(sim_transient, T=x -> 50.0 * exp(-10 * ((x[1]-0.5)^2 + (x[2]-0.5)^2)))
+
+# Implicit FBDF solver by default — diffusion is stiff
+run!(sim_transient)
+
+T_final = temperature(sim_transient)
+```
+
+:::
+
+The rest of this guide uses the steady-state `sim`.
 
 ## Step 6: Extract and Visualize Results
 
@@ -167,22 +197,8 @@ Each physics model has dedicated field extraction functions:
 - `displacement(sim)` — for `LinearElasticity`, returns `(ux, uy)` or `(ux, uy, uz)`
 - `velocity(sim)`, `pressure(sim)` — for `IncompressibleNavierStokes`
 
-## Going Transient
+## Next Steps
 
-Converting the same problem to a transient simulation requires minimal changes — add a time step and stop time, and set initial conditions:
-
-```@example getting_started
-# Same domain as before
-sim = Simulation(domain, Transient(Δt=0.001, stop_time=1.0))
-
-# Set initial temperature to 0 everywhere
-set!(sim, T=0.0)
-
-# Or use a function of position
-set!(sim, T=x -> 50.0 * exp(-10 * ((x[1]-0.5)^2 + (x[2]-0.5)^2)))
-
-# Run transient simulation (implicit FBDF solver by default — diffusion is stiff)
-run!(sim)
-
-T_final = temperature(sim)
-```
+- [Custom PDEs](@ref) — solve your own equation instead of a built-in model
+- [Examples](@ref) — complete worked examples, including linear elasticity
+- [Package Design](@ref) — how the pieces fit together, and how to add new physics

@@ -1,5 +1,6 @@
 using Macchiato
 using Documenter
+using DocumenterVitepress
 
 DocMeta.setdocmeta!(
     Macchiato, :DocTestSetup, :(using Macchiato); recursive = true
@@ -10,25 +11,29 @@ makedocs(;
     authors = "Kyle Beggs",
     sitename = "Macchiato.jl",
     repo = Documenter.Remotes.GitHub("JuliaMeshless", "Macchiato.jl"),
-    format = Documenter.HTML(;
-        prettyurls = get(ENV, "CI", "false") == "true",
-        canonical = "https://JuliaMeshless.github.io/Macchiato.jl",
-        edit_link = "main",
-        assets = String[]
+    format = DocumenterVitepress.MarkdownVitepress(;
+        repo = "github.com/JuliaMeshless/Macchiato.jl",
+        devbranch = "main",
+        devurl = "dev",
+        build_vitepress = (!haskey(ENV, "VITEPRESS_DEV"))
     ),
     warnonly = [:missing_docs],
     pages = [
-        "Home" => "index.md",
-        "Getting Started" => "getting_started.md",
-        "Custom PDEs" => "custom_pdes.md",
-        "Examples" => "examples.md",
-        "Package Design" => "design.md",
+        "Getting Started" => [
+            "Quick Start" => "getting_started.md",
+            "Custom PDEs" => "custom_pdes.md",
+        ],
+        "Manual" => [
+            "Examples" => "examples.md",
+            "Package Design" => "design.md",
+        ],
         "API Reference" => "api.md",
-    ]
+    ],
+    clean = false
 )
 
-deploydocs(;
+DocumenterVitepress.deploydocs(;
     repo = "github.com/JuliaMeshless/Macchiato.jl",
     devbranch = "main",
-    versions = ["stable" => "v^", "dev" => "dev"]
+    push_preview = true
 )

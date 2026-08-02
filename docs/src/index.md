@@ -1,14 +1,67 @@
+```@raw html
+---
+layout: home
+
+hero:
+  name: "Macchiato.jl"
+  text: "PDEs on scattered point clouds"
+  tagline: Define any equation with a small model interface — no mesh, no element quality, no remeshing.
+  image:
+    src: /hero.png
+    alt: Cantilever beam point cloud coloured by displacement magnitude
+  actions:
+    - theme: brand
+      text: Get Started
+      link: /getting_started
+    - theme: alt
+      text: Custom PDEs
+      link: /custom_pdes
+    - theme: alt
+      text: API Reference
+      link: /api
+    - theme: alt
+      text: View on GitHub
+      link: https://github.com/JuliaMeshless/Macchiato.jl
+
+features:
+  - icon: 🧩
+    title: Any PDE, Not Just Ours
+    details: Implement two methods — assemble a system, or return a time-derivative — and Macchiato handles operators, boundary conditions, and time integration for your equation.
+    link: /custom_pdes
+  - icon: 🔥
+    title: Built-in Physics
+    details: Heat transfer, linear elasticity, and incompressible flow ship ready to use, as convenience models built on the same public interface you would use yourself.
+    link: /api
+  - icon: 🧱
+    title: Boundary Conditions That Read Like Physics
+    details: Dirichlet, Neumann, and Robin conditions with named aliases — write Temperature, HeatFlux, or Convection instead of remembering which generic type maps to which.
+    link: /design
+  - icon: ⏱️
+    title: Steady and Transient
+    details: The same domain solves either way. Steady-state assembles one linear system; transient hands an ODE function to OrdinaryDiffEq, defaulting to an implicit solver because diffusion is stiff.
+    link: /getting_started
+  - icon: 🫧
+    title: Meshless Geometry
+    details: Drop points on the boundary, fill the interior, and refine by adding points where you need accuracy. No connectivity, no element quality, no remeshing.
+    link: /design
+  - icon: 📤
+    title: Fields Out, VTK Out
+    details: Pull named fields straight off a simulation with temperature or displacement, or export the whole point cloud to VTK for ParaView.
+    link: /api
+---
+```
+
 ```@meta
 CurrentModule = Macchiato
 ```
 
-# Macchiato.jl
+```@raw html
+<div class="vp-doc quick-example" style="width:80%; margin:auto">
+```
 
-Solve partial differential equations on scattered point clouds — no mesh required.
+## Quick Example
 
-Macchiato.jl is a **general-purpose meshless PDE framework**. Define any PDE by implementing a small model interface, and Macchiato handles operator assembly, boundary condition application, and time integration. The package ships with ready-to-use models for heat transfer, linear elasticity, and fluid dynamics — but these are convenience built-ins, not the whole story. See [Custom PDEs](@ref) to learn how to solve your own equations.
-
-## Quick Start
+Steady-state heat conduction on a unit square, from geometry to temperature field:
 
 ```@setup quickstart
 import WhatsThePoint as WTP
@@ -40,7 +93,7 @@ using Unitful: m, °
 # 1. Geometry: 1m × 1m rectangle point cloud
 part = PointBoundary(rectangle(1m, 1m)...)
 split_surface!(part, 75°)
-cloud = discretize(part, ConstantSpacing(1/33 * m), alg=VanDerSandeFornberg())
+cloud = discretize(part, ConstantSpacing(1/33 * m))
 
 # 2. Boundary conditions
 bcs = Dict(
@@ -57,16 +110,33 @@ run!(sim)
 
 # 4. Extract results
 T = temperature(sim)
+extrema(T)   # (coldest, hottest)
+```
+
+That is the whole workflow. [Getting Started](@ref) walks through each step in detail, and
+[Custom PDEs](@ref) shows how to swap `SolidEnergy` for an equation of your own.
+
+## Installation
+
+```julia
+using Pkg
+Pkg.add(url="https://github.com/JuliaMeshless/Macchiato.jl")
 ```
 
 ## Gallery
 
-| Heat Conduction | Cantilever Beam |
-|:---:|:---:|
-| ![2D temperature field](assets/heat_2d.png) | ![2D beam displacement](assets/cantilever_beam_2d.png) |
-| Steady-state temperature on a unit square | Displacement magnitude under end shear |
+```@raw html
+<div class="gallery-grid">
+```
 
-See the [Examples](@ref) page for complete worked examples with visualization code.
+![Steady-state temperature on a unit square](assets/heat_2d.png) ![Displacement magnitude under end shear](assets/cantilever_beam_2d.png)
+
+```@raw html
+</div>
+```
+
+Steady-state temperature on a unit square, and displacement magnitude in a cantilever beam under
+end shear. See the [Examples](@ref) page for the code behind both.
 
 ## Why Meshless Methods?
 
@@ -80,23 +150,30 @@ Macchiato.jl uses **radial basis function (RBF)** collocation, where differentia
 
 ## The JuliaMeshless Ecosystem
 
-Macchiato.jl is part of the [JuliaMeshless](https://github.com/JuliaMeshless) organization — three composable packages that form a complete simulation pipeline:
+Macchiato.jl is the physics layer of [JuliaMeshless](https://github.com/JuliaMeshless) — three
+composable packages that form a complete simulation pipeline.
 
+```@raw html
+<div class="ecosystem-flow">
+  <a class="ecosystem-card" href="https://github.com/JuliaMeshless/WhatsThePoint.jl">
+    <div class="ecosystem-stage">Geometry</div>
+    <h3>WhatsThePoint.jl</h3>
+    <p>Boundary creation, surface splitting, interior fill, and point repulsion.</p>
+  </a>
+  <div class="ecosystem-arrow" aria-hidden="true">→</div>
+  <a class="ecosystem-card" href="https://github.com/JuliaMeshless/RadialBasisFunctions.jl">
+    <div class="ecosystem-stage">Numerics</div>
+    <h3>RadialBasisFunctions.jl</h3>
+    <p>RBF interpolation and differential operators (∇², ∂/∂x, custom) with KNN stencil selection.</p>
+  </a>
+  <div class="ecosystem-arrow" aria-hidden="true">→</div>
+  <a class="ecosystem-card ecosystem-card-active" href="https://github.com/JuliaMeshless/Macchiato.jl">
+    <div class="ecosystem-stage">PDE Framework</div>
+    <h3>Macchiato.jl</h3>
+    <p>Model interface, boundary conditions, simulation and time stepping, field extraction and VTK I/O.</p>
+  </a>
+</div>
 ```
-┌─────────────────────┐     ┌──────────────────────────┐     ┌─────────────────────────────┐
-│   WhatsThePoint.jl  │     │ RadialBasisFunctions.jl  │     │  Macchiato.jl               │
-│                     │     │                          │     │                             │
-│  Boundary creation  │────▶│  RBF interpolation       │────▶│  PDE model interface        │
-│  Surface splitting  │     │  Differential operators  │     │  Boundary conditions        │
-│  Interior fill      │     │  (∇², ∂/∂x, custom)      │     │  Simulation & time stepping │
-│  Point repulsion    │     │  KNN stencil selection   │     │  Field extraction & VTK I/O │
-└─────────────────────┘     └──────────────────────────┘     └─────────────────────────────┘
-        Geometry                   Numerics                      PDE Framework
-```
-
-- [**WhatsThePoint.jl**](https://github.com/JuliaMeshless/WhatsThePoint.jl) — Point cloud generation from geometric primitives, surface splitting, interior fill, and point repulsion.
-- [**RadialBasisFunctions.jl**](https://github.com/JuliaMeshless/RadialBasisFunctions.jl) — RBF interpolation and meshless differential operators (Laplacian, partial, gradient, custom) with automatic stencil selection.
-- [**Macchiato.jl**](https://github.com/JuliaMeshless/Macchiato.jl) — General-purpose PDE framework: define custom models or use built-in physics (heat, elasticity, fluids), with boundary conditions, steady-state and transient solvers, field extraction, and VTK export.
 
 ## Built-in Models
 
@@ -115,3 +192,7 @@ Macchiato ships with ready-to-use models for common physics. You can also [defin
 - [Examples](@ref) — complete worked examples with visualization
 - [Package Design](@ref) — architecture and extension guide
 - [API Reference](@ref) — full type and function documentation
+
+```@raw html
+</div>
+```

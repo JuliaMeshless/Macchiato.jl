@@ -6,9 +6,7 @@ This page describes the architecture of Macchiato.jl for users who want to under
 
 Every simulation follows the same pipeline:
 
-```
-Geometry → Model → BCs → Domain → Simulation → Results
-```
+> **Geometry** → **Model** → **BCs** → **Domain** → **Simulation** → **Results**
 
 1. **Geometry** — WhatsThePoint.jl creates a `PointCloud` with boundary surfaces and interior points
 2. **Model** — Choose a physics model (`SolidEnergy`, `LinearElasticity`, etc.)

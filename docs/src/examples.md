@@ -2,9 +2,8 @@
 
 ## 2D Heat Conduction
 
-Steady-state heat conduction on a 1m × 1m square with fixed temperatures on each edge.
-
-### Steady-State
+Heat conduction on a 1m × 1m square with fixed temperatures on each edge. The same `Domain` solves
+either steady-state or transient — only the `Simulation` changes.
 
 ```@setup heat
 import WhatsThePoint as WTP
@@ -29,6 +28,10 @@ function rectangle(Lx, Ly; n=100)
 end
 ```
 
+:::tabs
+
+== Steady-State
+
 ```@example heat
 using WhatsThePoint
 using WhatsThePoint: coords
@@ -41,7 +44,7 @@ using CairoMakie
 dx = 1/33 * m
 part = PointBoundary(rectangle(1m, 1m)...)
 split_surface!(part, 75°)
-cloud = discretize(part, ConstantSpacing(dx), alg=VanDerSandeFornberg())
+cloud = discretize(part, ConstantSpacing(dx))
 
 # Boundary conditions & model
 bcs = Dict(
@@ -69,9 +72,10 @@ Colorbar(fig[1, 2], sc; label="T")
 fig
 ```
 
-### Transient
+== Transient
 
-The same geometry and BCs can be run as a transient simulation by providing a time step and stop time:
+Reusing the `domain` built above, pass a `Transient` mode with a time step and stop time. An
+initial condition is required — `set!` fills the field before the first step.
 
 ```@example heat
 sim = Simulation(domain, Transient(Δt=0.001, stop_time=0.01))
@@ -80,6 +84,8 @@ run!(sim)
 
 T_final = temperature(sim)
 ```
+
+:::
 
 ## 2D Cantilever Beam (Linear Elasticity)
 
@@ -91,12 +97,14 @@ Geometry: L × 2D beam, x ∈ [0, L], y ∈ [-D, D]. The left end is clamped (pr
 
 Timoshenko beam solution (plane stress):
 
-```
-u(x,y) = -P/(6EI) [y((6L-3x)x + (2+ν)(y²-D²))]
-v(x,y) =  P/(6EI) [3νy²(L-x) + (4+5ν)D²x + (3L-x)x²]
+```math
+\begin{aligned}
+u(x,y) &= -\frac{P}{6EI} \left[ y \left( (6L - 3x)x + (2 + \nu)(y^2 - D^2) \right) \right] \\
+v(x,y) &= \phantom{-}\frac{P}{6EI} \left[ 3\nu y^2 (L - x) + (4 + 5\nu) D^2 x + (3L - x)x^2 \right]
+\end{aligned}
 ```
 
-where I = 2D³/3 is the second moment of area.
+where ``I = 2D^3/3`` is the second moment of area.
 
 ### Full Example
 
@@ -144,7 +152,7 @@ areas = fill(dx, length(pts))
 part = PointBoundary(pts, nrms, areas)
 split_surface!(part, 75°)
 
-cloud = WTP.discretize(part, ConstantSpacing(dx), alg=VanDerSandeFornberg())
+cloud = WTP.discretize(part, ConstantSpacing(dx))
 
 # Boundary conditions
 bc_left(x, t) = (u_exact(x[1], x[2]), v_exact(x[1], x[2]))
