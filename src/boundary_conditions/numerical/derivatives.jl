@@ -24,7 +24,7 @@ function compute_local_derivative_weights(
 
     # Compute weights
     n = ustrip.(normals[local_i])
-    d = directional(nbs_coords, [surf_pt], n)
+    d = directional(nbs_coords, n; eval_points = [surf_pt])
 
     # Collect to dense to preserve precision
     w = d.weights isa AbstractVector ? collect(d.weights) : collect(d.weights[1, :])

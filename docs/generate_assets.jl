@@ -46,7 +46,7 @@ function generate_heat_2d()
     part = PointBoundary(pts, nrms, areas)
     split_surface!(part, 75°)
 
-    cloud = WTP.discretize(part, ConstantSpacing(dx), alg = VanDerSandeFornberg())
+    cloud = WTP.discretize(part, ConstantSpacing(dx))
 
     bcs = Dict(
         :surface1 => MM.Temperature(0.0),
@@ -114,7 +114,7 @@ function generate_cantilever_beam_2d()
     part = PointBoundary(pts, nrms, areas)
     split_surface!(part, 75°)
 
-    cloud = WTP.discretize(part, ConstantSpacing(dx), alg = VanDerSandeFornberg())
+    cloud = WTP.discretize(part, ConstantSpacing(dx))
 
     bc_left(x, t) = (u_exact(x[1], x[2]), v_exact(x[1], x[2]))
     bc_right(x, t) = (0.0, P * (D^2 - x[2]^2) / (2I))
@@ -130,14 +130,7 @@ function generate_cantilever_beam_2d()
     domain = MM.Domain(cloud, bcs, model)
 
     sim = Simulation(domain)
-    set!(sim, ux = 0.0, uy = 0.0)
-
-    basis_kw = (; basis = PHS(3; poly_deg = 3))
-    prob = LinearSolve.LinearProblem(sim.domain; basis_kw...)
-    sol = LinearSolve.solve(prob)
-
-    sim._solution = sol.u
-    sim.iteration = 1
+    run!(sim; basis = PHS(3; poly_deg = 3))
 
     ux_sim, uy_sim = displacement(sim)
     displacement_mag = sqrt.(ux_sim .^ 2 .+ uy_sim .^ 2)

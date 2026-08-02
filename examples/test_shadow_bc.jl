@@ -49,7 +49,7 @@ println("   Surfaces: ", keys(part.surfaces))
 println("\n2. Creating point cloud...")
 
 Δ = dx
-cloud = WhatsThePoint.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
+cloud = WhatsThePoint.discretize(part, ConstantSpacing(Δ))
 
 println("   Total points in cloud: ", size(cloud))
 println("   Volume points: ", length(cloud.volume))

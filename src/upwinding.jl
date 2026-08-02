@@ -31,7 +31,7 @@ function upwind(
     Δ === nothing && (Δ = _find_smallest_dist(data, k))
     backward = ∂virtual(data, eval_points, dim, Δ, basis; backward = true, k = k)
     forward = ∂virtual(data, eval_points, dim, Δ, basis; backward = false, k = k)
-    center = partial(data, eval_points, 1, dim, basis; k = k)
+    center = partial(data, 1, dim; eval_points = eval_points, basis = basis, k = k)
 
     du = let backward = backward, forward = forward, center = center
         (ϕ, v, θ) -> begin

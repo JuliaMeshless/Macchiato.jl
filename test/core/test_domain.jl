@@ -9,7 +9,7 @@ include(joinpath(@__DIR__, "..", "end_2_end", "2d_square.jl"))
 
 function domain_test_cloud(dx = 1 / 17 * m)
     part = create_2d_square_domain(dx)
-    return WTP.discretize(part, ConstantSpacing(dx), alg = VanDerSandeFornberg())
+    return WTP.discretize(part, ConstantSpacing(dx))
 end
 
 function domain_test_bcs()

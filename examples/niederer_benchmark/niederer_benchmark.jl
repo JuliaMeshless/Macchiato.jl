@@ -121,6 +121,12 @@ function create_geometry(dx)
     println("Refined boundary mesh: $(length(collect(Meshes.elements(mesh)))) triangles")
 
     # 3. VdSF scattered volume fill at target spacing.
+    #
+    # NOT Octree, despite it being the preferred 3D algorithm elsewhere: Octree
+    # emits its volume points in metres regardless of the mesh's units, so on the
+    # mm-tagged geometry below `PointCloud` rejects the mm boundary / m volume
+    # pair ("boundary and volume CRS still differ"). Revisit once WhatsThePoint
+    # carries the mesh unit through the octree fill.
     boundary = PointBoundary(mesh)
     cloud = WhatsThePoint.discretize(boundary, ConstantSpacing(dx * mm); alg = VanDerSandeFornberg())
 
@@ -137,8 +143,8 @@ function create_geometry(dx)
     end
 
     # Defensive de-edging: the downstream BC code assumes each boundary point
-    # has a single unambiguous face. VdSF centroids are strictly interior to a
-    # triangle (hence to one cuboid face), so this should be a no-op in practice.
+    # has a single unambiguous face. Triangle centroids are strictly interior to
+    # a triangle (hence to one cuboid face), so this should be a no-op in practice.
     moved = dedge_boundary_points!(bnd_pts)
     moved > 0 && println("De-edged $moved boundary point(s) that straddled multiple faces")
 

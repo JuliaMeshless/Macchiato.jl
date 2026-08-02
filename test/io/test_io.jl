@@ -10,7 +10,7 @@ include(joinpath(@__DIR__, "..", "end_2_end", "2d_square.jl"))
 function create_io_test_points()
     dx = 1 / 9 * m
     part = create_2d_square_domain(dx)
-    cloud = WTP.discretize(part, ConstantSpacing(dx), alg = VanDerSandeFornberg())
+    cloud = WTP.discretize(part, ConstantSpacing(dx))
     return WTP.points(cloud)
 end
 

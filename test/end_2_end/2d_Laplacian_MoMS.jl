@@ -38,7 +38,7 @@ dx = 1 / 33 * m  # Resolution (33x33 gives 1089 points)
 part = create_2d_square_domain(dx)
 
 Δ = dx
-cloud = WTP.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
+cloud = WTP.discretize(part, ConstantSpacing(Δ))
 
 # ============================================================================
 # Step 3: Set up boundary conditions from analytical solution

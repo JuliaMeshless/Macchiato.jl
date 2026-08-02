@@ -118,8 +118,8 @@ function make_bc!(
     adjl = find_neighbors(coords_all, eval_pts, k)
 
     # Build operators (KernelAbstractions parallelizes internally)
-    ∂x_op = partial(coords_all, eval_pts, 1, 1; k = k, adjl = adjl, kwargs...)
-    ∂y_op = partial(coords_all, eval_pts, 1, 2; k = k, adjl = adjl, kwargs...)
+    ∂x_op = partial(coords_all, 1, 1; eval_points = eval_pts, k = k, adjl = adjl, kwargs...)
+    ∂y_op = partial(coords_all, 1, 2; eval_points = eval_pts, k = k, adjl = adjl, kwargs...)
 
     # Zero all traction BC rows in a single O(nnz) pass
     row_set = Set{Int}()

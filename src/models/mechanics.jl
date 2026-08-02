@@ -52,10 +52,10 @@ end
     _ℒ_mixed_partial(basis::AbstractRadialBasis)
 
 Mixed partial derivative ∂²/∂x∂y for radial basis functions.
-Uses the D² (directional second derivative) functor with orthogonal unit vectors.
+Uses the `∂mixed` functor, which evaluates ∂²φ/(∂x_dim1 ∂x_dim2) directly.
 """
 function _ℒ_mixed_partial(basis::RadialBasisFunctions.AbstractRadialBasis)
-    return RadialBasisFunctions.D²(basis, SVector(1.0, 0.0), SVector(0.0, 1.0))
+    return RadialBasisFunctions.∂mixed(basis, 1, 2)
 end
 
 """

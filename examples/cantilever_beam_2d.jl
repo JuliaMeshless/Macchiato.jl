@@ -88,7 +88,7 @@ split_surface!(part, 75°)
 # surface1=bottom, surface2=right, surface3=top, surface4=left
 
 Δ = dx
-cloud = WTP.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
+cloud = WTP.discretize(part, ConstantSpacing(Δ))
 
 # ============================================================================
 # Visualize Point Cloud
@@ -154,8 +154,9 @@ GC.gc()
 t_assembly = @elapsed prob = LinearSolve.LinearProblem(sim.domain; basis_kw...)
 t_solve = @elapsed sol = LinearSolve.solve(prob)
 
+# Assign the solution directly rather than calling `run!`, so the assembly and
+# solve above can be timed separately.
 sim._solution = sol.u
-sim.iteration = 1
 
 # ============================================================================
 # Compare with Analytical Solution

@@ -30,7 +30,7 @@ using WhatsThePoint, Macchiato, Unitful: m, °
 # (`rectangle` is a small boundary-builder helper defined in the Getting Started guide)
 part = PointBoundary(rectangle(1m, 1m)...)
 split_surface!(part, 75°)
-cloud = discretize(part, ConstantSpacing(1/33 * m), alg=VanDerSandeFornberg())
+cloud = discretize(part, ConstantSpacing(1/33 * m))
 
 # Physics + BCs
 model = SolidEnergy(k=1.0, ρ=1.0, cₚ=1.0)
@@ -85,4 +85,4 @@ Full documentation is available at [juliameshless.github.io/Macchiato.jl](https:
 
 ## Contributing
 
-Contributions are welcome! The package uses a dispatch-based design that makes it straightforward to add new physics domains. See the [Package Design](https://JuliaMeshless.github.io/Macchiato.jl/dev/design/) section of the docs for the architecture overview and extension guide.
+Contributions are welcome! The package uses a dispatch-based design that makes it straightforward to add new physics domains. See the [Package Design](https://JuliaMeshless.github.io/Macchiato.jl/dev/design) section of the docs for the architecture overview and extension guide.

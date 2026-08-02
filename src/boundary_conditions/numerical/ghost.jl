@@ -95,7 +95,7 @@ function build_neumann_diffusion(domain; k = DEFAULT_STENCIL_SIZE)
 
     n_ghost = j
     data_pts = vcat(all_pts, ghost_pts)
-    W_ext = laplacian(data_pts, all_pts; k = k).weights
+    W_ext = laplacian(data_pts; eval_points = all_pts, k = k).weights
     W_real = W_ext[:, 1:N]
     W_ghost = W_ext[:, (N + 1):(N + n_ghost)]
     T = sparse(rows, cols, vals, n_ghost, N)

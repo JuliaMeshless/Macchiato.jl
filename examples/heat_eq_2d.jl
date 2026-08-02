@@ -49,7 +49,7 @@ visualize(part; markersize = 1.5markersize, size = figsize)
 ##
 
 Δ = dx
-cloud = WhatsThePoint.discretize(part, ConstantSpacing(Δ), alg = VanDerSandeFornberg())
+cloud = WhatsThePoint.discretize(part, ConstantSpacing(Δ))
 
 visualize(cloud; markersize = markersize, size = figsize)
 #save(joinpath(@__DIR__, "rectangle-0.04.jld2"), Dict("cloud"=>cloud))
