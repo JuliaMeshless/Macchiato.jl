@@ -32,7 +32,7 @@ function _ensure_u0_initialized!(sim)
     if sim.u0 === nothing
         n_points = length(sim.domain.cloud)
         dim = _get_dimension(sim.domain)
-        n_vars = _num_vars(sim.domain.models, dim)
+        n_vars = num_vars(sim.domain.models, dim)
         sim.u0 = zeros(n_points * n_vars)
     end
     return nothing
@@ -103,7 +103,7 @@ function _field_indices(sim, field::Symbol)
             stop = start + n_points - 1
             return (start + (field_idx - 1) * n_points):(start + field_idx * n_points - 1)
         end
-        var_offset += _num_vars(model, dim)
+        var_offset += num_vars(model, dim)
     end
 
     throw(ArgumentError("Unknown field: $field"))

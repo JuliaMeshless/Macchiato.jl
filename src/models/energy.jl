@@ -26,7 +26,7 @@ model = SolidEnergy(k=1.0, ρ=1.0, cₚ=1.0, source=(x, t) -> -4.0)
     source::S = nothing  # Optional source term: f(x, t) -> value
 end
 
-_num_vars(::SolidEnergy, _) = 1
+num_vars(::SolidEnergy, _) = 1
 
 function make_f(model::SolidEnergy, domain; neighbors = DEFAULT_STENCIL_SIZE, kwargs...)
     (; k, ρ, cₚ, source) = model
@@ -72,7 +72,7 @@ function make_system(model::SolidEnergy, domain; kwargs...)
     coords = _coords(domain.cloud)
     ∇² = laplacian(_ustrip(coords); k = DEFAULT_STENCIL_SIZE, kwargs...)
     α = k / (cₚ * ρ)
-    A = α * ∇².weights
+    A = weights(α * ∇²)
 
     # Compute RHS from source term
     # Steady-state heat equation: ∇²T = f/α → (α∇²)T = f

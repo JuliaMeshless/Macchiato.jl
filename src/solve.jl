@@ -45,6 +45,6 @@ function _bc_kwargs(model::LinearElasticity)
     return (; λstar = λstar, μ_lame = μ)
 end
 
-function _num_vars(models::AbstractVector{<:AbstractModel}, Dim)
-    return sum(m -> _num_vars(m, Dim), models)
+function num_vars(models::AbstractVector{<:AbstractModel}, Dim)
+    return sum(m -> num_vars(m, Dim), models)
 end
