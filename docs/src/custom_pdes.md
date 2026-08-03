@@ -65,7 +65,7 @@ Macchiato.num_vars(::PoissonModel, _) = 1
 # Assemble the linear system for steady-state
 function Macchiato.make_system(model::PoissonModel, domain; kwargs...)
     x = node_coordinates(domain)
-    ∇² = laplacian(x; kwargs...)
+    ∇² = laplacian(x; k = 40, kwargs...)
     A = weights(∇²)
 
     # Evaluate source term at each point
@@ -80,6 +80,7 @@ That's it — just a struct and two methods. The key points:
 - `make_system` builds the system matrix `A` and right-hand side `b`; Macchiato handles BC application and solving
 - [`node_coordinates`](@ref) returns the cloud's coordinates unit-stripped, ready for the operator constructors
 - `weights` is the supported accessor for an operator's sparse weight matrix
+- `k` is the stencil size. If omitted, RadialBasisFunctions.jl picks the minimum the basis needs (12 here), which can produce singular stencils near boundaries where neighbors are nearly collinear — pass a larger value; the built-in Macchiato models use 40
 
 ## Step 2: Solve and Verify
 
@@ -142,7 +143,7 @@ Macchiato.num_vars(::AdvectionDiffusion, _) = 1
 function Macchiato.make_system(model::AdvectionDiffusion, domain; kwargs...)
     (; ν, c) = model
     x = node_coordinates(domain)
-    op = (@operator ν * ∇² - c ⋅ ∇)(x; kwargs...)
+    op = (@operator ν * ∇² - c ⋅ ∇)(x; k = 40, kwargs...)
     b = [model.source(xᵢ, 0.0) for xᵢ in x]
     return weights(op), b
 end
