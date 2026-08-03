@@ -35,7 +35,7 @@ AbstractSimulationMode
 `AbstractModel` represents **any PDE** — the built-in subtypes (`SolidEnergy`, `LinearElasticity`, etc.) are convenience models that ship with the package. You can define your own model for any equation; see [Custom PDEs](@ref) for a complete walkthrough.
 
 Every model must implement:
-- `_num_vars(::MyModel, dim)` — number of solution variables (1 for scalar, `dim` for vector, `dim+1` for velocity+pressure)
+- `num_vars(::MyModel, dim)` — number of solution variables (1 for scalar, `dim` for vector, `dim+1` for velocity+pressure)
 - `make_system(::MyModel, domain)` — assemble `(A, b)` for steady-state *(required for steady-state)*
 - `make_f(::MyModel, domain)` — return `f(du, u, p, t)` for transient ODE integration *(required for transient)*
 
@@ -179,7 +179,7 @@ struct Electrostatics{E} <: Solid
     ε::E  # permittivity
 end
 
-_num_vars(::Electrostatics, _) = 1
+num_vars(::Electrostatics, _) = 1
 
 function make_system(model::Electrostatics, domain; kwargs...)
     # Assemble ε∇²ϕ = -ρ_free
@@ -201,4 +201,4 @@ export Electrostatics
 The generic BC implementations (`PrescribedValue`, `PrescribedFlux`, `ZeroFlux`) handle all the matrix/ODE application logic automatically. No changes to the solver infrastructure are needed.
 
 !!! tip "Custom PDEs don't need any of this"
-    If you're defining a custom PDE outside the package, you don't need to create alias constructors at all. Just create your model struct, implement `_num_vars` and `make_system`, and use the generic BC constructors (`PrescribedValue(0.0)`, etc.). See [Custom PDEs](@ref) for the minimal approach.
+    If you're defining a custom PDE outside the package, you don't need to create alias constructors at all. Just create your model struct, implement `num_vars` and `make_system`, and use the generic BC constructors (`PrescribedValue(0.0)`, etc.). See [Custom PDEs](@ref) for the minimal approach.

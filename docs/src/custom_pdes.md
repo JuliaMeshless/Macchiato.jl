@@ -2,6 +2,8 @@
 
 Macchiato.jl is not limited to the built-in physics models — you can define and solve **any PDE** using the same infrastructure. This tutorial walks through solving the Poisson equation on a unit square with a manufactured solution.
 
+Differential operators come from [RadialBasisFunctions.jl](https://github.com/JuliaMeshless/RadialBasisFunctions.jl), and Macchiato re-exports the operator-building surface (`laplacian`, `partial`, `mixed_partial`, `gradient`, the [`@operator`](https://juliameshless.github.io/RadialBasisFunctions.jl/stable/guides/pde_operators/) macro, the `PHS`/`IMQ`/`Gaussian` bases, and the `weights` accessor) — so `using Macchiato` is all you need.
+
 ## The Problem
 
 We solve the 2D Poisson equation:
@@ -58,28 +60,26 @@ struct PoissonModel{F} <: AbstractModel
 end
 
 # Number of solution variables (1 for scalar PDE)
-Macchiato._num_vars(::PoissonModel, _) = 1
+Macchiato.num_vars(::PoissonModel, _) = 1
 
 # Assemble the linear system for steady-state
 function Macchiato.make_system(model::PoissonModel, domain; kwargs...)
-    coords = Macchiato._coords(domain.cloud)
-    ∇² = laplacian(Macchiato._ustrip(coords); k=40, kwargs...)
-    A = ∇².weights
+    x = node_coordinates(domain)
+    ∇² = laplacian(x; kwargs...)
+    A = weights(∇²)
 
     # Evaluate source term at each point
-    b = map(coords) do pt
-        model.source(ustrip.(pt), 0.0)
-    end
+    b = [model.source(xᵢ, 0.0) for xᵢ in x]
 
     return A, b
 end
 ```
 
 That's it — just a struct and two methods. The key points:
-- `_num_vars` returns the number of unknowns per point (1 for scalar, `dim` for vector)
+- [`num_vars`](@ref) returns the number of unknowns per point (1 for scalar, `dim` for vector)
 - `make_system` builds the system matrix `A` and right-hand side `b`; Macchiato handles BC application and solving
-
-The `laplacian` function comes from [RadialBasisFunctions.jl](https://github.com/JuliaMeshless/RadialBasisFunctions.jl) — it builds a sparse meshless Laplacian operator from the point cloud. You can use any operator from that package: `partial`, `gradient`, or even custom differential operators.
+- [`node_coordinates`](@ref) returns the cloud's coordinates unit-stripped, ready for the operator constructors
+- `weights` is the supported accessor for an operator's sparse weight matrix
 
 ## Step 2: Solve and Verify
 
@@ -87,8 +87,6 @@ Boundary conditions use the generic constructors directly — no aliases or trai
 
 ```@example poisson
 using WhatsThePoint
-using WhatsThePoint: coords
-using RadialBasisFunctions
 using Unitful: m, °, ustrip
 
 # Manufactured solution and source term
@@ -120,13 +118,37 @@ run!(sim)
 # Verify against exact solution
 # For custom models, access the solution vector via the public accessor
 u_numerical = solution(sim)
-pts = points(cloud)
-u_exact_vals = [u_exact(ustrip.([coords(pt).x, coords(pt).y])) for pt in pts]
+u_exact_vals = u_exact.(node_coordinates(domain))
 error = maximum(abs.(u_numerical .- u_exact_vals))
 println("Max error: $error")
 ```
 
 With 33 points per side you should see a max error on the order of ``10^{-4}`` or better.
+
+## Multi-Term Operators: the `@operator` Macro
+
+The Poisson example needs only a bare Laplacian, but most PDEs combine several terms. Rather than building each operator and summing weight matrices by hand, write the operator in mathematical notation with `@operator` — the whole expression is fused into a **single weight matrix**:
+
+```julia
+struct AdvectionDiffusion{T, V, S} <: AbstractModel
+    ν::T          # diffusivity
+    c::V          # advection velocity vector
+    source::S     # source term f(x, t) -> value
+end
+
+Macchiato.num_vars(::AdvectionDiffusion, _) = 1
+
+# ν∇²u − c·∇u = f, assembled in one fused weights build
+function Macchiato.make_system(model::AdvectionDiffusion, domain; kwargs...)
+    (; ν, c) = model
+    x = node_coordinates(domain)
+    op = (@operator ν * ∇² - c ⋅ ∇)(x; kwargs...)
+    b = [model.source(xᵢ, 0.0) for xᵢ in x]
+    return weights(op), b
+end
+```
+
+Recognized symbols include `∇²`/`Δ`, `∂(dim)`, `∂²(dim)`, `∂(i, j)` (mixed partials), `∇ ⋅ (κ * ∇)` (diffusion), `c ⋅ ∇` (advection), and `f`/`I` (identity), plus scalar coefficients. Built operators also compose directly — `α * op` and `op₁ + op₂` combine the existing weight matrices without re-collocation, which is how the built-in `LinearElasticity` model assembles its blocks. See the [Building PDE Operators guide](https://juliameshless.github.io/RadialBasisFunctions.jl/stable/guides/pde_operators/) in RadialBasisFunctions.jl for the full vocabulary.
 
 ## Optional: Named BC Aliases
 
@@ -142,11 +164,11 @@ These are purely syntactic sugar — they construct the same generic types ([`Pr
 
 ## Key Takeaways
 
-1. **Any PDE works.** Define an `AbstractModel` subtype and implement `_num_vars` and `make_system`. That's all Macchiato needs.
+1. **Any PDE works.** Define an `AbstractModel` subtype and implement `num_vars` and `make_system`. That's all Macchiato needs.
 
 2. **No boilerplate traits required.** Generic BC types (`PrescribedValue`, `PrescribedFlux`, `ZeroFlux`) dispatch on the mathematical hierarchy (`Dirichlet`/`Neumann`/`Robin`), so they work with any model — no equation-type trait needed.
 
-3. **Operators come from RadialBasisFunctions.jl.** Use `laplacian`, `partial`, `gradient`, or build custom differential operators — they all return sparse weight matrices ready for assembly.
+3. **Operators come from RadialBasisFunctions.jl and are re-exported.** Use `laplacian`, `partial`, `mixed_partial`, `gradient`, or compose multi-term operators with `@operator` — `using Macchiato` brings them all in. Access an operator's sparse matrix with `weights(op)`, never the internal field.
 
 4. **Generic BC types work directly.** `PrescribedValue(value)`, `PrescribedFlux(flux)`, and `ZeroFlux()` work out of the box for custom PDEs. Named aliases like `Temperature` are just convenience wrappers used by the built-in models.
 

@@ -50,7 +50,8 @@ These are the functions to implement when defining a [custom PDE](@ref "Custom P
 
 ```@docs
 AbstractModel
-_num_vars
+num_vars
+node_coordinates
 make_system
 make_f
 ```
