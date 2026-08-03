@@ -5,6 +5,7 @@ testfiles = [
     "aqua.jl",
     "core/test_domain.jl",
     "core/test_utils.jl",
+    "core/test_api_surface.jl",
     "operators/test_upwinding.jl",
     "io/test_io.jl",
     "end_2_end/2d_Laplacian_MoMS.jl",
