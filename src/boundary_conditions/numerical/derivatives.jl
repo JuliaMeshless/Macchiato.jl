@@ -2,8 +2,8 @@
 Compute interpolation weights at a point, returning dense vector.
 """
 @inline function interpolation_weights(nbs_coords, pt; kwargs...)
-    op = regrid(nbs_coords, [pt]; kwargs...)
-    return op.weights isa AbstractVector ? collect(op.weights) : collect(op.weights[1, :])
+    W = weights(regrid(nbs_coords, [pt]; kwargs...))
+    return W isa AbstractVector ? collect(W) : collect(W[1, :])
 end
 
 """
@@ -27,7 +27,8 @@ function compute_local_derivative_weights(
     d = directional(nbs_coords, n; eval_points = [surf_pt])
 
     # Collect to dense to preserve precision
-    w = d.weights isa AbstractVector ? collect(d.weights) : collect(d.weights[1, :])
+    W = weights(d)
+    w = W isa AbstractVector ? collect(W) : collect(W[1, :])
     return nbs, w
 end
 

@@ -134,8 +134,8 @@ function make_bc!(
     w_dx_buf = Vector{Float64}(undef, max_k)
     w_dy_buf = Vector{Float64}(undef, max_k)
 
-    W_dx = ∂x_op.weights
-    W_dy = ∂y_op.weights
+    W_dx = weights(∂x_op)
+    W_dy = weights(∂y_op)
 
     for (local_i, global_i) in enumerate(ids)
         x = get_node_coords(surf, local_i)

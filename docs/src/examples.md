@@ -113,7 +113,6 @@ using WhatsThePoint
 using WhatsThePoint: coords
 import WhatsThePoint as WTP
 using Macchiato
-using RadialBasisFunctions: PHS
 using Unitful: m, °, ustrip
 using LinearAlgebra
 using Statistics: mean

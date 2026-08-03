@@ -41,10 +41,10 @@ include(joinpath(@__DIR__, "..", "end_2_end", "2d_square.jl"))
         @test λstar ≈ 2.0 / 3 rtol = 0.01
     end
 
-    @testset "_num_vars" begin
+    @testset "num_vars" begin
         model = LinearElasticity(E = 200.0e3, ν = 0.3)
-        @test MM._num_vars(model, 2) == 2
-        @test MM._num_vars(model, 3) == 3
+        @test MM.num_vars(model, 2) == 2
+        @test MM.num_vars(model, 3) == 3
     end
 
     @testset "show method" begin

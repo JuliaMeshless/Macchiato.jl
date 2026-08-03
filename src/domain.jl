@@ -87,6 +87,22 @@ function Base.delete!(domain::Domain, model::AbstractModel)
     return domain
 end
 
+"""
+    node_coordinates(domain::Domain; strip_units=true)
+    node_coordinates(cloud; strip_units=true)
+
+Coordinates of every node in the domain (boundary first, then interior) as a
+`Vector` of `SVector`s — with units stripped by default, which is the form the
+RadialBasisFunctions.jl operator constructors (`laplacian`, `partial`, …) accept.
+
+Pass `strip_units=false` to keep the `Unitful` quantities.
+"""
+node_coordinates(domain::Domain; kwargs...) = node_coordinates(domain.cloud; kwargs...)
+function node_coordinates(cloud; strip_units::Bool = true)
+    c = _coords(cloud)
+    return strip_units ? _ustrip(c) : c
+end
+
 function Base.show(io::IO, domain::Domain)
     println(io, "$(domain.name): Domain")
     return show(io, domain.models)

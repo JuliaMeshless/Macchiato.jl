@@ -13,6 +13,17 @@ using Unitful
 using StaticArrays
 using RadialBasisFunctions
 import RadialBasisFunctions: autoselect_k
+
+# Re-export the RadialBasisFunctions operator-building surface so custom-PDE authors
+# only need `using Macchiato`. Boundary-condition types are deliberately NOT re-exported —
+# Macchiato has its own boundary-condition vocabulary (Dirichlet/Neumann/Robin below).
+using RadialBasisFunctions: laplacian, partial, mixed_partial, gradient, custom, weights,
+    @operator, Laplacian, Partial, MixedPartial, Identity,
+    PHS, PHS1, PHS3, PHS5, PHS7, IMQ, Gaussian, find_neighbors
+export laplacian, partial, mixed_partial, gradient, custom, weights
+export @operator, Laplacian, Partial, MixedPartial, Identity
+export PHS, PHS1, PHS3, PHS5, PHS7, IMQ, Gaussian
+export find_neighbors, autoselect_k
 using SparseArrays
 using NearestNeighbors: KDTree, knn
 using OrdinaryDiffEq
@@ -49,7 +60,7 @@ export PrescribedValue, PrescribedFlux, ZeroFlux
 
 #################### Domains ####################
 include("domain.jl")
-export Domain
+export Domain, node_coordinates
 export add!, delete!
 
 include("boundary_conditions/walls.jl")
@@ -89,13 +100,16 @@ include("models/mechanics.jl")
 export LinearElasticity, lame_parameters
 
 """
-    _num_vars(model::AbstractModel, dim) -> Int
+    num_vars(model::AbstractModel, dim) -> Int
 
 Return the number of solution variables per point for `model` in `dim` dimensions.
 
 Examples: 1 for scalar PDEs, `dim` for vector PDEs, `dim + 1` for velocity + pressure.
 """
-function _num_vars end
+function num_vars end
+
+# Back-compat alias: methods added to `Macchiato._num_vars` land on `num_vars`.
+const _num_vars = num_vars
 
 """
     make_f(model::AbstractModel, domain; kwargs...) -> f
@@ -116,7 +130,7 @@ Required for steady-state simulations. Macchiato applies boundary conditions and
 function make_system end
 
 export make_f, make_system
-export _num_vars
+export num_vars
 
 #################### Solvers ####################
 include("solve.jl")

@@ -99,7 +99,7 @@ function IncompressibleNavierStokes(μ::M, ρ) where {M <: Real}
     return IncompressibleNavierStokes(NewtonianViscosity(μ), ρ)
 end
 
-_num_vars(::IncompressibleNavierStokes, dim::Int) = dim + 1
+num_vars(::IncompressibleNavierStokes, dim::Int) = dim + 1
 
 function make_f(
         model::IncompressibleNavierStokes, domain::Domain{Dim}; kwargs...
@@ -107,9 +107,9 @@ function make_f(
     (; μ, ρ) = model
     vol = _coords(domain.cloud.volume)
     all_points = _coords(domain.cloud)
-    ∇² = laplacian(all_points; eval_points = vol, k = 40)
+    ∇² = laplacian(all_points; eval_points = vol, k = DEFAULT_STENCIL_SIZE)
     α = k / (cₚ * ρ)
-    w = α * ∇².weights
+    w = weights(α * ∇²)
     n_boundary = length(boundary(domain.cloud))
     vol_ids = (n_boundary + 1):(n_boundary + length(domain.cloud.volume))
 

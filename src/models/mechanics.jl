@@ -28,7 +28,7 @@ model = LinearElasticity(E=200e3, ν=0.3, body_force=x -> (0.0, -9.81))
     body_force::TF = nothing
 end
 
-_num_vars(::LinearElasticity, dim::Int) = dim
+num_vars(::LinearElasticity, dim::Int) = dim
 
 """
     lame_parameters(model::LinearElasticity)
@@ -46,80 +46,6 @@ function lame_parameters(model::LinearElasticity)
     λ = E * ν / ((1 + ν) * (1 - 2ν))
     λstar = 2μ * λ / (λ + 2μ)
     return μ, λstar
-end
-
-"""
-    _ℒ_mixed_partial(basis::AbstractRadialBasis)
-
-Mixed partial derivative ∂²/∂x∂y for radial basis functions.
-Uses the `∂mixed` functor, which evaluates ∂²φ/(∂x_dim1 ∂x_dim2) directly.
-"""
-function _ℒ_mixed_partial(basis::RadialBasisFunctions.AbstractRadialBasis)
-    return RadialBasisFunctions.∂mixed(basis, 1, 2)
-end
-
-"""
-    _ℒ_mixed_partial(basis::MonomialBasis{2, Deg})
-
-Mixed partial derivative ∂²/∂x∂y for 2D monomial basis.
-
-Hand-coded to match the MonomialBasis evaluation ordering. The generic
-`∂exponents`/`monomial_recursive_list`/`build_monomial_basis` pipeline
-produces results in `multiexponents` ordering which differs from the
-`MonomialBasis` evaluator ordering used in the RBF-FD collocation matrix.
-"""
-function _ℒ_mixed_partial(::RadialBasisFunctions.MonomialBasis{2, 0})
-    function basis!(b, x)
-        b .= zero(eltype(x))
-        return nothing
-    end
-    return RadialBasisFunctions.ℒMonomialBasis(2, 0, basis!)
-end
-
-function _ℒ_mixed_partial(::RadialBasisFunctions.MonomialBasis{2, 1})
-    function basis!(b, x)
-        b .= zero(eltype(x))
-        return nothing
-    end
-    return RadialBasisFunctions.ℒMonomialBasis(2, 1, basis!)
-end
-
-function _ℒ_mixed_partial(::RadialBasisFunctions.MonomialBasis{2, 2})
-    # Monomial ordering: [1, x, y, xy, x², y²]
-    # ∂²/∂x∂y:          [0, 0, 0,  1,  0,  0]
-    function basis!(b, x)
-        T = eltype(x)
-        b .= zero(T)
-        b[4] = one(T)
-        return nothing
-    end
-    return RadialBasisFunctions.ℒMonomialBasis(2, 2, basis!)
-end
-
-function _ℒ_mixed_partial(mon::RadialBasisFunctions.MonomialBasis{2, Deg}) where {Deg}
-    n = binomial(2 + Deg, 2)
-
-    # Probe the monomial evaluator to determine exponents in its native ordering
-    b_x = zeros(n)
-    b_y = zeros(n)
-    mon.f(b_x, [2.0, 1.0])  # b_x[i] = 2^(x_exponent_i)
-    mon.f(b_y, [1.0, 2.0])  # b_y[i] = 2^(y_exponent_i)
-
-    ax = round.(Int, log2.(b_x))
-    ay = round.(Int, log2.(b_y))
-
-    # Precompute active indices: ∂²/∂x∂y is non-zero only when both exponents ≥ 1
-    active = [(i, ax[i], ay[i]) for i in 1:n if ax[i] >= 1 && ay[i] >= 1]
-
-    function basis!(b, x)
-        T = eltype(x)
-        b .= zero(T)
-        for (i, a, c) in active
-            b[i] = T(a * c) * x[1]^(a - 1) * x[2]^(c - 1)
-        end
-        return nothing
-    end
-    return RadialBasisFunctions.ℒMonomialBasis(2, Deg, basis!)
 end
 
 """
@@ -150,21 +76,12 @@ function make_system(model::LinearElasticity, domain; kwargs...)
     # Build RBF operators (KernelAbstractions parallelizes internally)
     ∂²x = partial(coords, 2, 1; k = k, adjl = adjl, kwargs...)
     ∂²y = partial(coords, 2, 2; k = k, adjl = adjl, kwargs...)
-    ∂²xy = custom(coords, _ℒ_mixed_partial; k = k, adjl = adjl, kwargs...)
+    ∂²xy = mixed_partial(coords, 1, 2; k = k, adjl = adjl, kwargs...)
 
-    # Assemble 2N×2N system from blocks
-    W_∂²x = ∂²x.weights
-    W_∂²y = ∂²y.weights
-    W_∂²xy = ∂²xy.weights
-
-    # A₁₁ = (λ*+2μ) ∂²/∂x² + μ ∂²/∂y²
-    A₁₁ = (λstar + 2μ) * W_∂²x + μ * W_∂²y
-
-    # A₁₂ = A₂₁ = (λ*+μ) ∂²/∂x∂y
-    A₁₂ = (λstar + μ) * W_∂²xy
-
-    # A₂₂ = μ ∂²/∂x² + (λ*+2μ) ∂²/∂y²
-    A₂₂ = μ * W_∂²x + (λstar + 2μ) * W_∂²y
+    # Assemble 2N×2N system from blocks via operator algebra
+    A₁₁ = weights((λstar + 2μ) * ∂²x + μ * ∂²y)
+    A₁₂ = weights((λstar + μ) * ∂²xy)
+    A₂₂ = weights(μ * ∂²x + (λstar + 2μ) * ∂²y)
 
     # Combine into 2N×2N sparse matrix
     A = [
