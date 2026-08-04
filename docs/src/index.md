@@ -8,7 +8,7 @@ hero:
   tagline: Define any equation with a small model interface — no mesh, no element quality, no remeshing.
   image:
     src: /hero.png
-    alt: Cantilever beam point cloud coloured by displacement magnitude
+    alt: Coffee-mug point cloud coloured by temperature
   actions:
     - theme: brand
       text: Get Started
