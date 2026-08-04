@@ -3,7 +3,7 @@
 # Run from repo root: julia docs/generate_logo.jl
 #
 # The hero image (`docs/src/public/hero.png`) is produced by
-# `examples/coffee_cup.jl` — this script only generates the logo.
+# `examples/moka_pot.jl` — this script only generates the logo.
 #
 # Unlike `generate_assets.jl`, which produces labelled figures for the Gallery and
 # Examples pages, this script produces *art*: no axes, no colorbar, no title, and a

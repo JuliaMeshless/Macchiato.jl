@@ -29,6 +29,10 @@ docs/build/
 docs/site/
 docs/node_modules/
 
+# raw Thingiverse download consumed by examples/assets/prep_moka.py;
+# only the processed moka.stl is committed
+examples/assets/MokaPot.stl
+
 # ignore media files
 *.png
 !docs/src/assets/*.png

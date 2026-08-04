@@ -18,7 +18,7 @@ Every simulation starts with a point cloud — a set of scattered points that di
 ```@setup getting_started
 import WhatsThePoint as WTP
 using Unitful: m
-function rectangle(Lx, Ly; n=100)
+function rectangle(Lx, Ly; n=50)
     dx, dy = Lx / n, Ly / n
     rx, ry = (dx:dx:Lx-dx), (dy:dy:Ly-dy)
     pts = vcat(
@@ -53,8 +53,8 @@ split_surface!(part, 75°)
 Splitting at corners creates named surfaces so you can assign different boundary conditions to each edge. Now fill the interior:
 
 ```@example getting_started
-# Discretize: place interior points at ~1/33 m spacing
-dx = 1/33 * m
+# Discretize: place interior points at 1/50 m spacing, matching the boundary
+dx = 1/50 * m
 cloud = discretize(part, ConstantSpacing(dx))
 ```
 
@@ -187,7 +187,7 @@ y = [ustrip(coords(pt).y) for pt in pts]
 
 fig = Figure(; size=(800, 700))
 ax = Axis(fig[1, 1]; title="Temperature", xlabel="x [m]", ylabel="y [m]", aspect=DataAspect())
-sc = scatter!(ax, x, y; color=T, colormap=:inferno, markersize=8)
+sc = scatter!(ax, x, y; color=T, colormap=:inferno, markersize=12)
 Colorbar(fig[1, 2], sc; label="T")
 fig
 ```

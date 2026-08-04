@@ -8,7 +8,7 @@ either steady-state or transient — only the `Simulation` changes.
 ```@setup heat
 import WhatsThePoint as WTP
 using Unitful: m
-function rectangle(Lx, Ly; n=100)
+function rectangle(Lx, Ly; n=50)
     dx, dy = Lx / n, Ly / n
     rx, ry = (dx:dx:Lx-dx), (dy:dy:Ly-dy)
     pts = vcat(
@@ -41,7 +41,7 @@ using Unitful: m, °, ustrip
 using CairoMakie
 
 # Geometry
-dx = 1/33 * m
+dx = 1/50 * m
 part = PointBoundary(rectangle(1m, 1m)...)
 split_surface!(part, 75°)
 cloud = discretize(part, ConstantSpacing(dx))
@@ -66,8 +66,8 @@ x = [ustrip(coords(pt).x) for pt in pts]
 y = [ustrip(coords(pt).y) for pt in pts]
 
 fig = Figure(; size=(800, 700))
-ax = Axis(fig[1, 1]; title="Temperature", xlabel="x [m]", ylabel="y [m]", aspect=DataAspect())
-sc = scatter!(ax, x, y; color=T, colormap=:inferno, markersize=8)
+ax = Axis(fig[1, 1]; title="Steady-State Temperature", xlabel="x [m]", ylabel="y [m]", aspect=DataAspect())
+sc = scatter!(ax, x, y; color=T, colormap=:inferno, markersize=12)
 Colorbar(fig[1, 2], sc; label="T")
 fig
 ```
@@ -190,7 +190,7 @@ displacement_mag = sqrt.(ux_sim .^ 2 .+ uy_sim .^ 2)
 
 fig = Figure(; size=(1000, 500))
 ax = Axis(fig[1, 1]; title="Displacement Magnitude ‖u‖", xlabel="x", ylabel="y", aspect=DataAspect())
-sc = scatter!(ax, x, y; color=displacement_mag, colormap=:viridis, markersize=6)
+sc = scatter!(ax, x, y; color=displacement_mag, colormap=:viridis, markersize=8)
 Colorbar(fig[1, 2], sc; label="‖u‖")
 fig
 ```

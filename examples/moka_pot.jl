@@ -1,14 +1,15 @@
-# Coffee-mug conduction render — the docs home-page hero.
+# Moka-pot conduction render — the docs home-page hero.
 #
-# A stylized mug (examples/assets/mug.stl, authored by examples/assets/make_mug.py)
-# heated from the bottom: fixed hot temperature on the base underside, convective
-# losses everywhere else. Steady-state solve, scattered points coloured by
-# temperature in the Julia brand colors.
+# A stovetop moka pot (examples/assets/moka.stl, prepared by
+# examples/assets/prep_moka.py from CNC Kitchen's CC BY "3D Printable Moka Pot",
+# thingiverse.com/thing:2490679) heated from the base: fixed hot temperature on
+# the underside, convective losses everywhere else. Steady-state solve,
+# scattered points coloured by temperature in the Julia brand colors.
 #
-# Run from the repo root: julia --project=examples examples/coffee_cup.jl
+# Run from the repo root: julia --project=examples examples/moka_pot.jl
 # Outputs:
-#   docs/src/public/hero.png        — VitePress hero, served as /hero.png (committed)
-#   examples/coffee_cup_preview.png — QA render with axes + colorbar (gitignored)
+#   docs/src/public/hero.png       — VitePress hero, served as /hero.png (committed)
+#   examples/moka_pot_preview.png  — QA render with axes + colorbar (gitignored)
 #
 # The hero renders into a ~250 px roughly-square slot, so the spacing is coarse
 # and the markers fat on purpose — anything finer washes out to grey.
@@ -27,11 +28,10 @@ using CairoMakie
 using Random: seed!
 
 # The Poisson-disk surface sampler and Bridson fill draw from the global RNG, so
-# every run is a different cloud realization. The steady shadow-point BC rows are
-# sensitive to the realization on this coarse thin-walled geometry — most clouds
-# solve cleanly but some blow through the maximum principle at the bottom
-# Dirichlet/Robin junction. Seed 3 is verified clean (T stays within [29.9, 100.7]);
-# the assert after run! catches a bad realization if anything here changes.
+# every run is a different cloud realization. The prep script closed the pot
+# into one solid body, which keeps the steady solve far from the thin-shell
+# fragility the mug had — but the assert after run! still catches a bad
+# realization if anything here changes.
 seed!(3)
 
 # Julia brand colors, matching docs/src/.vitepress/theme/style.css
@@ -51,7 +51,7 @@ const dx = 4.0e-3m  # 4 mm
 # its points from raw floats, which Meshes defaults to metres — a boundary in
 # any other unit fails to combine with the generated volume.
 
-mesh32 = import_mesh(joinpath(@__DIR__, "assets", "mug.stl"), mm)
+mesh32 = import_mesh(joinpath(@__DIR__, "assets", "moka.stl"), mm)
 verts = map(Meshes.vertices(mesh32)) do p
     xyz = Float64.(ustrip.(u"m", Meshes.to(p))) .* m
     Meshes.Point(xyz...)
@@ -61,7 +61,7 @@ mesh = Meshes.SimpleMesh(verts, Meshes.topology(mesh32))
 part = PointBoundary(mesh, ConstantSpacing(dx))
 
 # Partition the single sampled surface by height: the base underside sits at
-# z = 0 and nothing else (the handle bottoms out at z = 10 mm) is below 2 mm.
+# z = 0 and nothing else (the handle bottoms out much higher) is below 2 mm.
 surf = part[:surface1]
 pts = WTP.points(surf)
 nrm = WTP.normal(surf)
@@ -81,13 +81,12 @@ println("cloud: ", length(WTP.points(cloud)), " points ",
 # Physics: steady conduction, hot base, convective losses
 # ============================================================================
 #
-# Robin BC is h·T + k·∂T/∂n = h·T∞ with lengths in metres, so h/k = 4 m⁻¹
-# puts the fin decay length √(k·t/2h) ≈ 35 mm ≈ half the mug height — the
-# gradient spans the full mug instead of saturating hot or collapsing at the base.
-# Don't lower h below ~4 to stretch the gradient further: the weaker Robin
-# diagonal makes the system fragile near the Dirichlet/Robin junction ring and
-# some cloud realizations blow through the maximum principle. The hero render
-# stretches the colors instead (see `shade` below).
+# Robin BC is h·T + k·∂T/∂n = h·T∞ with lengths in metres. For a solid column
+# with lateral convection the decay length is √((A/P)/(h/k)); the pot's
+# cross-section gives A/P ≈ 18 mm, so h/k = 4 m⁻¹ puts the decay at ≈ 70 mm —
+# half the pot height — and the gradient spans the full body instead of
+# saturating hot or collapsing at the base. The hero render stretches the
+# colors further (see `shade` below).
 
 const T∞ = 20.0
 const T_hot = 100.0
@@ -100,10 +99,9 @@ bcs = Dict(
 
 domain = MM.Domain(cloud, bcs, SolidEnergy(k = k_th, ρ = 1.0, cₚ = 1.0))
 sim = Simulation(domain)
-# The default steady scheme (one-sided directional derivative rows) is unstable on
-# thin 3D shells like the mug wall — it violates the maximum principle by ±200°.
-# Shadow points anchor ∂T/∂n on interpolated interior points instead, which keeps
-# the Robin rows well-posed on walls only ~2.5 nodes thick.
+# Shadow points anchor ∂T/∂n on interpolated interior points, which keeps the
+# Robin rows well-posed near the Dirichlet/Robin junction ring at the base and
+# on the ~3-node-thick handle.
 run!(sim; scheme = ShadowPoints(ustrip(u"m", dx), 2))
 T = temperature(sim)
 
@@ -120,7 +118,7 @@ x = [ustrip(u"m", c[1]) for c in coords]
 y = [ustrip(u"m", c[2]) for c in coords]
 z = [ustrip(u"m", c[3]) for c in coords]
 
-az, el = 1.45π, π / 8
+az, el = 0.45π, π / 8
 eye = (cos(el) * cos(az), cos(el) * sin(az), sin(el))
 ord = sortperm(x .* eye[1] .+ y .* eye[2] .+ z .* eye[3])  # far → near for overdraw
 
@@ -136,14 +134,13 @@ function save_png(path, fig; kwargs...)
     return path
 end
 
-# Hero-only color stretch: the physical profile decays exponentially up the wall,
-# which crowds most of the mug into the bottom fifth of the colormap. A gentle
-# power stretch of normalized temperature spreads the green→purple→red sweep over
-# the full height without touching the physics — 0.65 keeps a green cast at the
-# rim and handle (√ washes it out to grey). The QA preview keeps the linear scale.
-shade = clamp.((T .- T∞) ./ (T_hot - T∞), 0.0, 1.0) .^ 0.65
+# Hero-only color stretch: the solid body keeps the top around a third of the
+# temperature range, which reads grey in the colormap's middle. A mild power
+# stretch >1 pushes the crown into green while the base stays red, without
+# touching the physics. The QA preview keeps the linear scale.
+shade = clamp.((T .- T∞) ./ (T_hot - T∞), 0.0, 1.0) .^ 1.3
 
-function mug_scatter!(ax, color, colorrange; markersize = 1.8e-3)  # marker radius in data units (m)
+function moka_scatter!(ax, color, colorrange; markersize = 1.26e-3)  # marker radius in data units (m)
     return meshscatter!(
         ax,
         x[ord],
@@ -172,7 +169,7 @@ ax = Axis3(
 )
 hidedecorations!(ax)
 hidespines!(ax)
-mug_scatter!(ax, shade, (0.0, 1.0))
+moka_scatter!(ax, shade, (0.0, 1.0))
 
 hero_path = joinpath(@__DIR__, "..", "docs", "src", "public", "hero.png")
 save_png(hero_path, fig; px_per_unit = 2)
@@ -182,9 +179,9 @@ println("saved: ", abspath(hero_path))
 # --- QA preview: axes + colorbar, white background -------------------------
 qa = Figure(; size = (1200, 1000))
 qax = Axis3(qa[1, 1]; azimuth = az, elevation = el, aspect = :data)
-sc = mug_scatter!(qax, T, (T∞, T_hot))
+sc = moka_scatter!(qax, T, (T∞, T_hot))
 Colorbar(qa[1, 2], sc; label = "T")
 
-qa_path = joinpath(@__DIR__, "coffee_cup_preview.png")
+qa_path = joinpath(@__DIR__, "moka_pot_preview.png")
 save_png(qa_path, qa; px_per_unit = 2)
 println("saved: ", abspath(qa_path))
