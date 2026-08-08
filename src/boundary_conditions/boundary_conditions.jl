@@ -148,7 +148,7 @@ function write_bc_derivative_block!(
     ) where {TA, TB}
     n = length(ids)
     R = convert(TA, β_val) .*
-        derivative_rows(surf, domain, scheme, ids, normal(surf); kwargs...)
+        derivative_rows(surf, domain, scheme, ids, normal(surf); A = A, kwargs...)
     if !iszero(α_val)
         # α on the diagonal, added as a block rather than element by element.
         R += sparse(1:n, collect(ids), fill(convert(TA, α_val), n), n, size(A, 2))

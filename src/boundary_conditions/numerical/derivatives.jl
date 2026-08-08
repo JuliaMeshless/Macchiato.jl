@@ -2,7 +2,11 @@
 Compute interpolation weights at a point, returning dense vector.
 """
 @inline function interpolation_weights(nbs_coords, pt; kwargs...)
-    W = weights(regrid(nbs_coords, [pt]; kwargs...))
+    # The shadow scheme calls this on a PER-NODE stencil (nbs_coords), so the
+    # cloud-wide `adjl`/`k` in kwargs must NOT be forwarded to regrid — the local
+    # interpolation uses every supplied neighbour and no external adjacency.
+    k_local = length(nbs_coords)
+    W = weights(regrid(nbs_coords, [pt]; k = k_local))
     return W isa AbstractVector ? collect(W) : collect(W[1, :])
 end
 
@@ -37,24 +41,58 @@ function derivative_rows(
     end
 end
 
-# Shadow-point schemes have no batched form; build the same block node by node.
-function derivative_rows(surf, domain, scheme, ids, normals; kwargs...)
-    I, J, V = Int[], Int[], Float64[]
-    for (local_i, global_i) in enumerate(ids)
-        nbs, w = compute_local_derivative_weights(
-            surf, domain, scheme, nothing, global_i, local_i, normals; kwargs...
-        )
-        append!(I, fill(local_i, length(nbs)))
-        append!(J, nbs)
-        append!(V, w)
+# Shadow-point schemes have no per-node batched RBF solve built into the RBF
+# operator API, but the whole surface block IS expressible as batched sparse
+# regrid operators:  W_surf = regrid(data, surf_pts),  W_shadow = regrid(data,
+# shadow_pts)  each build a single sparse (n_boundary × n_data) weight matrix in
+# the parallel CPU kernel. The derivative block is then just the sparse
+# difference of the two. This replaces the old node-by-node loop which did two
+# dense local solves PER boundary node and never finished at scale.
+function derivative_rows(surf, domain, scheme, ids, normals; adjl = nothing,
+                         basis = PHS(3; poly_deg = 2), A = nothing, kwargs...)
+    coords = _ustrip(_coords(domain.cloud))
+    surf_pts = coords[ids]                 # n_boundary eval points (the nodes)
+    n = ustrip.(normals)
+    d = map(eachindex(ids)) do li
+        ustrip(shadow_op_value(scheme, get_node_coords(surf, li)))
     end
-    return sparse(I, J, V, length(ids), length(domain.cloud))
+
+    # Stencils are per eval point and come from the same cloud adjacency the
+    # interior operator uses (material-aware when provided).
+    stencils = isnothing(adjl) ?
+        find_neighbors(coords, surf_pts, DEFAULT_STENCIL_SIZE) : adjl[ids]
+
+    # shadow points, one step (and, for order 2, two steps) inward along +n
+    sh1 = [surf_pts[i] .- n[i] .* d[i] for i in eachindex(ids)]
+
+    W_surf = weights(regrid(coords, surf_pts; adjl = stencils, basis = basis))
+    W_sh1 = weights(regrid(coords, sh1; adjl = stencils, basis = basis))
+
+    if scheme isa WhatsThePoint.ShadowPoints{1}
+        # ∂u/∂n ≈ (u_surf - u_shadow)/Δ
+        return Diagonal(1.0 ./ d) * (W_surf - W_sh1)
+    else
+        # ∂u/∂n ≈ (3 u_surf - 4 u_sh1 + u_sh2) / (2Δ)
+        sh2 = [surf_pts[i] .- n[i] .* (2 .* d[i]) for i in eachindex(ids)]
+        W_sh2 = weights(regrid(coords, sh2; adjl = stencils, basis = basis))
+        return Diagonal(3.0 ./ (2.0 .* d)) * W_surf .-
+               Diagonal(2.0 ./ d) * W_sh1 .+
+               Diagonal(1.0 ./ (2.0 .* d)) * W_sh2
+    end
 end
+
+# Δ value at a boundary point: ShadowPoints stores a constant (wrapped in a
+# closure) or a function of position; both are callable.
+shadow_op_value(s, p) = s(p)
+striptype(x) = x
 
 """
 Compute derivative weights for a boundary point using 1st order shadow points.
 First-order shadow points: ∂u/∂n ≈ (u_surface - u_shadow)/Δ.
 Returns (neighbor_indices, weights).
+
+(Kept for the older node-by-node API; the batched `derivative_rows` above is
+what the steady solve actually uses.)
 """
 function compute_local_derivative_weights(
         surf, domain, shadow_op::WhatsThePoint.ShadowPoints{1},

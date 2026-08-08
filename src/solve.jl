@@ -29,12 +29,12 @@ function LinearSolve.LinearProblem(
 
     for boundary in domain.boundaries
         ids, bc = boundary.second
-        verbose && println("Applying boundary condition: ", boundary.first)
+        verbose && (println("Applying boundary condition: ", boundary.first); flush(stdout))
         surf = domain.cloud[boundary.first]
         make_bc!(A, b, bc, surf, domain, ids; scheme = scheme, bc_kw..., kwargs...)
     end
 
-    verbose && println("Done creating linear problem")
+    verbose && (println("Done creating linear problem"); flush(stdout))
     return LinearSolve.LinearProblem(dropzeros(A), b)
 end
 
