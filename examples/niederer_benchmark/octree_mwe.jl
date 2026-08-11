@@ -37,7 +37,7 @@ boundary = PointBoundary(mesh)
 
 dx = 0.5
 spacing = ConstantSpacing(dx * mm)
-alg = Octree(mesh; spacing)
+alg = Orthtree(mesh; spacing)
 
 println("node_min_ratio: $(alg.node_min_ratio)")
 println("alpha: $(alg.alpha)")

@@ -47,7 +47,7 @@ const dx = 4.0e-3m  # 4 mm
 #
 # Binary STL stores Float32 and `import_mesh` preserves the machine type, which
 # would otherwise propagate all the way into the RBF weight assembly. The
-# conversion to metres is load-bearing too: the Octree interior fill constructs
+# conversion to metres is load-bearing too: the Orthtree interior fill constructs
 # its points from raw floats, which Meshes defaults to metres — a boundary in
 # any other unit fails to combine with the generated volume.
 
@@ -73,7 +73,7 @@ part[:walls] = PointSurface(pts[.!bottom], nrm[.!bottom], ar[.!bottom])
 @assert count(bottom) > 100 "suspiciously few bottom points: $(count(bottom))"
 @assert count(!, bottom) > 1000 "suspiciously few wall points: $(count(!, bottom))"
 
-cloud = WTP.discretize(part, ConstantSpacing(dx); alg = Octree(mesh; spacing = ConstantSpacing(dx)))
+cloud = WTP.discretize(part, ConstantSpacing(dx); alg = Orthtree(mesh; spacing = ConstantSpacing(dx)))
 println("cloud: ", length(WTP.points(cloud)), " points ",
     "(bottom ", count(bottom), ", walls ", count(!, bottom), ")")
 

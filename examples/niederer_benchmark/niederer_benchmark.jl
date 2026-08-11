@@ -122,7 +122,7 @@ function create_geometry(dx)
 
     # 3. VdSF scattered volume fill at target spacing.
     #
-    # NOT Octree, despite it being the preferred 3D algorithm elsewhere: Octree
+    # NOT Orthtree, despite it being the preferred 3D algorithm elsewhere: Orthtree
     # emits its volume points in metres regardless of the mesh's units, so on the
     # mm-tagged geometry below `PointCloud` rejects the mm boundary / m volume
     # pair ("boundary and volume CRS still differ"). Revisit once WhatsThePoint

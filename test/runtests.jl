@@ -9,6 +9,7 @@ testfiles = [
     "operators/test_upwinding.jl",
     "io/test_io.jl",
     "end_2_end/2d_Laplacian_MoMS.jl",
+    "end_2_end/2d_complex_steady.jl",
     "simulation/test_set.jl",
     "simulation/test_simulation.jl",
     "models/test_linear_elasticity.jl",

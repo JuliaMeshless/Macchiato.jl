@@ -15,7 +15,7 @@ println("using $(BLAS.get_num_threads()) CPU threads")
 
 ##
 
-# Load the mesh explicitly rather than via `PointBoundary(path, m)`: `Octree`
+# Load the mesh explicitly rather than via `PointBoundary(path, m)`: `Orthtree`
 # below needs the `SimpleMesh` itself to build its triangle octree.
 mesh = import_mesh(joinpath(@__DIR__, "geometry/rectangle3d-04.stl"), m)
 part = PointBoundary(mesh)
@@ -28,7 +28,7 @@ markersize = 0.015
 
 Δ = 0.04m
 #cloud = load(joinpath(@__DIR__, "rectangle-0.04.jld2"), "cloud")
-cloud = WhatsThePoint.discretize(part, ConstantSpacing(Δ); alg = Octree(mesh))
+cloud = WhatsThePoint.discretize(part, ConstantSpacing(Δ); alg = Orthtree(mesh))
 visualize(cloud; markersize = 0.7markersize, size = figsize)
 #save(joinpath(@__DIR__, "rectangle-0.04.jld2"), Dict("cloud"=>cloud))
 

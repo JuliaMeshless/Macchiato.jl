@@ -10,10 +10,12 @@ LinearSolve = "7ed4a6bd-45f5-4d41-b270-4a48e9bafcae"
 Macchiato = "cd40ceae-7681-4e2e-9056-ba6e356aca3e"
 Meshes = "eacbb407-ea5a-433e-ab97-5258b1ca43fa"
 OhMyThreads = "67456a42-1dca-4109-a031-0a68de7e3ad5"
+OrderedCollections = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
 OrdinaryDiffEqLowOrderRK = "1344f307-1e59-4825-a18e-ace9aa3fa4c6"
 OrdinaryDiffEqOperatorSplitting = "760fc936-9fa0-4281-9c1a-468957eedc89"
 RadialBasisFunctions = "79ee0514-adf7-4479-8807-6f72ea8967e8"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+SpecialFunctions = "276daf66-3868-5448-9aa4-cd146d93841b"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
 UnicodePlots = "b8865327-cd53-5732-bb35-84acbb429228"
@@ -21,9 +23,6 @@ Unitful = "1986cc42-f94f-5a68-af5c-568840ba703d"
 WhatsThePoint = "5faae8f1-f507-432f-bd56-cf2f1161ab6f"
 WriteVTK = "64499a7a-5c06-52f2-abe2-ccb03c286192"
 
-# Matches the root and docs environments: the registered WhatsThePoint 0.2.0 is an
-# older snapshot than `main`, and these examples use main-only API (`Octree`,
-# `import_mesh`). Macchiato resolves to this repo so `Pkg.instantiate()` is enough.
 [sources]
 Macchiato = {path = ".."}
 WhatsThePoint = {rev = "main", url = "https://github.com/JuliaMeshless/WhatsThePoint.jl"}
