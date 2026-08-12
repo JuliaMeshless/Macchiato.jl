@@ -294,17 +294,25 @@ cursor_obs = Observable([0.0])
 title_obs = Observable("Ez — t = 0.0 (0.0 T)")
 
 fig = Figure(; size = (1180, 520))
-ax_f = Axis(fig[1, 1]; aspect = DataAspect(), title = title_obs,
-    xlabel = "x (m)", ylabel = "y (m)")
-plt = scatter!(ax_f, xs, ys;
+ax_f = Axis(
+    fig[1, 1]; aspect = DataAspect(), title = title_obs,
+    xlabel = "x (m)", ylabel = "y (m)"
+)
+plt = scatter!(
+    ax_f, xs, ys;
     color = c_obs, colorrange = (-1.0, 1.0), colormap = :RdBu,
-    markerspace = :data, markersize = 1.4h)
+    markerspace = :data, markersize = 1.4h
+)
 Colorbar(fig[1, 2], plt; label = "Ez")
-ax_p = Axis(fig[1, 3]; title = "probe near (0.25, 0.25)",
-    xlabel = "t / T", ylabel = "Ez")
+ax_p = Axis(
+    fig[1, 3]; title = "probe near (0.25, 0.25)",
+    xlabel = "t / T", ylabel = "Ez"
+)
 ts_fine = range(0.0, t_end; length = 600)
-lines!(ax_p, collect(ts_fine ./ T_period), [Ez_exact(coords[probe_i], t) for t in ts_fine];
-    color = :gray35, linewidth = 2, label = "exact")
+lines!(
+    ax_p, collect(ts_fine ./ T_period), [Ez_exact(coords[probe_i], t) for t in ts_fine];
+    color = :gray35, linewidth = 2, label = "exact"
+)
 scatter!(ax_p, probe_obs; color = :crimson, markersize = 7, label = "numeric")
 vlines!(ax_p, cursor_obs; color = (:gray, 0.4))
 ylims!(ax_p, -0.65, 0.65)

@@ -236,9 +236,11 @@ function make_recorder(frames, frame_t, energies, dot_E, n)
             end
             next_frame[] += Δt_frame
             if length(frame_t) % 40 == 0
-                println("  t = ", round(t; digits = 2),
+                println(
+                    "  t = ", round(t; digits = 2),
                     " | energy = ", round(energies[end]; sigdigits = 5),
-                    " | max|Ez| = ", round(maximum(abs, Ez); sigdigits = 3))
+                    " | max|Ez| = ", round(maximum(abs, Ez); sigdigits = 3)
+                )
             end
         end
         return nothing
@@ -253,8 +255,10 @@ foreach(E -> push!(E, 0.0), dot_E)
 always(u, t, integrator) = true
 # save_positions = (false, false) is load-bearing: the default saves 3N floats
 # at every one of the 1000 steps.
-cb = DiscreteCallback(always, make_recorder(frames, frame_t, energies, dot_E, N);
-    save_positions = (false, false))
+cb = DiscreteCallback(
+    always, make_recorder(frames, frame_t, energies, dot_E, N);
+    save_positions = (false, false)
+)
 
 # ============================================================================
 # Solve — fixed-step SSPRK43 (adaptive = false is load-bearing)
@@ -280,12 +284,16 @@ E_max, E_end = maximum(energies), energies[end]
 
 println("\npeak |Ez| over the run: ", round(peak_Ez; sigdigits = 3))
 for (d, tp, ep, ef) in zip(dots, t_pk, E_pk, E_fin)
-    println("  ", rpad(d.label, 7), "t_peak = ", round(tp; digits = 2),
+    println(
+        "  ", rpad(d.label, 7), "t_peak = ", round(tp; digits = 2),
         " | E_peak = ", round(ep; sigdigits = 4),
-        " | E_final/E_peak = ", round(ef / ep; sigdigits = 3))
+        " | E_final/E_peak = ", round(ef / ep; sigdigits = 3)
+    )
 end
-println("  total energy: max = ", round(E_max; sigdigits = 4),
-    " | final/max = ", round(E_end / E_max; sigdigits = 3))
+println(
+    "  total energy: max = ", round(E_max; sigdigits = 4),
+    " | final/max = ", round(E_end / E_max; sigdigits = 3)
+)
 
 # Causal arrival order — the headline check: source-to-dot distances are
 # red 0.89 < green 1.44 < purple 1.61, so stored energy must peak in that order.
@@ -319,20 +327,28 @@ c_obs = Observable(shade_frame(frames[1]))
 title_obs = Observable("Ez — t = 0.0")
 
 fig = Figure(; size = (1060, 740))
-ax_f = Axis(fig[1, 1]; aspect = DataAspect(), title = title_obs,
-    xlabel = "x (m)", ylabel = "y (m)")
-plt = scatter!(ax_f, xs, ys;
+ax_f = Axis(
+    fig[1, 1]; aspect = DataAspect(), title = title_obs,
+    xlabel = "x (m)", ylabel = "y (m)"
+)
+plt = scatter!(
+    ax_f, xs, ys;
     color = c_obs, colorrange = (0, 1),
     colormap = cgrad(["#ffffff", "#389826", "#9558B2", "#CB3C33"], [0.0, 0.35, 0.7, 1.0]),
-    markerspace = :data, markersize = 1.4h)
+    markerspace = :data, markersize = 1.4h
+)
 for d in dots
-    poly!(ax_f, Circle(Point2f(d.c...), r_dot);
-        color = :transparent, strokecolor = d.color, strokewidth = 2)
+    poly!(
+        ax_f, Circle(Point2f(d.c...), r_dot);
+        color = :transparent, strokecolor = d.color, strokewidth = 2
+    )
 end
 Colorbar(fig[1, 2], plt; label = "|Ez| / frame max")
-lines!(ax_f, [L_sp, Lx - L_sp, Lx - L_sp, L_sp, L_sp],
+lines!(
+    ax_f, [L_sp, Lx - L_sp, Lx - L_sp, L_sp, L_sp],
     [L_sp, L_sp, Ly - L_sp, Ly - L_sp, L_sp];
-    color = (:gray, 0.4), linestyle = :dash)
+    color = (:gray, 0.4), linestyle = :dash
+)
 
 # iCloud's file provider intermittently stalls `close` on multi-MB files;
 # render to a temp file and mv into position. Every other frame at 24 fps keeps

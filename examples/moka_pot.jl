@@ -74,8 +74,10 @@ part[:walls] = PointSurface(pts[.!bottom], nrm[.!bottom], ar[.!bottom])
 @assert count(!, bottom) > 1000 "suspiciously few wall points: $(count(!, bottom))"
 
 cloud = WTP.discretize(part, ConstantSpacing(dx); alg = Orthtree(mesh; spacing = ConstantSpacing(dx)))
-println("cloud: ", length(WTP.points(cloud)), " points ",
-    "(bottom ", count(bottom), ", walls ", count(!, bottom), ")")
+println(
+    "cloud: ", length(WTP.points(cloud)), " points ",
+    "(bottom ", count(bottom), ", walls ", count(!, bottom), ")"
+)
 
 # ============================================================================
 # Physics: steady conduction, hot base, convective losses

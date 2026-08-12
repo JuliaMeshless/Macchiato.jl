@@ -70,8 +70,10 @@ part = PointBoundary(mesh, ConstantSpacing(dx))
 @assert length(WTP.points(part[:surface1])) > 1000 "suspiciously few boundary points"
 
 cloud = WTP.discretize(part, ConstantSpacing(dx); alg = Orthtree(mesh; spacing = ConstantSpacing(dx)))
-println("cloud: ", length(WTP.points(cloud)), " points ",
-    "(", length(WTP.points(part[:surface1])), " boundary)")
+println(
+    "cloud: ", length(WTP.points(cloud)), " points ",
+    "(", length(WTP.points(part[:surface1])), " boundary)"
+)
 
 # ============================================================================
 # Manufactured solution: u = sin(αx)sin(αy)sin(αz)
@@ -152,11 +154,11 @@ boundary_error = norm(err[1:length(cloud.boundary)], Inf)
 
 println("\nerror vs exact solution:")
 for (name, val) in (
-    "L2 (RMS)" => L2_error,
-    "L∞" => Linf_error,
-    "relative L2" => relative_L2,
-    "boundary L∞" => boundary_error,
-)
+        "L2 (RMS)" => L2_error,
+        "L∞" => Linf_error,
+        "relative L2" => relative_L2,
+        "boundary L∞" => boundary_error,
+    )
     println("  ", rpad(name, 14), round(val; sigdigits = 4))
 end
 
@@ -206,25 +208,35 @@ function field_panel!(where_, mask, color, colorrange; title, colormap, colorsca
     ax = Axis3(where_; azimuth = az, elevation = el, aspect = :data, title = title)
     x, y, z, col = xs[mask], ys[mask], zs[mask], color[mask]
     ord = sortperm(x .* eye[1] .+ y .* eye[2] .+ z .* eye[3])  # far → near for overdraw
-    plt = meshscatter!(ax, x[ord], y[ord], z[ord];
+    plt = meshscatter!(
+        ax, x[ord], y[ord], z[ord];
         color = col[ord], colorrange = colorrange, colormap = colormap,
-        colorscale = colorscale, markersize = 1.0e-3)
+        colorscale = colorscale, markersize = 1.0e-3
+    )
     return plt
 end
 
 full = trues(length(u))
 fig = Figure(; size = (1800, 1600))
 
-s1 = field_panel!(fig[1, 1], full, u, u_range;
-    title = "u (numerical)", colormap = :viridis)
-field_panel!(fig[2, 1], half, u, u_range;
-    title = "u — cutaway", colormap = :viridis)
+s1 = field_panel!(
+    fig[1, 1], full, u, u_range;
+    title = "u (numerical)", colormap = :viridis
+)
+field_panel!(
+    fig[2, 1], half, u, u_range;
+    title = "u — cutaway", colormap = :viridis
+)
 Colorbar(fig[1:2, 2], s1; label = "u")
 
-s2 = field_panel!(fig[1, 3], full, err_plot, err_range;
-    title = "|u − u_exact| (log scale)", colormap = :inferno, colorscale = log10)
-field_panel!(fig[2, 3], half, err_plot, err_range;
-    title = "|u − u_exact| — cutaway", colormap = :inferno, colorscale = log10)
+s2 = field_panel!(
+    fig[1, 3], full, err_plot, err_range;
+    title = "|u − u_exact| (log scale)", colormap = :inferno, colorscale = log10
+)
+field_panel!(
+    fig[2, 3], half, err_plot, err_range;
+    title = "|u − u_exact| — cutaway", colormap = :inferno, colorscale = log10
+)
 Colorbar(fig[1:2, 4], s2; label = "|u − u_exact|")
 
 png_path = joinpath(@__DIR__, "mms_armadillo.png")

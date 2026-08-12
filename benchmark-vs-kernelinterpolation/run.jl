@@ -27,9 +27,9 @@ const BENCH_ORDER = [
 ]
 
 prettytime(ns::Float64) =
-    ns < 1e3 ? @sprintf("%.1f ns", ns) :
-    ns < 1e6 ? @sprintf("%.2f μs", ns / 1e3) :
-    ns < 1e9 ? @sprintf("%.2f ms", ns / 1e6) : @sprintf("%.2f s", ns / 1e9)
+    ns < 1.0e3 ? @sprintf("%.1f ns", ns) :
+    ns < 1.0e6 ? @sprintf("%.2f μs", ns / 1.0e3) :
+    ns < 1.0e9 ? @sprintf("%.2f ms", ns / 1.0e6) : @sprintf("%.2f s", ns / 1.0e9)
 
 prettymem(bytes::Float64) =
     bytes < 1024 ? @sprintf("%.0f B", bytes) :
@@ -53,10 +53,13 @@ function print_results(results)
             )
         end
         ours_med = time(median(group["Macchiato stack"]))
-        @printf("  → ours is %.2f× %s than the fastest KI variant\n\n",
+        @printf(
+            "  → ours is %.2f× %s than the fastest KI variant\n\n",
             ours_med < ki_best ? ki_best / ours_med : ours_med / ki_best,
-            ours_med < ki_best ? "faster" : "slower")
+            ours_med < ki_best ? "faster" : "slower"
+        )
     end
+    return
 end
 
 verify()

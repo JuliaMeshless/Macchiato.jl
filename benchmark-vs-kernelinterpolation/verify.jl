@@ -22,12 +22,12 @@ function verify()
     _check(
         "interpolation 1D: KI vs ours at 17 off-node points",
         maximum(abs(itp_ki([x]) - itp_ours(SVector(x))) for x in xs_test),
-        1e-8, failures,
+        1.0e-8, failures,
     )
     _check(
         "interpolation 1D: ours reproduces nodal data",
         maximum(abs(itp_ours(x) - v) for (x, v) in zip(interp1d_x, interp1d_values)),
-        1e-8, failures,
+        1.0e-8, failures,
     )
 
     # -- Poisson 2D: all four solution paths must agree at the 400 interior nodes
@@ -47,15 +47,15 @@ function verify()
     sol_mc = ours_poisson_end_to_end(poisson_cloud)
     u_mc = sol_mc.u[(length(poisson_bdry) + 1):end]  # Macchiato ordering: [boundary; interior]
 
-    _check("Poisson 2D: KI Lagrange vs KI standard basis", maximum(abs.(u_ki_lag .- u_ki_std)), 1e-6, failures)
-    _check("Poisson 2D: KI (Lagrange) vs ours (RBF.jl assembly)", maximum(abs.(u_ki_lag .- u_ours)), 1e-6, failures)
+    _check("Poisson 2D: KI Lagrange vs KI standard basis", maximum(abs.(u_ki_lag .- u_ki_std)), 1.0e-6, failures)
+    _check("Poisson 2D: KI (Lagrange) vs ours (RBF.jl assembly)", maximum(abs.(u_ki_lag .- u_ours)), 1.0e-6, failures)
     # Looser tolerance: Macchiato's cloud orders nodes boundary-first while KI merges
     # interior-first, and on this symmetric grid the k-NN cutoff has distance ties, so 8 of
     # 436 stencils pick a different (equidistant) neighbor — a benign ~1e-4 effect at
     # identical settings, verified in the benchmark write-up.
-    _check("Poisson 2D: KI (Lagrange) vs ours (Macchiato end-to-end)", maximum(abs.(u_ki_lag .- u_mc)), 1e-3, failures)
-    _check("Poisson 2D: KI vs exact solution (discretization error)", maximum(abs.(u_ki_lag .- u_ref)), 5e-2, failures)
-    _check("Poisson 2D: ours vs exact solution (discretization error)", maximum(abs.(u_ours .- u_ref)), 5e-2, failures)
+    _check("Poisson 2D: KI (Lagrange) vs ours (Macchiato end-to-end)", maximum(abs.(u_ki_lag .- u_mc)), 1.0e-3, failures)
+    _check("Poisson 2D: KI vs exact solution (discretization error)", maximum(abs.(u_ki_lag .- u_ref)), 5.0e-2, failures)
+    _check("Poisson 2D: ours vs exact solution (discretization error)", maximum(abs.(u_ours .- u_ref)), 5.0e-2, failures)
 
     # -- Advection 2D: both rhs! evaluations must agree on the SAME state vector
     u_test = [u_adv(0.0, x) for x in adv_all]  # ordering matches KI's merge(inner, boundary)
@@ -63,14 +63,14 @@ function verify()
     KI.rhs!(du_ki, u_test, ki_adv_semi, 0.0)
     du_ours = similar(u_test)
     ours_adv_rhs!(du_ours, u_test, nothing, 0.0)
-    _check("Advection 2D: KI.rhs! vs ours_rhs! on identical state", maximum(abs.(du_ki .- du_ours)), 1e-6, failures)
+    _check("Advection 2D: KI.rhs! vs ours_rhs! on identical state", maximum(abs.(du_ki .- du_ours)), 1.0e-6, failures)
     # Informational sanity bound, not a parity assertion: the two sides run independent
     # adaptive Rodas5P solves (KI supplies solver hints ours lacks), so the end states agree
     # only to solver tolerance. The parity-critical check is the rhs! one above.
     _check(
         "Advection 2D: ODE end states (independent Rodas5P solves)",
         maximum(abs.(ki_adv_u_end .- ours_adv_u_end)),
-        5e-2, failures,
+        5.0e-2, failures,
     )
 
     if isempty(failures)

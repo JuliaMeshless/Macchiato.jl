@@ -22,19 +22,21 @@ Pkg.add(
 # fix/phs-laplacian-dimension branch (commit 1e26422f) checked out.
 Pkg.develop(path = joinpath(homedir(), "dev", "RadialBasisFunctions"))
 
-Pkg.add([
-    "BenchmarkTools",
-    "LinearSolve",
-    "OrdinaryDiffEqRosenbrock",
-    "OrdinaryDiffEqNonlinearSolve",
-    "SciMLBase",
-    "StaticArrays",
-    "Unitful",
-    "SparseArrays",
-    "LinearAlgebra",
-    "Random",
-    "Printf",
-])
+Pkg.add(
+    [
+        "BenchmarkTools",
+        "LinearSolve",
+        "OrdinaryDiffEqRosenbrock",
+        "OrdinaryDiffEqNonlinearSolve",
+        "SciMLBase",
+        "StaticArrays",
+        "Unitful",
+        "SparseArrays",
+        "LinearAlgebra",
+        "Random",
+        "Printf",
+    ]
+)
 
 Pkg.precompile()
 Pkg.status()

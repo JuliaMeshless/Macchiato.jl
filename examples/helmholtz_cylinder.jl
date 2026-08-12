@@ -181,11 +181,11 @@ boundary_error = maximum(abs, err[1:length(cloud.boundary)])
 
 println("\nerror vs exact series:")
 for (name, val) in (
-    "L2 (RMS)" => L2_error,
-    "L∞" => Linf_error,
-    "relative L2" => relative_L2,
-    "boundary L∞" => boundary_error,
-)
+        "L2 (RMS)" => L2_error,
+        "L∞" => Linf_error,
+        "relative L2" => relative_L2,
+        "boundary L∞" => boundary_error,
+    )
     println("  ", rpad(name, 14), round(val; sigdigits = 4))
 end
 
@@ -204,7 +204,8 @@ end
 # tweaked and re-rendered without re-solving.
 
 data_path = joinpath(@__DIR__, "helmholtz_cylinder_solution.jld2")
-jldsave(data_path;
+jldsave(
+    data_path;
     xs = [p[1] for p in coords], ys = [p[2] for p in coords],
     E_num = E_num, E_ex = E_ex, h = h, a_cyl = a_cyl,
 )

@@ -60,9 +60,11 @@ coords = node_coordinates(domain)
 err = u .- u_exact_c.(coords)
 boundary_error = maximum(abs, err[1:length(cloud.boundary)])
 max_error = maximum(abs, err)
-println("complex steady solve: eltype = ", eltype(u),
+println(
+    "complex steady solve: eltype = ", eltype(u),
     ", boundary L∞ = ", round(boundary_error; sigdigits = 3),
-    ", L∞ = ", round(max_error; sigdigits = 3))
+    ", L∞ = ", round(max_error; sigdigits = 3)
+)
 
 @testset "complex steady solve" begin
     @test eltype(u) == ComplexF64

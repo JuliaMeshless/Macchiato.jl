@@ -47,21 +47,29 @@ end
 fig = Figure(; size = (1500, 700), fontsize = 21)
 
 function field_panel!(where_, color, colorrange; title, colormap, colorscale = identity)
-    ax = Axis(where_; aspect = DataAspect(), title = title,
-        xlabel = "x (m)", ylabel = "y (m)")
-    plt = scatter!(ax, xs, ys;
+    ax = Axis(
+        where_; aspect = DataAspect(), title = title,
+        xlabel = "x (m)", ylabel = "y (m)"
+    )
+    plt = scatter!(
+        ax, xs, ys;
         color = color, colorrange = colorrange, colormap = colormap,
-        colorscale = colorscale, markerspace = :data, markersize = 1.4spacing)
+        colorscale = colorscale, markerspace = :data, markersize = 1.4spacing
+    )
     # Fill the PEC cylinder so it reads as a solid object and hides the hole rim.
     poly!(ax, Circle(Point2f(0, 0), Float32(cyl_radius)); color = :gray25)
     return plt
 end
 
-p1 = field_panel!(fig[1, 1], abs.(E_num), (0, maximum(abs, E_num));
-    title = "|E| — shadow and standing waves", colormap = CMAP_SEQ)
+p1 = field_panel!(
+    fig[1, 1], abs.(E_num), (0, maximum(abs, E_num));
+    title = "|E| — shadow and standing waves", colormap = CMAP_SEQ
+)
 Colorbar(fig[1, 2], p1)
-p2 = field_panel!(fig[1, 3], err_plot, err_range;
-    title = "|E − E_exact| (log scale)", colormap = :inferno, colorscale = log10)
+p2 = field_panel!(
+    fig[1, 3], err_plot, err_range;
+    title = "|E − E_exact| (log scale)", colormap = :inferno, colorscale = log10
+)
 Colorbar(fig[1, 4], p2)
 
 png_path = joinpath(@__DIR__, "helmholtz_cylinder.png")

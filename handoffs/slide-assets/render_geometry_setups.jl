@@ -29,29 +29,37 @@ const NODE_GRAY = :gray62
 # Slide 21: Helmholtz cylinder — annulus of nodes around the PEC cylinder
 # ============================================================================
 if !isfile(joinpath(ASSETS, "helm_geometry_deck.png"))
-data = load(joinpath(EX, "helmholtz_cylinder_solution.jld2"))
-xs_h, ys_h = data["xs"], data["ys"]
-spacing, a_cyl = data["h"], data["a_cyl"]
-R_out = 4.0
+    data = load(joinpath(EX, "helmholtz_cylinder_solution.jld2"))
+    xs_h, ys_h = data["xs"], data["ys"]
+    spacing, a_cyl = data["h"], data["a_cyl"]
+    R_out = 4.0
 
-fig1 = Figure(; size = (750, 700), fontsize = 21)
-ax1 = Axis(fig1[1, 1]; aspect = DataAspect(),
-    title = "the domain — an annulus of nodes",
-    xlabel = "x (m)", ylabel = "y (m)")
-scatter!(ax1, xs_h, ys_h;
-    color = NODE_GRAY, markerspace = :data, markersize = 1.4spacing)
-poly!(ax1, Circle(Point2f(0, 0), Float32(a_cyl)); color = :gray25)
-lines!(ax1, Circle(Point2f(0, 0), Float32(R_out));
-    color = (:gray25, 0.6), linestyle = :dash, linewidth = 1.5)
-# incident plane wave, traveling +x
-for y in (-1.2, 0.0, 1.2)
-    arrows!(ax1, [-5.3], [y], [0.75], [0.0];
-        color = "#4063D8", linewidth = 3, arrowsize = 14)
-end
-xlims!(ax1, -5.6, 4.35)
-ylims!(ax1, -4.35, 4.35)
-save_png(joinpath(ASSETS, "helm_geometry_deck.png"), fig1; px_per_unit = 2)
-println("saved helm_geometry_deck.png")
+    fig1 = Figure(; size = (750, 700), fontsize = 21)
+    ax1 = Axis(
+        fig1[1, 1]; aspect = DataAspect(),
+        title = "the domain — an annulus of nodes",
+        xlabel = "x (m)", ylabel = "y (m)"
+    )
+    scatter!(
+        ax1, xs_h, ys_h;
+        color = NODE_GRAY, markerspace = :data, markersize = 1.4spacing
+    )
+    poly!(ax1, Circle(Point2f(0, 0), Float32(a_cyl)); color = :gray25)
+    lines!(
+        ax1, Circle(Point2f(0, 0), Float32(R_out));
+        color = (:gray25, 0.6), linestyle = :dash, linewidth = 1.5
+    )
+    # incident plane wave, traveling +x
+    for y in (-1.2, 0.0, 1.2)
+        arrows!(
+            ax1, [-5.3], [y], [0.75], [0.0];
+            color = "#4063D8", linewidth = 3, arrowsize = 14
+        )
+    end
+    xlims!(ax1, -5.6, 4.35)
+    ylims!(ax1, -4.35, 4.35)
+    save_png(joinpath(ASSETS, "helm_geometry_deck.png"), fig1; px_per_unit = 2)
+    println("saved helm_geometry_deck.png")
 end
 
 # ============================================================================
@@ -98,24 +106,38 @@ xs2 = [x[1] for x in coords]
 ys2 = [x[2] for x in coords]
 
 fig2 = Figure(; size = (940, 740))
-ax2 = Axis(fig2[1, 1]; aspect = DataAspect(),
+ax2 = Axis(
+    fig2[1, 1]; aspect = DataAspect(),
     title = "the setup — glass dots, burst source, sponge walls",
-    xlabel = "x (m)", ylabel = "y (m)")
-scatter!(ax2, xs2, ys2;
-    color = NODE_GRAY, markerspace = :data, markersize = 1.4h)
+    xlabel = "x (m)", ylabel = "y (m)"
+)
+scatter!(
+    ax2, xs2, ys2;
+    color = NODE_GRAY, markerspace = :data, markersize = 1.4h
+)
 for d in dots
-    poly!(ax2, Circle(Point2f(d.c...), r_dot);
-        color = (d.color, 0.25), strokecolor = d.color, strokewidth = 2.5)
+    poly!(
+        ax2, Circle(Point2f(d.c...), r_dot);
+        color = (d.color, 0.25), strokecolor = d.color, strokewidth = 2.5
+    )
 end
-lines!(ax2, [L_sp, Lx - L_sp, Lx - L_sp, L_sp, L_sp],
+lines!(
+    ax2, [L_sp, Lx - L_sp, Lx - L_sp, L_sp, L_sp],
     [L_sp, L_sp, Ly - L_sp, Ly - L_sp, L_sp];
-    color = (:black, 0.75), linestyle = :dash, linewidth = 2.5)
-text!(ax2, L_sp + 0.05, L_sp + 0.03;
-    text = "sponge", color = (:black, 0.75), fontsize = 22.5)
-scatter!(ax2, [x_src[1]], [x_src[2]];
-    marker = :star8, markersize = 22, color = "#4063D8")
-text!(ax2, x_src[1] + 0.06, x_src[2] - 0.02;
-    text = "source", color = "#4063D8", fontsize = 24)
+    color = (:black, 0.75), linestyle = :dash, linewidth = 2.5
+)
+text!(
+    ax2, L_sp + 0.05, L_sp + 0.03;
+    text = "sponge", color = (:black, 0.75), fontsize = 22.5
+)
+scatter!(
+    ax2, [x_src[1]], [x_src[2]];
+    marker = :star8, markersize = 22, color = "#4063D8"
+)
+text!(
+    ax2, x_src[1] + 0.06, x_src[2] - 0.02;
+    text = "source", color = "#4063D8", fontsize = 24
+)
 save_png(joinpath(ASSETS, "logo_geometry_deck.png"), fig2; px_per_unit = 2)
 println("saved logo_geometry_deck.png")
 println("DONE")
