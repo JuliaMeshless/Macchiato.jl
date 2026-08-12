@@ -85,9 +85,11 @@ end
                 eval_points = eval_points, k = k, basis = basis,
             ),
         )
-        maxdiff = maximum(abs, W_cus - W_lap)
-        println("  |W_custom(D = I) - W_laplacian|_max = $maxdiff")
-        @test maxdiff < 1.0e-8
+        # the two assembly paths (composed ∂²x + ∂²y vs fused ∇²) agree only up to
+        # roundoff on O(1/dx²) ghost-amplified weights, so compare relative to scale
+        reldiff = maximum(abs, W_cus - W_lap) / maximum(abs, W_lap)
+        println("  |W_custom(D = I) - W_laplacian|_max / |W_laplacian|_max = $reldiff")
+        @test reldiff < 1.0e-11
     end
 
     @testset "anisotropic operator: finite weights, zero row-sum" begin

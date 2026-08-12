@@ -5,9 +5,10 @@
 # For a transient problem a Neumann/Robin boundary node must stay a *dynamic*
 # unknown governed by the diffusion equation, with the flux folded into the
 # discrete operator via a fictitious "ghost" node one spacing OUTSIDE the domain
-# along +n. The ghost's value is eliminated algebraically from the flux condition
-# and its stencil column is tied back onto an interior "shadow" node (the nearest
-# node to the mirror point one spacing inside). This yields a stable operator
+# along +n. The ghost's value is eliminated algebraically from the wall-centered
+# flux condition `u_ghost = u(mirror) + dist·∂ₙu`, with `u` at the mirror point one
+# spacing inside interpolated (RBF `regrid` weights) over nearby volume nodes, and
+# its stencil column tied back onto that interpolation row. This yields a stable operator
 # `u' = W u + b(t)` — the scattered-node analogue of the finite-difference
 # ghost-cell method for a no-flux wall. Unlike a penalty on the derivative, it
 # does not depend on the sign of the RBF-FD self-weight, so it does not blow up.
@@ -60,7 +61,8 @@ row-sum). For example, fiber-aligned anisotropic diffusion:
     )
 
 The boundary-first node ordering (`[boundary; volume]`) of the point cloud is
-assumed, so a shadow node's global index is `n_boundary + its_volume_index`.
+assumed, so a mirror-interpolation node's global index is
+`n_boundary + its_volume_index`.
 """
 function build_neumann_diffusion(
         domain; k = DEFAULT_STENCIL_SIZE,
@@ -72,9 +74,9 @@ function build_neumann_diffusion(
     Nb = N - length(vol_pts)
 
     tree_all = KDTree(all_pts)
-    tree_vol = KDTree(vol_pts)
 
     ghost_pts = eltype(all_pts)[]
+    mirror_pts = eltype(all_pts)[]
     rows = Int[]
     cols = Int[]
     vals = Float64[]
@@ -95,13 +97,11 @@ function build_neumann_diffusion(
             _, nn_dist = knn(tree_all, x, 2, true)
             Δ = nn_dist[2]
             ghost = x .+ Δ .* n
-            mirror_idx, _ = knn(tree_vol, x .- Δ .* n, 1)
-            sid = Nb + mirror_idx[1]
-            dist = norm(ghost .- all_pts[sid])
+            dist = 2 * Δ  # ghost-to-mirror gap, centered on the wall node
 
             j += 1
             push!(ghost_pts, ghost)
-            push!(rows, j); push!(cols, sid); push!(vals, 1.0)
+            push!(mirror_pts, x .- Δ .* n)
             if is_robin
                 push!(rows, j); push!(cols, gi); push!(vals, -dist * α(bc) / β(bc))
             end
@@ -113,6 +113,20 @@ function build_neumann_diffusion(
     end
 
     n_ghost = j
+    # Eliminate each ghost via the wall-centered difference `u_ghost = u(mirror) +
+    # dist·∂ₙu`, with `u(mirror)` expressed as an RBF interpolation over nearby
+    # volume nodes. On a scattered cloud no node sits at the mirror point, and
+    # snapping to the nearest one instead injects a tangential `∇u ⋅ offset` error
+    # into the eliminated ghost value that never converges away; the poly-augmented
+    # interpolation row is exact for linear fields, so the folded operator stays
+    # consistent.
+    if n_ghost > 0
+        M = weights(regrid(vol_pts, mirror_pts; k = min(k, length(vol_pts))))
+        Mi, Mj, Mv = findnz(M)
+        append!(rows, Mi)
+        append!(cols, Nb .+ Mj)
+        append!(vals, Mv)
+    end
     data_pts = vcat(all_pts, ghost_pts)
     W_ext = weights(operator(data_pts; eval_points = all_pts, k = k))
     W_real = W_ext[:, 1:N]
