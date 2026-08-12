@@ -1,3 +1,7 @@
+# The solution eltype is set by what `make_system` and the BCs produce — real
+# models solve in Float64, but a complex-valued problem (e.g. time-harmonic
+# Helmholtz with phase-carrying Dirichlet data) flows through the same steady
+# path unchanged, so the storage must not pin the eltype at construction time.
 """
     Simulation{M, C, Mode}
 
@@ -24,10 +28,6 @@ sim = Simulation(domain, Steady())
 sim = Simulation(domain, Transient(Δt=0.001, stop_time=1.0))
 ```
 """
-# The solution eltype is set by what `make_system` and the BCs produce — real
-# models solve in Float64, but a complex-valued problem (e.g. time-harmonic
-# Helmholtz with phase-carrying Dirichlet data) flows through the same steady
-# path unchanged, so the storage must not pin the eltype at construction time.
 mutable struct Simulation{M, C, Mode <: AbstractSimulationMode}
     domain::Domain{M, C}
     mode::Mode
