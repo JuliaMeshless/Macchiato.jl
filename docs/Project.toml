@@ -15,4 +15,4 @@ WhatsThePoint = {rev = "main", url = "https://github.com/JuliaMeshless/WhatsTheP
 [compat]
 Documenter = "1.11"
 DocumenterVitepress = "0.3.4"
-WhatsThePoint = "0.2"
+WhatsThePoint = "0.2, 0.3"
