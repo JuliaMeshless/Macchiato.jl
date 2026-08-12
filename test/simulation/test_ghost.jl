@@ -89,7 +89,9 @@ end
         # roundoff on O(1/dx²) ghost-amplified weights, so compare relative to scale
         reldiff = maximum(abs, W_cus - W_lap) / maximum(abs, W_lap)
         println("  |W_custom(D = I) - W_laplacian|_max / |W_laplacian|_max = $reldiff")
-        @test reldiff < 1.0e-11
+        # observed up to ~1e-10 across BLAS/architectures; the RBF 2D-Laplacian bug
+        # this guards against shows up at ~3e-1 relative
+        @test reldiff < 1.0e-8
     end
 
     @testset "anisotropic operator: finite weights, zero row-sum" begin
@@ -102,14 +104,17 @@ end
             ),
         )
         row_sum = maximum(abs, vec(sum(W; dims = 2)))
+        Wmax = maximum(abs, W)
         println(
             "  anisotropic W: nnz = $(nnz(W)), max|row-sum| = $row_sum, " *
-                "max|W| = $(maximum(abs, W))"
+                "max|W| = $Wmax"
         )
         @test size(W) == (N, N)
         @test all(isfinite, W.nzval)
-        # ∇·(D∇) annihilates constants; the ghost→shadow fold must preserve that
-        @test row_sum < 1.0e-8
+        # ∇·(D∇) annihilates constants; the ghost fold must preserve that. Weight
+        # magnitudes scale with the (cloud-dependent) worst 1/Δ², so bound the
+        # row-sum relative to them; observed ~1e-16 relative.
+        @test row_sum / Wmax < 1.0e-11
         n_flux = sum(
             length(ids) for (name, (ids, bc)) in domain.boundaries if bc isa ZeroFlux
         )
