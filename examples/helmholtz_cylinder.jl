@@ -13,9 +13,10 @@
 # pattern from docs/src/custom_pdes.md.
 #
 # Run from the repo root: julia --project=examples examples/helmholtz_cylinder.jl
-# Output: examples/helmholtz_cylinder.png (gitignored) — 2x2 figure: Re(E) and
-# Im(E) interference fringes, |E| amplitude with the shadow region, and the
-# pointwise |error| against the exact series on a log scale.
+# Output: examples/helmholtz_cylinder_solution.jld2 (gitignored) — the solved
+# and exact fields as plain arrays — then the figure, rendered by including
+# helmholtz_cylinder_viz.jl as the final step. To tweak the figure without
+# re-solving, edit and run that script alone.
 #
 # Requires RadialBasisFunctions ≥ 0.7.1 (dimension-aware PHS Laplacian — 0.7.0
 # hardcodes the 3D constant and silently biases 2D solves).
@@ -31,7 +32,7 @@ import Macchiato as MM
 using Unitful: m, ustrip
 using OrderedCollections: LittleDict
 using SpecialFunctions: besselj, hankelh1
-using CairoMakie
+using JLD2: jldsave
 using StaticArrays: SVector
 using LinearAlgebra: norm
 using Random: seed!
@@ -136,7 +137,8 @@ Macchiato.num_vars(::Helmholtz, _) = 1
 function Macchiato.make_system(model::Helmholtz, domain; kwargs...)
     κ² = model.κ^2
     x = node_coordinates(domain)
-    op = (@operator ∇² + κ² * f)(x; k = 60, basis = PHS(3; poly_deg = 6))
+    helmholtz = @operator ∇² + κ² * f
+    op = helmholtz(x; k = 60, basis = PHS(3; poly_deg = 6))
     # Solve uniformly in ComplexF64. The weights are real, but A is promoted at
     # assembly because a real factorization cannot back-substitute a complex
     # right-hand side — LinearSolve's default solver selection only lands on a
@@ -194,61 +196,18 @@ end
 @assert Linf_error < 6.0e-3 "L∞ error too large: $Linf_error"
 
 # ============================================================================
-# Render: 2x2 — Re(E), Im(E), |E|, and |error| on a log scale
+# Save the solution, then render via the standalone viz script
 # ============================================================================
+#
+# The solve is minutes; the render is seconds. Everything the figure needs is
+# saved as plain arrays/scalars (no package types) so the visualization can be
+# tweaked and re-rendered without re-solving.
 
-xs = [p[1] for p in coords]
-ys = [p[2] for p in coords]
+data_path = joinpath(@__DIR__, "helmholtz_cylinder_solution.jld2")
+jldsave(data_path;
+    xs = [p[1] for p in coords], ys = [p[2] for p in coords],
+    E_num = E_num, E_ex = E_ex, h = h, a_cyl = a_cyl,
+)
+println("saved solution data: ", abspath(data_path))
 
-# Dirichlet rows sit near machine eps — far below the interior error band. Clamp
-# to a floor just under that band so the log colorbar resolves the interior
-# variation instead of stretching over the empty decades down to eps.
-err_abs = abs.(err)
-floor_val = 1.0e-8
-err_plot = max.(err_abs, floor_val)
-err_range = (floor_val, max(maximum(err_abs), 10floor_val))
-
-# Shared symmetric range for the Re/Im fringe panels (diverging colormap
-# centered on zero); |E| gets a sequential map anchored at zero.
-M = max(maximum(abs, real.(E_num)), maximum(abs, imag.(E_num)))
-
-# iCloud's file provider intermittently stalls `close` on multi-MB PNGs written
-# in place under the synced repo ("SystemError: close: Operation timed out").
-# Render to a local temp file and move it into position in one bulk copy instead.
-function save_png(path, fig; kwargs...)
-    tmp = tempname() * ".png"
-    save(tmp, fig; kwargs...)
-    mv(tmp, path; force = true)
-    return path
-end
-
-fig = Figure(; size = (1500, 1400))
-
-function field_panel!(where_, color, colorrange; title, colormap, colorscale = identity)
-    ax = Axis(where_; aspect = DataAspect(), title = title,
-        xlabel = "x (m)", ylabel = "y (m)")
-    plt = scatter!(ax, xs, ys;
-        color = color, colorrange = colorrange, colormap = colormap,
-        colorscale = colorscale, markerspace = :data, markersize = 1.4h)
-    # Fill the PEC cylinder so it reads as a solid object and hides the hole rim.
-    poly!(ax, Circle(Point2f(0, 0), Float32(a_cyl)); color = :gray25)
-    return plt
-end
-
-p1 = field_panel!(fig[1, 1], real.(E_num), (-M, M);
-    title = "Re(E) — interference fringes", colormap = :RdBu)
-Colorbar(fig[1, 2], p1)
-p2 = field_panel!(fig[1, 3], imag.(E_num), (-M, M);
-    title = "Im(E)", colormap = :RdBu)
-Colorbar(fig[1, 4], p2)
-p3 = field_panel!(fig[2, 1], abs.(E_num), (0, maximum(abs, E_num));
-    title = "|E| — shadow and standing waves", colormap = :viridis)
-Colorbar(fig[2, 2], p3)
-p4 = field_panel!(fig[2, 3], err_plot, err_range;
-    title = "|E − E_exact| (log scale)", colormap = :inferno, colorscale = log10)
-Colorbar(fig[2, 4], p4)
-
-png_path = joinpath(@__DIR__, "helmholtz_cylinder.png")
-save_png(png_path, fig; px_per_unit = 2)
-@assert isfile(png_path) && filesize(png_path) > 20_000
-println("saved: ", abspath(png_path))
+include("helmholtz_cylinder_viz.jl")

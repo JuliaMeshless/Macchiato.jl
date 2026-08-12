@@ -25,14 +25,19 @@ const K_o = 5.4
 const Na_o = 140.0
 const Ca_o = 2.0
 
-# Maximum conductances — epicardial variant
+# Maximum conductances — epicardial variant.
+# G_CaL/G_Kr/G_Ks accept optional pre-include scale overrides (define
+# TT06_G_CaL_SCALE etc. BEFORE include-ing this file) so a script can shorten
+# the action potential — e.g. examples/biventricle_spiral.jl shrinks the
+# reentry wavelength to sustain a spiral wave. Left undefined, the scales are 1
+# and the published model is unchanged.
 const G_Na = 14.838
 const G_bNa = 0.00029
-const G_CaL = 3.98e-5
+const G_CaL = 3.98e-5 * (@isdefined(TT06_G_CaL_SCALE) ? TT06_G_CaL_SCALE : 1.0)
 const G_bCa = 0.000592
 const G_to = 0.294       # epicardial
-const G_Ks = 0.392       # epicardial
-const G_Kr = 0.153
+const G_Ks = 0.392 * (@isdefined(TT06_G_Ks_SCALE) ? TT06_G_Ks_SCALE : 1.0)   # epicardial
+const G_Kr = 0.153 * (@isdefined(TT06_G_Kr_SCALE) ? TT06_G_Kr_SCALE : 1.0)
 const G_K1 = 5.405
 const G_pCa = 0.1238
 const G_pK = 0.0146

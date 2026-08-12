@@ -1,0 +1,58 @@
+  Activating project at `~/Library/Mobile Documents/com~apple~CloudDocs/pro/dev/Macchiato/examples`
+[ Info: Macchiato will use 5 threads
+Julia Version 1.12.6
+Commit 15346901f00 (2026-04-09 19:20 UTC)
+Build Info:
+  Official https://julialang.org release
+Platform Info:
+  OS: macOS (arm64-apple-darwin24.0.0)
+  CPU: 15 × Apple M5 Pro
+  WORD_SIZE: 64
+  LLVM: libLLVM-18.1.7 (ORCJIT, apple-m1)
+  GC: Built with stock GC
+Threads: 5 default, 1 interactive, 5 GC (on 5 virtual cores)
+Environment:
+  JULIA_MPI_PATH = /opt/homebrew/opt/open-mpi
+  JULIA_NUM_THREADS = 13
+  JULIA_PKG_DEVDIR = /Users/kylebeggs/pro/dev
+  JULIA_PKG_USE_CLI_GIT = true
+  Building node tree... done (6224 leaves, 0.0s)
+  Classifying node tree leaves... done (0.07s)
+  Auto-estimated max_points = 5970
+  Bridson sampling (1937 boundary seeds)... done (3779 points, 0.21s)
+cloud: 5716 points (1937 boundary + 3779 volume)
+Solving (dt = 0.005 ms, t_end = 80.0 ms)...
+monodomain W: nnz = 301014, max|row-sum| = 7.771561172376096e-15, max|W| = 4.8, forward-Euler dt_max ≈ 0.4144 ms
+stimulus region: 52 nodes in the 1.5 mm corner cube
+  t = 5.0 ms | V ∈ [-92.8, 28.1] mV | activated: 192 / 5716
+  t = 10.0 ms | V ∈ [-93.1, 30.7] mV | activated: 665 / 5716
+  t = 15.0 ms | V ∈ [-91.9, 31.0] mV | activated: 1390 / 5716
+  t = 20.0 ms | V ∈ [-93.5, 31.2] mV | activated: 2351 / 5716
+  t = 25.0 ms | V ∈ [-90.6, 30.4] mV | activated: 3440 / 5716
+  t = 30.0 ms | V ∈ [-91.7, 30.7] mV | activated: 4355 / 5716
+  t = 35.0 ms | V ∈ [-90.0, 33.6] mV | activated: 5242 / 5716
+  t = 40.0 ms | V ∈ [-91.4, 31.0] mV | activated: 5667 / 5716
+  t = 45.0 ms | V ∈ [19.6, 30.3] mV | activated: 5716 / 5716
+  t = 50.0 ms | V ∈ [21.9, 30.5] mV | activated: 5716 / 5716
+  t = 55.0 ms | V ∈ [25.5, 30.4] mV | activated: 5716 / 5716
+  t = 60.0 ms | V ∈ [26.9, 30.6] mV | activated: 5716 / 5716
+  t = 65.0 ms | V ∈ [26.3, 30.8] mV | activated: 5716 / 5716
+  t = 70.0 ms | V ∈ [25.7, 30.9] mV | activated: 5716 / 5716
+  t = 75.0 ms | V ∈ [25.1, 30.7] mV | activated: 5716 / 5716
+  t = 80.0 ms | V ∈ [24.6, 30.1] mV | activated: 5716 / 5716
+ 15.332355 seconds (28.76 M allocations: 1.734 GiB, 1.35% gc time, 18.56% compilation time: 2% of which was recompilation)
+
+Activation times at Niederer reference points:
+  Pi   target (mm)           snapped (mm)                dist   AT (ms)
+  P1   (0.0  , 0.0 , 0.0 ) (0.0   , 0.019, 0.081) 0.083  1.23
+  P2   (0.0  , 7.0 , 0.0 ) (0.027 , 6.951, 0.0  ) 0.056  21.51
+  P3   (20.0 , 7.0 , 0.0 ) (20.0  , 6.781, 0.109) 0.245  40.91
+  P4   (20.0 , 0.0 , 0.0 ) (19.766, 0.133, 0.0  ) 0.269  33.85
+  P5   (0.0  , 0.0 , 3.0 ) (0.0   , 0.06 , 2.921) 0.099  6.88
+  P6   (0.0  , 7.0 , 3.0 ) (0.106 , 7.0  , 2.762) 0.26   22.04
+  P7   (20.0 , 0.0 , 3.0 ) (19.971, 0.073, 3.0  ) 0.078  35.04
+  P8   (20.0 , 7.0 , 3.0 ) (19.79 , 6.74 , 3.0  ) 0.334  41.68
+  P9   (10.0 , 3.5 , 1.5 ) (10.215, 3.581, 1.421) 0.243  20.84
+Diagonal P1→P8 activation curve written to /Users/kylebeggs/Library/Mobile Documents/com~apple~CloudDocs/pro/dev/Macchiato/examples/niederer_benchmark/niederer_diagonal.csv
+Results written to niederer_result.vtu
+saved: /Users/kylebeggs/Library/Mobile Documents/com~apple~CloudDocs/pro/dev/Macchiato/examples/niederer_benchmark/niederer_benchmark.png

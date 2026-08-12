@@ -28,25 +28,44 @@ function _flux_source_applier(bc, idx, coef, xs)
 end
 
 """
-    build_neumann_diffusion(domain; k=DEFAULT_STENCIL_SIZE)
+    build_neumann_diffusion(domain; k=DEFAULT_STENCIL_SIZE, operator=...)
 
 Assemble the transient scalar-diffusion operator for a `Domain` with all
 Neumann/Robin flux conditions folded in via ghost nodes.
 
 Returns `(W, G, source_appliers)`:
 - `W::SparseMatrixCSC` (N×N): the solution-dependent diffusion operator — interior
-  RBF-FD Laplacian plus ghost-folded boundary rows (including the Robin `α·u`
-  coupling). Not scaled by the diffusivity.
+  operator rows (default: RBF-FD Laplacian) plus ghost-folded boundary rows
+  (including the Robin `α·u` coupling). Not scaled by the diffusivity.
 - `G::SparseMatrixCSC` (N×n_ghost): scatters the per-ghost flux source `c(t)` into
   the right-hand side. Not scaled by the diffusivity.
 - `source_appliers::Vector`: one closure per Neumann/Robin surface; calling
   `applier(cbuf, t)` fills that surface's entries of the length-`n_ghost` source
   buffer with `coef * bc(x, t)`.
 
+`operator` is a builder callable `(data_pts; eval_points, k) -> RadialBasisOperator`
+whose weights supply the interior operator rows; it defaults to the isotropic RBF-FD
+`laplacian`. Pass a closure to fold the flux conditions into an anisotropic or
+otherwise custom second-order operator — the ghost elimination is operator-agnostic
+as long as the operator annihilates constants (so the ghost-folded rows keep zero
+row-sum). For example, fiber-aligned anisotropic diffusion:
+
+    D = SVector(D_L, D_T, D_T)   # fibers along x
+    build_neumann_diffusion(
+        domain; k = 60,
+        operator = (data; eval_points, k) -> custom(
+            data, @operator(∇ ⋅ (D * ∇));
+            eval_points = eval_points, k = k, basis = PHS(3; poly_deg = 2),
+        ),
+    )
+
 The boundary-first node ordering (`[boundary; volume]`) of the point cloud is
 assumed, so a shadow node's global index is `n_boundary + its_volume_index`.
 """
-function build_neumann_diffusion(domain; k = DEFAULT_STENCIL_SIZE)
+function build_neumann_diffusion(
+        domain; k = DEFAULT_STENCIL_SIZE,
+        operator = (data; eval_points, k) -> laplacian(data; eval_points = eval_points, k = k),
+    )
     all_pts = _ustrip(_coords(domain.cloud))
     vol_pts = _ustrip(_coords(domain.cloud.volume))
     N = length(all_pts)
@@ -95,7 +114,7 @@ function build_neumann_diffusion(domain; k = DEFAULT_STENCIL_SIZE)
 
     n_ghost = j
     data_pts = vcat(all_pts, ghost_pts)
-    W_ext = weights(laplacian(data_pts; eval_points = all_pts, k = k))
+    W_ext = weights(operator(data_pts; eval_points = all_pts, k = k))
     W_real = W_ext[:, 1:N]
     W_ghost = W_ext[:, (N + 1):(N + n_ghost)]
     T = sparse(rows, cols, vals, n_ghost, N)

@@ -53,3 +53,16 @@ examples/niederer_benchmark/niederer_result_fd.vtr
 # raw Stanford scan downloaded by examples/assets/prep_armadillo.py;
 # only the processed armadillo.stl is committed
 examples/assets/Armadillo.ply
+
+# raw Bai et al. 2015 atlas mesh copied from DerangedIons/ArmyHeart.jl (git-LFS)
+# by examples/assets/prep_biventricle.py; only the processed biventricle.stl is
+# committed
+examples/assets/bai_etal_2015-instance_010_e26073.vtu
+examples/biventricle_result.vtu
+
+# solved voltage frames for examples/biventricle_spiral.jl (re-renderable)
+examples/biventricle_spiral_frames.jld2
+
+# solved field for examples/helmholtz_cylinder.jl (re-renderable via
+# examples/helmholtz_cylinder_viz.jl)
+examples/helmholtz_cylinder_solution.jld2

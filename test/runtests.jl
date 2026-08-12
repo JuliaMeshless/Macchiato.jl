@@ -12,6 +12,7 @@ testfiles = [
     "end_2_end/2d_complex_steady.jl",
     "simulation/test_set.jl",
     "simulation/test_simulation.jl",
+    "simulation/test_ghost.jl",
     "models/test_linear_elasticity.jl",
 ]
 
