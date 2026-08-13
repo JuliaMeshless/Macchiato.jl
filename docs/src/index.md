@@ -107,7 +107,7 @@ That is the whole workflow. [Getting Started](@ref) walks through each step in d
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/JuliaMeshless/Macchiato.jl")
+Pkg.add("Macchiato")
 ```
 
 ## Gallery

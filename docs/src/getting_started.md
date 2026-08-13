@@ -6,9 +6,7 @@ This tutorial walks through a complete 2D steady-state heat conduction simulatio
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/JuliaMeshless/WhatsThePoint.jl")
-Pkg.add(url="https://github.com/JuliaMeshless/RadialBasisFunctions.jl")
-Pkg.add(url="https://github.com/JuliaMeshless/Macchiato.jl")
+Pkg.add(["WhatsThePoint", "RadialBasisFunctions", "Macchiato"])
 ```
 
 ## Step 1: Define the Geometry

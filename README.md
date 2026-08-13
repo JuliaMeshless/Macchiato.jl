@@ -70,13 +70,13 @@ All BCs accept constant values or functions `(x, t) -> value` for spatially/temp
 
 ```julia
 using Pkg
-Pkg.add(url="https://github.com/JuliaMeshless/Macchiato.jl")
+Pkg.add("Macchiato")
 ```
 
 Or for development:
 
 ```julia
-Pkg.develop(url="https://github.com/JuliaMeshless/Macchiato.jl")
+Pkg.develop("Macchiato")
 ```
 
 ## Documentation
