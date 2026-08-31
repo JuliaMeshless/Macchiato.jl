@@ -79,9 +79,9 @@ function make_system(model::LinearElasticity, domain; kwargs...)
     ∂²xy = mixed_partial(coords, 1, 2; k = k, adjl = adjl, kwargs...)
 
     # Assemble 2N×2N system from blocks via operator algebra
-    A₁₁ = weights((λstar + 2μ) * ∂²x + μ * ∂²y)
-    A₁₂ = weights((λstar + μ) * ∂²xy)
-    A₂₂ = weights(μ * ∂²x + (λstar + 2μ) * ∂²y)
+    A₁₁ = sparse((λstar + 2μ) * ∂²x + μ * ∂²y)
+    A₁₂ = sparse((λstar + μ) * ∂²xy)
+    A₂₂ = sparse(μ * ∂²x + (λstar + 2μ) * ∂²y)
 
     # Combine into 2N×2N sparse matrix
     A = [

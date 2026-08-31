@@ -72,7 +72,7 @@ function make_system(model::SolidEnergy, domain; kwargs...)
     coords = _coords(domain.cloud)
     ∇² = laplacian(_ustrip(coords); k = DEFAULT_STENCIL_SIZE, kwargs...)
     α = k / (cₚ * ρ)
-    A = weights(α * ∇²)
+    A = sparse(α * ∇²)
 
     # Compute RHS from source term
     # Steady-state heat equation: ∇²T = f/α → (α∇²)T = f

@@ -34,117 +34,84 @@ bc_right(x, t) = u_exact(1.0, ustrip(x[2]))   # x = 1: u = y(1-y)
 bc_top(x, t) = u_exact(ustrip(x[1]), 1.0)     # y = 1: u = x(1-x)
 bc_left(x, t) = u_exact(0.0, ustrip(x[2]))    # x = 0: u = y(1-y)
 
-dx = 1 / 33 * m  # Resolution (33x33 gives 1089 points)
-part = create_2d_square_domain(dx)
-
-Δ = dx
-cloud = WTP.discretize(part, ConstantSpacing(Δ))
-
 # ============================================================================
-# Step 3: Set up boundary conditions from analytical solution
+# Step 2: Boundary conditions from the analytical solution
 # ============================================================================
-
-#surface1 is bottom
-#surface2 is right
-#surface3 is top
-#surface4 is left
-
-# We want to test different types of BCs:
-# 1. Dirichlet (Temperature): u = u_exact
-# 2. Neumann (HeatFlux): ∂u/∂n = ∇u ⋅ n
-# 3. Robin (Convection): h·u + k·∂u/∂n = h·T∞
-
-# Calculate normal derivatives for u_exact = x(1-x) + y(1-y)
-# ∇u = (1-2x, 1-2y)
-# Bottom (y=0, n=(0,-1)): ∂u/∂n = -(1-2y) = -1
-# Right (x=1, n=(1,0)):   ∂u/∂n = (1-2x) = -1
-# Top (y=1, n=(0,1)):     ∂u/∂n = (1-2y) = -1
-# Left (x=0, n=(-1,0)):   ∂u/∂n = -(1-2x) = -1
-# So flux is -1 everywhere.
+#
+# surface1 = bottom, surface2 = right, surface3 = top, surface4 = left.
+#
+# Three BC types are exercised at once:
+#   1. Dirichlet (Temperature): u = u_exact
+#   2. Neumann   (HeatFlux):    ∂u/∂n = ∇u ⋅ n
+#   3. Robin     (Convection):  h·u + k·∂u/∂n = h·T∞
+#
+# For u_exact = x(1-x) + y(1-y), ∇u = (1-2x, 1-2y), so on every edge
+# ∂u/∂n = -1:
+#   bottom (y=0, n=(0,-1)): -(1-2y) = -1     right (x=1, n=(1,0)):  (1-2x) = -1
+#   top    (y=1, n=(0,1)):   (1-2y) = -1     left  (x=0, n=(-1,0)): -(1-2x) = -1
 
 flux_val = -1.0
 
-# For Robin on Top (y=1):
-# Let h = 1, k = 1.
-# u + ∂u/∂n = T∞
-# u + (-1) = T∞  =>  T∞ = u - 1
+# Robin on the top edge with h = k = 1: u + ∂u/∂n = T∞ ⟹ T∞ = u - 1
 bc_top_robin(x, t) = bc_top(x, t) - 1.0
 
-bcs = Dict(
+moms_bcs() = Dict(
     :surface1 => MM.Temperature(bc_bottom),             # Bottom: Dirichlet
     :surface2 => MM.HeatFlux(flux_val),                 # Right: Neumann
     :surface3 => MM.Convection(1.0, 1.0, bc_top_robin), # Top: Robin
-    :surface4 => MM.Temperature(bc_left)                # Left: Dirichlet
+    :surface4 => MM.Temperature(bc_left),               # Left: Dirichlet
 )
 
-# ============================================================================
-# Step 4: Set up physics model with source term
-# ============================================================================
+"""
+    solve_poisson_moms(dx) -> (; L2_error, Linf_error, relative_L2, boundary_error)
 
-# For Poisson equation ∇²u = f, we use SolidEnergy with α = k/(ρcₚ) = 1
-# Steady-state: ∇²u = f/α → (α∇²)u = f
-# We need α = 1, so set k = ρ = cₚ = 1
+Solve ∇²u = -4 on the unit square at resolution `dx` under mixed
+Dirichlet/Neumann/Robin conditions, and compare against `u_exact`.
 
-k = 1.0
-ρ = 1.0
-cₚ = 1.0
+Kept in a function rather than at file scope so a failure here is reported as one
+test error instead of escaping `include` and aborting the whole suite.
+"""
+function solve_poisson_moms(dx = 1 / 33 * m)
+    cloud = create_2d_square_cloud(dx)
 
-# Source term function: f(x, t) = ∇²u_exact = -4
-source_function(x, t) = source_term(x[1], x[2])
+    # Poisson ∇²u = f via SolidEnergy with α = k/(ρcₚ) = 1
+    source_function(x, t) = source_term(x[1], x[2])
+    model = MM.SolidEnergy(k = 1.0, ρ = 1.0, cₚ = 1.0, source = source_function)
+    domain = MM.Domain(cloud, moms_bcs(), model)
 
-model = MM.SolidEnergy(k = k, ρ = ρ, cₚ = cₚ, source = source_function)
-domain = MM.Domain(cloud, bcs, model)
+    sol = solve(MM.LinearProblem(domain))
+    u_numerical = sol.u
 
-println("\nModel: ", model)
+    u_analytical = map(MM._coords(cloud)) do pt
+        u_exact(ustrip(pt.x), ustrip(pt.y))
+    end
 
-# ============================================================================
-# Step 5: Solve steady-state linear problem
-# ============================================================================
-
-prob = MM.LinearProblem(domain)
-sol = solve(prob)
-u_numerical = sol.u
-
-# ============================================================================
-# Step 6: Compute analytical solution at all points
-# ============================================================================
-
-u_analytical = map(MM._coords(cloud)) do pt
-    u_exact(ustrip(pt.x), ustrip(pt.y))
+    error = u_numerical .- u_analytical
+    return (
+        L2_error = norm(error, 2) / sqrt(length(error)),
+        Linf_error = norm(error, Inf),
+        relative_L2 = (norm(error, 2) / sqrt(length(error))) / norm(u_analytical, 2),
+        boundary_error = norm(error[1:length(cloud.boundary)], Inf),
+    )
 end
 
-# ============================================================================
-# Step 7: Compute errors
-# ============================================================================
-
-error = u_numerical .- u_analytical
-L2_error = norm(error, 2) / sqrt(length(error))
-Linf_error = norm(error, Inf)
-relative_L2 = L2_error / norm(u_analytical, 2)
-
-println("\nError Analysis:")
-println("  L2 error:      ", L2_error)
-println("  L∞ error:      ", Linf_error)
-println("  Relative L2:   ", relative_L2)
-
-# Error at boundary points (should be near zero)
-boundary_indices = 1:length(cloud.boundary)
-boundary_error = norm(error[boundary_indices], Inf)
-println("  Boundary L∞:   ", boundary_error)
-
-# ============================================================================
-# Step 8: Tests
-# ============================================================================
-
 @testset "2D Poisson MoMS" begin
-    # Boundary conditions should be exact
-    @test boundary_error < 1.0e-10
+    r = solve_poisson_moms()
 
-    # Interior solution accuracy depends on discretization
-    # For 33x33 grid with polynomial solution, expect good accuracy
-    @test L2_error < 5.0e-2  # Reasonable for meshless method
-    @test Linf_error < 1.0e-1
-    @test relative_L2 < 0.1  # Less than 10% relative error
+    println("\nError Analysis:")
+    println("  L2 error:      ", r.L2_error)
+    println("  L∞ error:      ", r.Linf_error)
+    println("  Relative L2:   ", r.relative_L2)
+    println("  Boundary L∞:   ", r.boundary_error)
+
+    # Boundary conditions should be satisfied essentially exactly
+    @test r.boundary_error < 1.0e-10
+
+    # Interior accuracy depends on discretization; these are reasonable for a
+    # 33×33 meshless cloud on a polynomial solution.
+    @test r.L2_error < 5.0e-2
+    @test r.Linf_error < 1.0e-1
+    @test r.relative_L2 < 0.1
 
     println("\n✓ Poisson equation solver validated with MoMS")
     println("  Solving: ∇²u = -4 with u = x(1-x) + y(1-y)")

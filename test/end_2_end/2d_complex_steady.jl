@@ -35,38 +35,50 @@ Macchiato.num_vars(::ComplexPoisson, _) = 1
 function Macchiato.make_system(model::ComplexPoisson, domain; kwargs...)
     x = node_coordinates(domain)
     ∇² = laplacian(x; k = 40)
-    A = ComplexF64.(weights(∇²))
+    A = ComplexF64.(sparse(∇²))
     b = ComplexF64[model.source(xᵢ) for xᵢ in x]
     return A, b
 end
 
-dx = 1 / 33 * m
-part = create_2d_square_domain(dx)
-cloud = WTP.discretize(part, ConstantSpacing(dx))
+"""
+    solve_complex_steady(dx) -> (; u, boundary_error, max_error)
 
-bcs = Dict(
-    :surface1 => PrescribedValue((x, t) -> u_exact_c(x)),
-    :surface2 => PrescribedValue((x, t) -> u_exact_c(x)),
-    :surface3 => PrescribedValue((x, t) -> u_exact_c(x)),
-    :surface4 => PrescribedValue((x, t) -> u_exact_c(x)),
-)
+Run the complex-valued steady solve and compare against `u_exact_c`.
 
-domain = MM.Domain(cloud, bcs, ComplexPoisson(source_c))
-sim = Simulation(domain)
-run!(sim)
-u = solution(sim)
+Kept in a function rather than at file scope so a failure here is reported as one
+test error instead of escaping `include` and aborting the whole suite.
+"""
+function solve_complex_steady(dx = 1 / 33 * m)
+    cloud = create_2d_square_cloud(dx)
 
-coords = node_coordinates(domain)
-err = u .- u_exact_c.(coords)
-boundary_error = maximum(abs, err[1:length(cloud.boundary)])
-max_error = maximum(abs, err)
-println(
-    "complex steady solve: eltype = ", eltype(u),
-    ", boundary L∞ = ", round(boundary_error; sigdigits = 3),
-    ", L∞ = ", round(max_error; sigdigits = 3)
-)
+    bcs = Dict(
+        surf => PrescribedValue((x, t) -> u_exact_c(x))
+            for surf in (:surface1, :surface2, :surface3, :surface4)
+    )
+
+    domain = MM.Domain(cloud, bcs, ComplexPoisson(source_c))
+    sim = Simulation(domain)
+    run!(sim)
+    u = solution(sim)
+
+    err = u .- u_exact_c.(node_coordinates(domain))
+    return (
+        u = u,
+        boundary_error = maximum(abs, err[1:length(cloud.boundary)]),
+        max_error = maximum(abs, err),
+    )
+end
 
 @testset "complex steady solve" begin
+    r = solve_complex_steady()
+    u, boundary_error, max_error = r.u, r.boundary_error, r.max_error
+
+    println(
+        "complex steady solve: eltype = ", eltype(u),
+        ", boundary L∞ = ", round(boundary_error; sigdigits = 3),
+        ", L∞ = ", round(max_error; sigdigits = 3)
+    )
+
     @test eltype(u) == ComplexF64
     # Dirichlet rows are identity rows — complex boundary values stored exactly
     @test boundary_error < 1.0e-10

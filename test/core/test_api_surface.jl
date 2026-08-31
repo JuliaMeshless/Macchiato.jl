@@ -11,8 +11,7 @@ include(joinpath(@__DIR__, "..", "end_2_end", "2d_square.jl"))
 
 function create_api_test_cloud()
     dx = 1 / 9 * m
-    part = create_2d_square_domain(dx)
-    return WTP.discretize(part, ConstantSpacing(dx))
+    return create_2d_square_cloud(dx)
 end
 
 struct APITestModel <: AbstractModel end
@@ -27,9 +26,21 @@ struct APITestModel <: AbstractModel end
             )
             @test Base.isexported(Macchiato, name)
         end
-        # BC vocabulary stays Macchiato's own — RBF's BC types must NOT leak through
+        # BC vocabulary is Macchiato's own
         @test Base.isexported(Macchiato, :Dirichlet)  # Macchiato's abstract type
-        @test Macchiato.Dirichlet !== RadialBasisFunctions.Dirichlet
+    end
+
+    @testset "RadialBasisFunctions owns no boundary-condition vocabulary" begin
+        # Layer invariant: RBF is an operator/stencil library. Boundary conditions live
+        # here, geometry lives in WhatsThePoint. If any of these reappear upstream, the
+        # packages have re-coupled — see the 0.9.0 Hermite removal.
+        for name in (
+                :BoundaryCondition, :Dirichlet, :Neumann, :Robin, :Internal,
+                :is_dirichlet, :is_neumann, :is_robin, :is_internal,
+                :HermiteStencilData, :classify_stencil,
+            )
+            @test !isdefined(RadialBasisFunctions, name)
+        end
     end
 
     @testset "num_vars rename keeps _num_vars back-compat alias" begin

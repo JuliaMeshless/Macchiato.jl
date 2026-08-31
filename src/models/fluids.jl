@@ -109,7 +109,7 @@ function make_f(
     all_points = _coords(domain.cloud)
     ∇² = laplacian(all_points; eval_points = vol, k = DEFAULT_STENCIL_SIZE)
     α = k / (cₚ * ρ)
-    w = weights(α * ∇²)
+    w = sparse(α * ∇²)
     n_boundary = length(boundary(domain.cloud))
     vol_ids = (n_boundary + 1):(n_boundary + length(domain.cloud.volume))
 

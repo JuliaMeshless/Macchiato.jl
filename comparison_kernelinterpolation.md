@@ -34,7 +34,7 @@ Packages under comparison:
 | **Kernel families** | PHS (r, r³, r⁵, r⁷), IMQ, Gaussian | Gaussian confirmed in README; `src/kernels/` subdirectory and "(conditionally) positive definite kernels" framing imply a broader catalog (likely Matérn, Wendland, PHS) |
 | **Polynomial augmentation** | Degree 0–2, matched to PHS order | Yes, automatic for conditionally PD kernels |
 | **Geometry pipeline** | First-class: WhatsThePoint handles STL/OBJ import, PCA normals, sharp-edge splitting, octree, node repulsion, boundary-layer spacing | Built-in hypercube / hypersphere / random node generators; optional Meshes.jl / QuasiMonteCarlo.jl for more |
-| **BC model** | Typed hierarchy: Dirichlet/Neumann/Robin + physics-specific aliases (`Temperature`, `Displacement`, `Convection`, …) | Hermite–Birkhoff symmetric collocation — BCs expressed as differential-operator conditions at nodes |
+| **BC model** | Typed hierarchy: Dirichlet/Neumann/Robin + physics-specific aliases (`Temperature`, `Displacement`, `Convection`, …), applied as row replacements at assembly | Hermite–Birkhoff symmetric collocation — BCs expressed as differential-operator conditions at nodes |
 | **PDE framing** | Concrete physics models: `SolidEnergy`, `LinearElasticity`, `IncompressibleNavierStokes`. Closed-form system assembly per model. | Generic `Equation` / differential-operator API. Builds the collocation system from a user-specified PDE. |
 | **Time-dependent PDEs** | `make_f` returns an ODE function; delegated to OrdinaryDiffEq.jl | Supported; delegates to OrdinaryDiffEq.jl (+ OrdinaryDiffEqRosenbrock recommended) |
 | **Linear algebra** | Sparse via SparseArrays + LinearSolve.jl | Dense (implied — no sparse/iterative hooks mentioned) |
@@ -80,7 +80,7 @@ KernelInterpolation.jl is generic from the ground up: you hand it a `NodeSet`, a
 
 KernelInterpolation.jl explicitly leans on **generalized (Hermite–Birkhoff) interpolation** for PDEs. In symmetric collocation, BCs are expressed as differential-operator conditions at boundary nodes, and the system matrix is built from kernel evaluations under those operators. This is mathematically clean and gives well-posed, provably-convergent methods.
 
-RadialBasisFunctions.jl also supports **Hermite stencils** for boundary conditions (so BCs like Neumann can be enforced exactly in the local stencil), but the framing is different: stencils are local, BCs are applied as row-replacements in the sparse system, and the abstraction is "this stencil enforces this derivative" rather than "this node satisfies this operator equation." Same underlying math, different packaging.
+RadialBasisFunctions.jl carried a Hermite stencil path until 0.9.0, when it was removed: RBF.jl is now purely an operator/stencil library with no boundary-condition vocabulary. In this stack, boundary conditions are Macchiato's concern and are applied as row replacements in the assembled system. This is a deliberate layering choice rather than a mathematical disagreement.
 
 ### 6. Modern Julia ecosystem integration
 

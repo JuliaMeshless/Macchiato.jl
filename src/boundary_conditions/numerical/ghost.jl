@@ -121,14 +121,14 @@ function build_neumann_diffusion(
     # interpolation row is exact for linear fields, so the folded operator stays
     # consistent.
     if n_ghost > 0
-        M = weights(regrid(vol_pts, mirror_pts; k = min(k, length(vol_pts))))
+        M = sparse(regrid(vol_pts, mirror_pts; k = min(k, length(vol_pts))))
         Mi, Mj, Mv = findnz(M)
         append!(rows, Mi)
         append!(cols, Nb .+ Mj)
         append!(vals, Mv)
     end
     data_pts = vcat(all_pts, ghost_pts)
-    W_ext = weights(operator(data_pts; eval_points = all_pts, k = k))
+    W_ext = sparse(operator(data_pts; eval_points = all_pts, k = k))
     W_real = W_ext[:, 1:N]
     W_ghost = W_ext[:, (N + 1):(N + n_ghost)]
     T = sparse(rows, cols, vals, n_ghost, N)

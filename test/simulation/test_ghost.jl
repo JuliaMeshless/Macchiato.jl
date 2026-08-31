@@ -11,8 +11,7 @@ using SparseArrays: nnz
 include(joinpath(@__DIR__, "..", "end_2_end", "2d_square.jl"))
 
 function ghost_test_domain(bcs, model; dx = 1 / 17 * m)
-    part = create_2d_square_domain(dx)
-    cloud = WTP.discretize(part, ConstantSpacing(dx))
+    cloud = create_2d_square_cloud(dx)
     return MM.Domain(cloud, bcs, model)
 end
 

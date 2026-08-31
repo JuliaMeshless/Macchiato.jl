@@ -9,8 +9,7 @@ include(joinpath(@__DIR__, "..", "end_2_end", "2d_square.jl"))
 
 function create_test_domain()
     dx = 1 / 17 * m
-    part = create_2d_square_domain(dx)
-    cloud = WTP.discretize(part, ConstantSpacing(dx))
+    cloud = create_2d_square_cloud(dx)
 
     k, ρ, cₚ = 1.0, 1.0, 1.0
     bcs = Dict(
@@ -88,8 +87,7 @@ end
 
     @testset "Transient run!" begin
         dx = 1 / 17 * m
-        part = create_2d_square_domain(dx)
-        cloud = WTP.discretize(part, ConstantSpacing(dx))
+        cloud = create_2d_square_cloud(dx)
         model = MM.SolidEnergy(k = 1.0, ρ = 1.0, cₚ = 1.0)
 
         dirichlet = Dict(

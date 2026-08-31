@@ -93,8 +93,7 @@ end
 
 @testset "Displacement field indices and accessors" begin
     dx = 1 / 17 * m
-    part = create_2d_square_domain(dx)
-    cloud = WTP.discretize(part, ConstantSpacing(dx))
+    cloud = create_2d_square_cloud(dx)
 
     bcs = Dict(
         :surface1 => Displacement(0.0, 0.0),
@@ -167,8 +166,7 @@ end
     bc_func(x, t) = (u_exact(x[1], x[2]), v_exact(x[1], x[2]))
 
     dx = 1 / 17 * m
-    part = create_2d_square_domain(dx)
-    cloud = WTP.discretize(part, ConstantSpacing(dx))
+    cloud = create_2d_square_cloud(dx)
 
     bcs = Dict(
         :surface1 => Displacement(bc_func),
@@ -215,8 +213,7 @@ end
 
     for res in resolutions
         dx = res * m
-        part = create_2d_square_domain(dx)
-        cloud = WTP.discretize(part, ConstantSpacing(dx))
+        cloud = create_2d_square_cloud(dx)
 
         bcs = Dict(
             :surface1 => Displacement(bc_func),
@@ -266,8 +263,7 @@ end
 
 @testset "LinearElasticity Simulation API" begin
     dx = 1 / 17 * m
-    part = create_2d_square_domain(dx)
-    cloud = WTP.discretize(part, ConstantSpacing(dx))
+    cloud = create_2d_square_cloud(dx)
 
     bcs = Dict(
         :surface1 => Displacement(0.0, 0.0),
